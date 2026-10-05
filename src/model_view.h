@@ -25,6 +25,8 @@ private:
     bool load(QString& error);
     void applyOptions(f3d::engine&);
     void cleanup();
+    f3d::vector3_t worldUp() const;
+    void orbit(double yaw, double pitch);
     QJsonObject config;
     std::unique_ptr<f3d::engine> engine;
     QString renderer;

@@ -1,6 +1,9 @@
 complete -c asset-preview -n '__fish_use_subcommand' -a 'gui start stop hide list status paths add material remove select reload layout settings capture' -d 'Live asset preview'
 complete -c asset-preview -n '__fish_seen_subcommand_from remove select reload settings' -a '(asset-preview --complete-ids)' -f
 complete -c asset-preview -n '__fish_seen_subcommand_from layout' -a 'single grid' -f
+complete -c asset-preview -n '__fish_seen_subcommand_from layout' -l size -r -f -a '2 3 4' -d 'Grid rows/columns'
+complete -c asset-preview -n '__fish_seen_subcommand_from layout' -l compact -d 'Compact spacing and overlays'
+complete -c asset-preview -n '__fish_seen_subcommand_from layout' -l no-compact -d 'Normal spacing and live status'
 complete -c asset-preview -n '__fish_seen_subcommand_from add material' -l id -r -d 'Stable preview ID'
 complete -c asset-preview -n '__fish_seen_subcommand_from add material' -l label -r -d 'Display name'
 complete -c asset-preview -n '__fish_seen_subcommand_from add material' -l watch -r -F -d 'Watch source or dependency (repeatable)'

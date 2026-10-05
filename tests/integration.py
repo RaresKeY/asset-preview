@@ -6,6 +6,7 @@ import ctypes
 import importlib.machinery
 import importlib.util
 import json
+import math
 import os
 from pathlib import Path
 import socket
@@ -47,6 +48,13 @@ def ticks(pid):
     # Linux stat field 14+15, after safely skipping the parenthesized comm.
     words = Path(f"/proc/{pid}/stat").read_text().rsplit(")", 1)[1].split()
     return int(words[11]) + int(words[12])
+
+def horizon_roll(camera, vertical=1):
+    # VTK stores an orthogonalized view-up vector. The camera's right vector
+    # must have no component along world up for a level horizon.
+    d=[p-f for p,f in zip(camera["position"],camera["focal"])]; up=camera["up"]
+    right=[d[1]*up[2]-d[2]*up[1],d[2]*up[0]-d[0]*up[2],d[0]*up[1]-d[1]*up[0]]
+    return right[vertical]/math.sqrt(sum(v*v for v in right))
 
 def png_pixel(path, x, y):
     """Read one pixel from Qt's un-interlaced RGB/RGBA screenshot, without Pillow."""
@@ -115,12 +123,18 @@ class XInput:
         self.xt.XTestFakeKeyEvent(self.display,code,pressed,0)
     def shortcut(self,key):
         self.key("Alt_L",1); self.key(key,1); self.key(key,0); self.key("Alt_L",0); self.x.XFlush(self.display)
-    def drag(self,x,y):
+    def motion(self,x,y):
         ox=ctypes.c_int(); oy=ctypes.c_int(); child=ctypes.c_ulong()
         self.x.XTranslateCoordinates(self.display,self.window,self.root,0,0,ctypes.byref(ox),ctypes.byref(oy),ctypes.byref(child))
         self.xt.XTestFakeMotionEvent(self.display,-1,ox.value+x,oy.value+y,0)
+    def click(self,x,y):
+        self.motion(x,y)
         self.xt.XTestFakeButtonEvent(self.display,1,1,0)
-        self.xt.XTestFakeMotionEvent(self.display,-1,ox.value+x+70,oy.value+y+25,0)
+        self.xt.XTestFakeButtonEvent(self.display,1,0,0); self.x.XFlush(self.display)
+    def drag(self,x,y,dx=70,dy=25):
+        self.motion(x,y)
+        self.xt.XTestFakeButtonEvent(self.display,1,1,0)
+        self.motion(x+dx,y+dy)
         self.xt.XTestFakeButtonEvent(self.display,1,0,0); self.x.XFlush(self.display)
     def close(self): self.x.XCloseDisplay(self.display)
 
@@ -154,7 +168,7 @@ class PreviewIntegration(unittest.TestCase):
     def setUp(self):
         client.rpc({"method":"hide"})
         for r in client.rpc({"method":"list"})["entries"]: client.rpc({"method":"remove","id":r["id"]})
-        client.rpc({"method":"layout","layout":"single"})
+        client.rpc({"method":"layout","layout":"single","grid_size":2,"compact":False})
 
     def add(self, key="image", **extra):
         asset=self.root/f"{key}.png"; png(asset)
@@ -283,7 +297,7 @@ class PreviewIntegration(unittest.TestCase):
         self.assertGreater(row("material")["metrics"]["loads"],initial)
         evidence=os.environ.get("ASSET_PREVIEW_EVIDENCE_DIR")
         if evidence:
-            target=Path(evidence); target.mkdir(parents=True,exist_ok=True)
+            target=Path(evidence).resolve(); target.mkdir(parents=True,exist_ok=True)
             capture=target/"material.png"; capture.unlink(missing_ok=True)
             client.rpc({"method":"capture","path":str(capture)})
             view=row("material")["viewport"]
@@ -321,6 +335,39 @@ class PreviewIntegration(unittest.TestCase):
             time.sleep(.2); state=row("orbit"); view=state["viewport"]; renders=state["metrics"]["renders"]
             input.drag(view["x"]+view["width"]//2,view["y"]+view["height"]//2)
             eventually(lambda:row("orbit")["metrics"]["renders"]>renders)
+            camera=row("orbit")["metrics"]["camera"]
+            radius=math.dist(camera["position"],camera["focal"])
+            self.assertAlmostEqual(horizon_roll(camera),0,places=8)
+            self.assertGreater(camera["up"][1],0)
+            # Repeated large drags hit both pitch limits without rolling or
+            # crossing the pole, and preserve orbit radius.
+            for dy in (-220,-220,-220,220,220,220):
+                renders=row("orbit")["metrics"]["renders"]
+                input.drag(view["x"]+view["width"]//2,view["y"]+view["height"]//2,100,dy)
+                eventually(lambda:row("orbit")["metrics"]["renders"]>renders)
+                camera=row("orbit")["metrics"]["camera"]
+                self.assertAlmostEqual(horizon_roll(camera),0,places=8)
+                self.assertGreater(camera["up"][1],0)
+                self.assertAlmostEqual(math.dist(camera["position"],camera["focal"]),radius,places=5)
+                self.assertLess(abs(camera["position"][1]-camera["focal"][1])/radius,.9999)
+            client.rpc({"method":"reload","id":"orbit"})
+            eventually(lambda:row("orbit")["metrics"]["loads"]>1)
+            for key in ("position","focal","up"):
+                for before,after in zip(camera[key],row("orbit")["metrics"]["camera"][key]):
+                    self.assertAlmostEqual(before,after,places=5)
+            client.rpc({"method":"settings","id":"orbit","settings":{"up_axis":"z"}})
+            self.assertAlmostEqual(horizon_roll(row("orbit")["metrics"]["camera"],2),0,places=8)
+            self.assertGreater(row("orbit")["metrics"]["camera"]["up"][2],0)
+            # Click the real native overlay, including when compact mode
+            # removes the persistent Live footer. This tests input stacking.
+            client.rpc({"method":"layout","compact":True})
+            time.sleep(.2)
+            button=row("orbit")["controls"]["options"]
+            input.click(button["x"]+button["width"]//2,button["y"]+button["height"]//2)
+            eventually(lambda:client.rpc({"method":"list"})["options_open"])
+            input.key("t",1); input.key("t",0); input.x.XFlush(input.display)
+            eventually(lambda:row("orbit")["settings"].get("textures") is False)
+            self.assertFalse(client.rpc({"method":"list"})["options_open"])
             # Global navigation also works while the native child has focus.
             input.shortcut("Right"); eventually(lambda:client.rpc({"method":"list"})["selected"]=="next")
         finally: input.close()
@@ -344,5 +391,65 @@ class PreviewIntegration(unittest.TestCase):
         eventually(lambda:row("progress")["metrics"]["loads"]>=2 and row("progress")["building"])
         self.assertIn("Building",row("progress")["status"])
         eventually(lambda:not row("progress")["building"])
+
+    def test_15_larger_grids_compact_status_validation_and_persistence(self):
+        for i in range(20): self.add(f"tile{i}")
+        self.show()
+        for size,count in ((3,9),(4,16)):
+            client.rpc({"method":"select","id":"tile0"})
+            client.rpc({"method":"layout","layout":"grid","grid_size":size})
+            self.assertEqual(client.rpc({"method":"list"})["active"],count)
+            client.rpc({"method":"select","id":"tile19"})
+            self.assertEqual(client.rpc({"method":"list"})["active"],20-count*(19//count))
+            self.assertNotIn("metrics",row("tile0"))
+        client.rpc({"method":"select","id":"tile0"})
+        eventually(lambda:row("tile0").get("metrics",{}).get("loads",0)>0)
+        initial=row("tile0")["metrics"]["loads"]
+        client.rpc({"method":"layout","compact":True})
+        self.assertEqual(row("tile0")["metrics"]["loads"],initial)
+        self.assertFalse(row("tile0")["status_visible"])
+        client.rpc({"method":"add","entry":{"id":"tile0","path":str(self.root/"uncreated-grid.png")}})
+        self.assertTrue(row("tile0")["status_visible"])
+        self.assertTrue(row("tile0")["status"].startswith("Waiting"))
+        for fields in ({"grid_size":5},{"grid_size":2.5},{"grid_size":"3"},{"compact":1},{"layout":None}):
+            with self.assertRaises(RuntimeError): client.rpc({"method":"layout",**fields})
+        for fields in ({"up_axis":"x"},{"lighting":"unknown"},{"textures":1}):
+            with self.assertRaises(RuntimeError): client.rpc({"method":"settings","id":"tile0","settings":fields})
+        client.rpc({"method":"quit"}); eventually(lambda:not client.running())
+        self.assertTrue(client.start()); self.pid=client.rpc({"method":"ping"})["pid"]; type(self).pid=self.pid
+        state=client.rpc({"method":"list"})
+        self.assertEqual((state["layout"],state["grid_size"],state["compact"]),("grid",4,True))
+        self.assertEqual(state["active"],0)
+
+    @unittest.skipUnless(GPU,"Hardware Gamescope lane")
+    def test_16_material_modes_restore_authored_appearance_and_camera(self):
+        albedo=self.root/"mode-albedo.png"; png(albedo,(210,35,20,255))
+        client.rpc({"method":"add","entry":{"id":"modes","path":str(albedo),"kind":"material"}})
+        self.show(); eventually(lambda:row("modes").get("metrics",{}).get("engine"),timeout=30)
+        eventually(lambda:row("modes")["metrics"]["renders"]>0)
+        state=row("modes"); view=state["viewport"]; camera=state["metrics"]["camera"]
+        def color(name):
+            time.sleep(.2)
+            target=self.root/f"mode-{name}.png"; target.unlink(missing_ok=True)
+            client.rpc({"method":"capture","path":str(target)})
+            return png_pixel(target,view["x"]+view["width"]//2,view["y"]+view["height"]//2)
+        original=color("original")
+        client.rpc({"method":"settings","id":"modes","settings":{"textures":False}})
+        bare=color("bare")
+        self.assertGreater(sum(abs(a-b) for a,b in zip(original,bare)),30)
+        client.rpc({"method":"settings","id":"modes","settings":{"materials":False}})
+        clay=color("clay")
+        self.assertGreater(sum(abs(a-b) for a,b in zip(bare,clay)),10)
+        client.rpc({"method":"settings","id":"modes","settings":{"materials":True,"textures":True}})
+        restored=color("restored")
+        self.assertLessEqual(max(abs(a-b) for a,b in zip(original,restored)),1)
+        for key in ("position","focal","up"):
+            for before,after in zip(camera[key],row("modes")["metrics"]["camera"][key]):
+                self.assertAlmostEqual(before,after,places=8)
+        self.assertEqual(row("modes")["metrics"]["lighting"],"studio")
+        client.rpc({"method":"settings","id":"modes","settings":{"lighting":"lightkit"}})
+        self.assertEqual(row("modes")["metrics"]["lighting"],"lightkit")
+        time.sleep(.5); renders=row("modes")["metrics"]["renders"]; time.sleep(.7)
+        self.assertEqual(row("modes")["metrics"]["renders"],renders)
 
 if __name__ == "__main__": unittest.main(verbosity=2)

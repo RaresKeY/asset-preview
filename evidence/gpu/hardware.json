@@ -1,5 +1,6 @@
 {
   "active": 1,
+  "compact": false,
   "entries": [
     {
       "active": false,
@@ -11,7 +12,7 @@
       "label": "cube.obj",
       "log": "",
       "maps": {},
-      "path": "/tmp/asset-preview-tests-q28eucv5/cube.obj",
+      "path": "/tmp/asset-preview-tests-faukb68b/cube.obj",
       "revisions": 3,
       "settings": {},
       "status": "Suspended",
@@ -23,40 +24,70 @@
       "building": false,
       "builds": 0,
       "command": [],
+      "controls": {
+        "options": {
+          "height": 28,
+          "width": 32,
+          "x": 915,
+          "y": 53
+        }
+      },
       "id": "material",
       "kind": "material",
       "label": "albedo.png",
       "log": "",
       "maps": {
-        "normal": "/tmp/asset-preview-tests-q28eucv5/normal.png",
-        "orm": "/tmp/asset-preview-tests-q28eucv5/orm.png"
+        "normal": "/tmp/asset-preview-tests-faukb68b/normal.png",
+        "orm": "/tmp/asset-preview-tests-faukb68b/orm.png"
       },
       "metrics": {
+        "camera": {
+          "focal": [
+            0,
+            0,
+            0
+          ],
+          "position": [
+            3.1442727911580852,
+            2.28884340878931,
+            5.446040227142212
+          ],
+          "up": [
+            -0.17101007166283438,
+            0.9396926207859083,
+            -0.29619813272602397
+          ]
+        },
         "engine": true,
+        "lighting": "studio",
+        "lights": 5,
         "loads": 3,
         "renderer": "NVIDIA GeForce RTX 2080 Ti/PCIe/SSE2",
-        "renders": 4
+        "renders": 5
       },
-      "path": "/tmp/asset-preview-tests-q28eucv5/albedo.png",
+      "path": "/tmp/asset-preview-tests-faukb68b/albedo.png",
       "revisions": 2,
       "settings": {
         "axes": true,
         "shape": "cube"
       },
       "status": "Live \u00b7 model ready",
+      "status_visible": true,
       "timeout": 120,
       "viewport": {
-        "height": 506,
-        "width": 946,
-        "x": 27,
-        "y": 148
+        "height": 646,
+        "width": 982,
+        "x": 9,
+        "y": 45
       },
       "watch": []
     }
   ],
+  "grid_size": 2,
   "layout": "single",
   "ok": true,
-  "pid": 3143264,
+  "options_open": false,
+  "pid": 631971,
   "platform": "xcb",
   "selected": "material",
   "watched_directories": 1,

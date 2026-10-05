@@ -1,6 +1,7 @@
 #include "model_view.h"
 #include <QFileInfo>
 #include <QImageReader>
+#include <QJsonArray>
 #include <QMouseEvent>
 #include <QOpenGLContext>
 #include <QOpenGLFunctions>
@@ -96,9 +97,16 @@ void ModelView::applyOptions(f3d::engine& e) {
     opt.render.show_edges = s["edges"].toBool();
     opt.ui.axis = s["axes"].toBool(false);
     opt.render.light.intensity = s["light"].toDouble(1.0);
+    opt.render.hdri.ambient = s["lighting"].toString("studio") == "studio";
+    opt.render.effect.tone_mapping = true;
     opt.render.effect.antialiasing.enable = true;
     opt.render.raytracing.enable = false;
     opt.scene.camera.orthographic = s["orthographic"].toBool();
+    opt.scene.up_direction = s["up_axis"].toString("y") == "z"
+        ? f3d::direction_t{0,0,1} : f3d::direction_t{0,1,0};
+    // Authored properties are restored by a scene reload when a display mode
+    // changes: F3D overrides mutate its imported actor properties.
+    opt.model = f3d::options{}.model;
     if (config["kind"].toString() == "material") {
         opt.model.color.rgb = f3d::color_t{1,1,1};
         opt.model.color.texture = config["path"].toString().toStdString();
@@ -108,7 +116,23 @@ void ModelView::applyOptions(f3d::engine& e) {
         // ORM contains actual multipliers, not default scaled factors.
         opt.model.material.roughness = maps["orm"].toString().isEmpty() ? s["roughness"].toDouble(0.5) : 1.0;
         opt.model.material.metallic = maps["orm"].toString().isEmpty() ? s["metallic"].toDouble(0.0) : 1.0;
-        opt.render.hdri.ambient = true;
+    }
+    if (!s["textures"].toBool(true) || !s["materials"].toBool(true)) {
+        // A present, empty path explicitly clears a texture in F3D 3.5. An
+        // unset optional retains the authored texture instead.
+        opt.model.color.texture = std::filesystem::path{};
+        opt.model.normal.texture = std::filesystem::path{};
+        opt.model.material.texture = std::filesystem::path{};
+        opt.model.emissive.texture = std::filesystem::path{};
+        opt.model.matcap.texture = std::filesystem::path{};
+    }
+    if (!s["materials"].toBool(true)) {
+        opt.model.color.rgb = f3d::color_t{0.65,0.67,0.70};
+        opt.model.color.opacity = 1.0;
+        opt.model.material.roughness = 0.8;
+        opt.model.material.metallic = 0.0;
+        opt.model.emissive.factor = f3d::color_t{0,0,0};
+        opt.model.unlit = false;
     }
 }
 bool ModelView::load(QString& error) {
@@ -135,6 +159,7 @@ bool ModelView::load(QString& error) {
         if (engine) window.getCamera().setState(engine->getWindow().getCamera().getState());
         else { window.getCamera().azimuth(30).elevation(20).resetToBounds(); }
         engine = std::move(next);
+        if (config["settings"].toObject()["lock_horizon"].toBool(true)) orbit(0,0);
         ++loads;
         return true;
     } catch (const std::exception& e) { error = QString::fromUtf8(e.what()); return false; }
@@ -145,20 +170,54 @@ bool ModelView::reload(const QJsonObject& cfg, QString& error) {
     makeCurrent(); bool ok = load(error); doneCurrent(); update(); return ok;
 }
 void ModelView::settings(const QJsonObject& cfg) {
-    const bool shapeChanged = cfg["settings"].toObject()["shape"] != config["settings"].toObject()["shape"];
+    const auto old=config["settings"].toObject(), next=cfg["settings"].toObject();
+    const bool reloadScene = next["shape"] != old["shape"] || next["up_axis"] != old["up_axis"] ||
+        next["materials"].toBool(true) != old["materials"].toBool(true) ||
+        next["textures"].toBool(true) != old["textures"].toBool(true);
     config = cfg;
     if (engine) {
         makeCurrent();
-        if (shapeChanged) { QString error; const bool ok = load(error); if (loaded) loaded(ok, error); }
+        if (reloadScene) { QString error; const bool ok = load(error); if (loaded) loaded(ok, error); }
         else applyOptions(*engine);
+        if (next["lock_horizon"].toBool(true)) orbit(0,0);
         doneCurrent(); update();
     }
 }
 void ModelView::fit() {
-    if (engine) { makeCurrent(); engine->getWindow().getCamera().resetToBounds(); doneCurrent(); update(); }
+    if (engine) { makeCurrent(); engine->getWindow().getCamera().resetToBounds(); if (config["settings"].toObject()["lock_horizon"].toBool(true)) orbit(0,0); doneCurrent(); update(); }
 }
 QJsonObject ModelView::metrics() const {
-    return {{"loads", loads}, {"renders", renders}, {"engine", bool(engine)}, {"renderer", renderer}};
+    QJsonObject result{{"loads", loads}, {"renders", renders}, {"engine", bool(engine)}, {"renderer", renderer}};
+    if (engine) {
+        const auto c=engine->getWindow().getCamera().getState();
+        result["camera"]=QJsonObject{{"position",QJsonArray{c.position[0],c.position[1],c.position[2]}},
+            {"focal",QJsonArray{c.focalPoint[0],c.focalPoint[1],c.focalPoint[2]}},
+            {"up",QJsonArray{c.viewUp[0],c.viewUp[1],c.viewUp[2]}}};
+        result["lighting"]=config["settings"].toObject()["lighting"].toString("studio");
+        result["lights"]=engine->getScene().getLightCount();
+    }
+    return result;
+}
+f3d::vector3_t ModelView::worldUp() const {
+    return config["settings"].toObject()["up_axis"].toString("y") == "z"
+        ? f3d::vector3_t{0,0,1} : f3d::vector3_t{0,1,0};
+}
+void ModelView::orbit(double yawDelta, double pitchDelta) {
+    auto& camera=engine->getWindow().getCamera();
+    auto state=camera.getState();
+    const bool zUp=config["settings"].toObject()["up_axis"].toString("y") == "z";
+    const int horizontal=zUp?1:2, vertical=zUp?2:1;
+    double d[3]; for (int i=0;i<3;++i) d[i]=state.position[i]-state.focalPoint[i];
+    const double radius=std::sqrt(d[0]*d[0]+d[1]*d[1]+d[2]*d[2]);
+    if (radius<1e-9) return;
+    double yaw=std::atan2(d[0],d[horizontal])+yawDelta;
+    double pitch=std::clamp(std::asin(std::clamp(d[vertical]/radius,-1.0,1.0))+pitchDelta,
+        -std::numbers::pi*0.49,std::numbers::pi*0.49);
+    d[0]=radius*std::cos(pitch)*std::sin(yaw);
+    d[horizontal]=radius*std::cos(pitch)*std::cos(yaw);
+    d[vertical]=radius*std::sin(pitch);
+    for (int i=0;i<3;++i) state.position[i]=state.focalPoint[i]+d[i];
+    state.viewUp=worldUp(); camera.setState(state);
 }
 void ModelView::resizeGL(int w, int h) {
     if (engine) engine->getWindow().setSize(std::max(1,int(w*devicePixelRatioF())), std::max(1,int(h*devicePixelRatioF())));
@@ -205,6 +264,8 @@ void ModelView::mouseMoveEvent(QMouseEvent* e) {
         const auto p=c.getPosition(), f=c.getFocalPoint();
         double distance=std::sqrt(std::pow(p[0]-f[0],2)+std::pow(p[1]-f[1],2)+std::pow(p[2]-f[2],2));
         c.pan(-d.x()*distance/height(),d.y()*distance/height());
+    } else if (config["settings"].toObject()["lock_horizon"].toBool(true)) {
+        orbit(-d.x()*.4*std::numbers::pi/180,-d.y()*.4*std::numbers::pi/180);
     } else { c.azimuth(-d.x()*.4).elevation(-d.y()*.4); }
     doneCurrent(); update();
 }

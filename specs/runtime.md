@@ -18,6 +18,8 @@ replacement is explicit, files may not exist yet. Window creation is deliberate
 through `gui` / `show`. Closing hides the window and releases every visible entry;
 `stop` / `quit` exits the server. Private version-1 state uses QSaveFile and retains
 invalid/corrupt state with an error. Session diagnostics are separate from specs.
+Grid size (2/3/4) and compact mode are optional version-1 fields with backward
+compatible defaults; partial layout requests merge and validate before saving.
 Filesystem changes after registration (for example a removed generator cwd) do
 not prevent restoring other registrations; the affected preview reports its own
 load/generator failure when selected.

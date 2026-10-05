@@ -10,11 +10,11 @@ registrations, 8 KiB per configuration, 128 extra input paths and 128 command ar
 | Request | Fields | Behavior |
 |---|---|---|
 | `ping` | — | Protocol version, PID and actual Qt platform |
-| `list` | — | Entries, live metrics, selection, layout, active count, watches, Qt platform |
+| `list` | — | Entries, live metrics, selection, layout, grid_size, compact, active count, watches, Qt platform |
 | `add` | `entry` object | Add or replace stable ID; no focus/selection change |
 | `remove` | `id` | Stop/unload and unregister; preserve files |
 | `select` | `id` | Change visible preview/page without raising window |
-| `layout` | `layout`: `single` or `grid` | Change display, with at most four active entries |
+| `layout` | optional `layout`: `single` / `grid`, `grid_size`: integer 2 / 3 / 4, `compact`: boolean | Merge/persist layout options; default grid 2×2, maximum 16 active entries |
 | `settings` | `id`, `settings` object | Validate, merge and persist options |
 | `reload` | `id` | Reload or rebuild only if currently visible |
 | `show` | — | Open/raise the single app window |
@@ -35,13 +35,27 @@ have `maps` containing absolute `normal` / `orm` file paths. Files may be missin
 generator cwd must exist at registration. No shell, URI execution, TCP listener,
 arbitrary plugin loading or command inference is implemented.
 
-Boolean settings: `grid`, `axes`, `edges`, `orthographic`, `nearest`. Numeric settings:
+Boolean settings: `grid`, `axes`, `edges`, `orthographic`, `nearest`, `materials`,
+`textures`, `lock_horizon`. The last three default to true. Numeric settings:
 `light` in 0–5, `roughness` / `metallic` in 0–1. `background` is `dark`, `light` or
 `checker`; checker applies to images. Material `shape` is `sphere`, `cube` or `plane`.
 Material roughness/metallic scalars apply when no ORM map is supplied.
+`up_axis` is `y` (default, XZ floor) or `z` (XY floor). `lighting` is `studio`
+(default, F3D embedded HDRI ambient + normal lights) or `lightkit` (normal lights).
+Disabling materials uses opaque neutral clay and suppresses all texture maps;
+the stored `textures` preference is retained. Display-mode changes reload the
+scene to restore authored properties, preserving camera state.
+
+Version-1 registry files missing `grid_size` and `compact` restore as 2 and false.
+CLI equivalents include `layout grid --size 4 --compact` and `--no-compact`.
 
 `metrics.loads` counts successful loads during this view's lifetime;
 `metrics.renders` counts paint calls. They reset on unloading/re-creating a view.
 Image metrics include decoded bytes and original/decoded dimensions; model metrics
-include `engine` and actual OpenGL `renderer`. These are diagnostic counters,
+include `engine`, actual OpenGL `renderer`, lighting mode, scene light count and
+`camera` position/focal/up vectors. VTK orthogonalizes the reported view-up vector;
+it is not necessarily equal to the world-up vector even with the horizon locked.
+Active entry diagnostics expose `viewport`, `controls.options` geometry and
+`status_visible`; top-level `options_open` reports an active popup. These support
+isolated input checks and are not persisted. These are diagnostic counters,
 not a guarantee of GPU-memory reclamation or perceptual quality.

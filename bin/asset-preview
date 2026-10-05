@@ -139,7 +139,10 @@ def parser() -> argparse.ArgumentParser:
     mat.add_argument("--exec", nargs=argparse.REMAINDER, dest="command")
     for action in ["remove", "select", "reload"]:
         sub.add_parser(action).add_argument("id")
-    sub.add_parser("layout").add_argument("mode", choices=["single", "grid"])
+    layout = sub.add_parser("layout")
+    layout.add_argument("mode", choices=["single", "grid"])
+    layout.add_argument("--size", type=int, choices=[2, 3, 4], help="Grid rows/columns: 4, 9 or 16 previews per page")
+    layout.add_argument("--compact", action=argparse.BooleanOptionalAction, default=None, help="Tight spacing and in-view controls")
     settings = sub.add_parser("settings", help="Update per-preview options with a JSON object")
     settings.add_argument("id"); settings.add_argument("value", help='For example: {"grid":false,"light":1.2}')
     sub.add_parser("capture", help="Save the current visible window to a new PNG").add_argument("file")
@@ -187,7 +190,10 @@ def main() -> int:
         request = {"method": "add", "entry": entry}
     if action in {"select", "remove", "reload", "settings"}: request["id"] = args.id
     if action == "settings": request["settings"] = json.loads(args.value)
-    if action == "layout": request["layout"] = args.mode
+    if action == "layout":
+        request["layout"] = args.mode
+        if args.size is not None: request["grid_size"] = args.size
+        if args.compact is not None: request["compact"] = args.compact
     if action == "capture": request["path"] = path(args.file)
     result = rpc(request)
     if action in {"add", "material"}: print(result["id"])

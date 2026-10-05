@@ -41,6 +41,20 @@ mipmaps and interpolation. F3D's renderer-specific overrides and its default
 environment differ from Godot's procedural shaders and Material Maker graphs.
 Use the owning engine's PNG capture for exact shader behavior.
 
+Studio mode uses F3D's built-in HDRI ambient environment with tone mapping. F3D
+3.5 adds VTK LightKit when there are no enabled scene lights, including with HDRI
+active. The kit has key, fill, head and two back lights; this is a five-light kit,
+not a custom three-point setup. Light-kit mode disables HDRI while keeping the
+same normal light handling. Imported authored lights remain F3D-owned.
+
+F3D texture optionals have different semantics: unset retains imported textures;
+a present empty filesystem path explicitly clears one in 3.5. Texture/clay
+display modes clear the applicable texture overrides. Their authored restoration
+uses a replacement scene because clearing/resetting options alone does not undo
+mutations to the imported actor's properties. Camera state is transferred.
+The orbit controller uses F3D's public camera-state API to enforce world-up yaw
+and bounded pitch; grid and HDRI up-direction follow the selected Y/Z up axis.
+
 This design minimizes ongoing work rather than proving a global minimum memory
 footprint. GPU drivers and the VTK dependency have a material baseline cost. Views
 are created only for visible entries and destroyed on navigation/hide/minimize;
@@ -58,5 +72,7 @@ Primary references, checked October 5, 2026:
 - [F3D external render window](https://github.com/f3d-app/f3d/blob/v3.5.0/vtkext/private/module/vtkF3DExternalRenderWindow.cxx)
 - [F3D Assimp texture import](https://github.com/f3d-app/f3d/blob/v3.5.0/plugins/assimp/module/vtkF3DAssimpImporter.cxx)
 - [F3D material options](https://f3d.app/docs/libf3d/OPTIONS/)
+- [F3D light and texture configuration](https://github.com/f3d-app/f3d/blob/v3.5.0/vtkext/private/module/vtkF3DRenderer.cxx)
+- [VTK LightKit](https://vtk.org/doc/nightly/html/classvtkLightKit.html)
 - [Qt runtime asset loader](https://doc.qt.io/qt-6/qml-qtquick3d-assetutils-runtimeloader.html)
 - [Qt embedded window ownership](https://doc.qt.io/qt-6/qwidget.html#createWindowContainer)

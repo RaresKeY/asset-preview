@@ -7,7 +7,7 @@
 | Spec | Owning sources | Scope | Read when |
 |---|---|---|---|
 | [Runtime and connections](runtime.md) | `src/main.cpp`, `src/service.*`, `bin/`, `fish/`, `skills/asset-preview/`, `tools/install.py`, `play.sh`, `icon.svg` | Singleton service, socket/state, explicit generators, agent skill and desktop/shell integration | Changing lifecycle, commands, persistence or installation |
-| [Preview lifecycle](preview.md) | `CMakeLists.txt`, `src/viewer.*`, `src/model_view.*`, window/watch paths in `src/service.cpp`, `tests/`, `examples/`, `tools/profile.py` | Visible-only loading, lazy native backend, event refresh, controls, imported/material semantics and verification | Changing rendering, navigation, dependencies, performance or refresh behavior |
+| [Preview lifecycle](preview.md) | `CMakeLists.txt`, `src/viewer.*`, `src/model_view.*`, window/watch paths in `src/service.cpp`, `tests/`, `examples/`, `tools/profile.py`, `tools/ui_scenes.py` | Visible-only loading, lazy native backend, event refresh, controls, imported/material semantics and verification | Changing rendering, navigation, dependencies, performance or refresh behavior |
 
 ## Maintenance
 

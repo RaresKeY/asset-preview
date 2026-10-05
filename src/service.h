@@ -14,6 +14,8 @@ class QComboBox;
 class QPushButton;
 class QGridLayout;
 class QFrame;
+class QCheckBox;
+class QToolButton;
 class Service;
 
 struct Entry {
@@ -24,6 +26,7 @@ struct Entry {
     QWidget* surface = nullptr;
     QFrame* card = nullptr;
     QLabel* statusLabel = nullptr;
+    QToolButton* optionsButton = nullptr;
     std::unique_ptr<QProcess> process;
     std::unique_ptr<QTimer> deadline;
     bool active = false, rerun = false;
@@ -52,7 +55,8 @@ private:
     QComboBox* selection;
     QPushButton* previous;
     QPushButton* next;
-    QPushButton* mode;
+    QComboBox* density;
+    QCheckBox* compactButton;
 };
 
 class Service final : public QObject {
@@ -65,11 +69,15 @@ public:
     void reconcile();
     void navigate(int delta);
     void save();
+    int pageSize() const { return layout=="grid" ? gridSize*gridSize : 1; }
     QStringList order;
     QMap<QString, std::shared_ptr<Entry>> entries;
     QString selected, layout = "single", socketPath, statePath;
+    int gridSize = 2;
+    bool compact = false;
     std::unique_ptr<PreviewWindow> window;
 private:
+    friend class PreviewWindow;
     QJsonObject add(QJsonObject config, bool restore = false);
     QString validate(QJsonObject& config, bool restore = false);
     QStringList dependencies(const Entry&) const;

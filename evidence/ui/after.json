@@ -1,0 +1,4491 @@
+{
+  "phase": "after",
+  "source_sha256": {
+    "model": "aa51cc2db9248e38459d1370841b8fad6385b48ab1128cc02cf371e6c3e47d88",
+    "albedo": "320a88ca183aaa051237a36c856226782753ae26c2f234bbd4e410d4118af904",
+    "normal": "7943557e36b8cc320a0950e8ca2e01a6d05807b3bff95f39b9c1ddefb04e37a0",
+    "orm": "6fbbf387793b7c555bdcef9dad8cd9d5fbbc8ce692f2d4da76107fe0b37b406d"
+  },
+  "captures": [
+    {
+      "file": "after-normal-2x2.png",
+      "state": {
+        "active": 4,
+        "compact": false,
+        "entries": [
+          {
+            "active": true,
+            "building": false,
+            "builds": 0,
+            "command": [],
+            "controls": {
+              "options": {
+                "height": 28,
+                "width": 32,
+                "x": 420,
+                "y": 53
+              }
+            },
+            "id": "model",
+            "kind": "model",
+            "label": "Sugar cube \u00b7 textured GLB",
+            "log": "",
+            "maps": {},
+            "metrics": {
+              "camera": {
+                "focal": [
+                  0,
+                  0,
+                  0
+                ],
+                "position": [
+                  1.5721363955790428,
+                  1.144421704394655,
+                  2.723020113571106
+                ],
+                "up": [
+                  -0.17101007166283438,
+                  0.9396926207859083,
+                  -0.29619813272602397
+                ]
+              },
+              "engine": true,
+              "lighting": "studio",
+              "lights": 5,
+              "loads": 1,
+              "renderer": "NVIDIA GeForce RTX 2080 Ti/PCIe/SSE2",
+              "renders": 3
+            },
+            "path": "/workspace/material-atlas/assets/models/sugar_cube/sugar_cube_textured.glb",
+            "revisions": 1,
+            "settings": {},
+            "status": "Live \u00b7 model ready",
+            "status_visible": true,
+            "timeout": 120,
+            "viewport": {
+              "height": 319,
+              "width": 487,
+              "x": 9,
+              "y": 45
+            },
+            "watch": []
+          },
+          {
+            "active": true,
+            "building": false,
+            "builds": 0,
+            "command": [],
+            "controls": {
+              "options": {
+                "height": 28,
+                "width": 32,
+                "x": 915,
+                "y": 53
+              }
+            },
+            "id": "material",
+            "kind": "material",
+            "label": "Smoked walnut \u00b7 baked material",
+            "log": "",
+            "maps": {
+              "normal": "/workspace/material-atlas/assets/materials/smoked_walnut_normal.png",
+              "orm": "/workspace/material-atlas/assets/materials/smoked_walnut_orm.png"
+            },
+            "metrics": {
+              "camera": {
+                "focal": [
+                  0,
+                  0,
+                  0
+                ],
+                "position": [
+                  3.1442727911580857,
+                  2.28884340878931,
+                  5.446040227142212
+                ],
+                "up": [
+                  -0.17101007166283438,
+                  0.9396926207859083,
+                  -0.29619813272602397
+                ]
+              },
+              "engine": true,
+              "lighting": "studio",
+              "lights": 5,
+              "loads": 1,
+              "renderer": "NVIDIA GeForce RTX 2080 Ti/PCIe/SSE2",
+              "renders": 3
+            },
+            "path": "/workspace/material-atlas/assets/materials/smoked_walnut_albedo.png",
+            "revisions": 1,
+            "settings": {},
+            "status": "Live \u00b7 model ready",
+            "status_visible": true,
+            "timeout": 120,
+            "viewport": {
+              "height": 319,
+              "width": 487,
+              "x": 504,
+              "y": 45
+            },
+            "watch": []
+          },
+          {
+            "active": true,
+            "building": false,
+            "builds": 0,
+            "command": [],
+            "controls": {
+              "options": {
+                "height": 28,
+                "width": 32,
+                "x": 420,
+                "y": 380
+              }
+            },
+            "id": "image0",
+            "kind": "image",
+            "label": "Very long asset name to check truncation and control reachability",
+            "log": "",
+            "maps": {},
+            "metrics": {
+              "decoded_height": 64,
+              "decoded_width": 64,
+              "height": 64,
+              "image_bytes": 16384,
+              "loads": 1,
+              "renders": 3,
+              "width": 64
+            },
+            "path": "/tmp/asset-preview-ui-tmc83zut/image0.png",
+            "revisions": 1,
+            "settings": {},
+            "status": "Live \u00b7 refreshed 07:02:09",
+            "status_visible": true,
+            "timeout": 120,
+            "viewport": {
+              "height": 319,
+              "width": 487,
+              "x": 9,
+              "y": 372
+            },
+            "watch": []
+          },
+          {
+            "active": true,
+            "building": false,
+            "builds": 0,
+            "command": [],
+            "controls": {
+              "options": {
+                "height": 28,
+                "width": 32,
+                "x": 915,
+                "y": 380
+              }
+            },
+            "id": "image1",
+            "kind": "image",
+            "label": "Texture 2",
+            "log": "",
+            "maps": {},
+            "metrics": {
+              "decoded_height": 64,
+              "decoded_width": 64,
+              "height": 64,
+              "image_bytes": 16384,
+              "loads": 1,
+              "renders": 3,
+              "width": 64
+            },
+            "path": "/tmp/asset-preview-ui-tmc83zut/image1.png",
+            "revisions": 1,
+            "settings": {},
+            "status": "Live \u00b7 refreshed 07:02:09",
+            "status_visible": true,
+            "timeout": 120,
+            "viewport": {
+              "height": 319,
+              "width": 487,
+              "x": 504,
+              "y": 372
+            },
+            "watch": []
+          },
+          {
+            "active": false,
+            "building": false,
+            "builds": 0,
+            "command": [],
+            "id": "image2",
+            "kind": "image",
+            "label": "Texture 3",
+            "log": "",
+            "maps": {},
+            "path": "/tmp/asset-preview-ui-tmc83zut/image2.png",
+            "revisions": 0,
+            "settings": {},
+            "status": "Suspended",
+            "timeout": 120,
+            "watch": []
+          },
+          {
+            "active": false,
+            "building": false,
+            "builds": 0,
+            "command": [],
+            "id": "image3",
+            "kind": "image",
+            "label": "Texture 4",
+            "log": "",
+            "maps": {},
+            "path": "/tmp/asset-preview-ui-tmc83zut/image3.png",
+            "revisions": 0,
+            "settings": {},
+            "status": "Suspended",
+            "timeout": 120,
+            "watch": []
+          },
+          {
+            "active": false,
+            "building": false,
+            "builds": 0,
+            "command": [],
+            "id": "image4",
+            "kind": "image",
+            "label": "Texture 5",
+            "log": "",
+            "maps": {},
+            "path": "/tmp/asset-preview-ui-tmc83zut/image4.png",
+            "revisions": 0,
+            "settings": {},
+            "status": "Suspended",
+            "timeout": 120,
+            "watch": []
+          },
+          {
+            "active": false,
+            "building": false,
+            "builds": 0,
+            "command": [],
+            "id": "image5",
+            "kind": "image",
+            "label": "Texture 6",
+            "log": "",
+            "maps": {},
+            "path": "/tmp/asset-preview-ui-tmc83zut/image5.png",
+            "revisions": 0,
+            "settings": {},
+            "status": "Suspended",
+            "timeout": 120,
+            "watch": []
+          },
+          {
+            "active": false,
+            "building": false,
+            "builds": 0,
+            "command": [],
+            "id": "image6",
+            "kind": "image",
+            "label": "Texture 7",
+            "log": "",
+            "maps": {},
+            "path": "/tmp/asset-preview-ui-tmc83zut/image6.png",
+            "revisions": 0,
+            "settings": {},
+            "status": "Suspended",
+            "timeout": 120,
+            "watch": []
+          },
+          {
+            "active": false,
+            "building": false,
+            "builds": 0,
+            "command": [],
+            "id": "image7",
+            "kind": "image",
+            "label": "Texture 8",
+            "log": "",
+            "maps": {},
+            "path": "/tmp/asset-preview-ui-tmc83zut/image7.png",
+            "revisions": 0,
+            "settings": {},
+            "status": "Suspended",
+            "timeout": 120,
+            "watch": []
+          },
+          {
+            "active": false,
+            "building": false,
+            "builds": 0,
+            "command": [],
+            "id": "image8",
+            "kind": "image",
+            "label": "Texture 9",
+            "log": "",
+            "maps": {},
+            "path": "/tmp/asset-preview-ui-tmc83zut/image8.png",
+            "revisions": 0,
+            "settings": {},
+            "status": "Suspended",
+            "timeout": 120,
+            "watch": []
+          },
+          {
+            "active": false,
+            "building": false,
+            "builds": 0,
+            "command": [],
+            "id": "image9",
+            "kind": "image",
+            "label": "Texture 10",
+            "log": "",
+            "maps": {},
+            "path": "/tmp/asset-preview-ui-tmc83zut/image9.png",
+            "revisions": 0,
+            "settings": {},
+            "status": "Suspended",
+            "timeout": 120,
+            "watch": []
+          },
+          {
+            "active": false,
+            "building": false,
+            "builds": 0,
+            "command": [],
+            "id": "image10",
+            "kind": "image",
+            "label": "Texture 11",
+            "log": "",
+            "maps": {},
+            "path": "/tmp/asset-preview-ui-tmc83zut/image10.png",
+            "revisions": 0,
+            "settings": {},
+            "status": "Suspended",
+            "timeout": 120,
+            "watch": []
+          },
+          {
+            "active": false,
+            "building": false,
+            "builds": 0,
+            "command": [],
+            "id": "image11",
+            "kind": "image",
+            "label": "Texture 12",
+            "log": "",
+            "maps": {},
+            "path": "/tmp/asset-preview-ui-tmc83zut/image11.png",
+            "revisions": 0,
+            "settings": {},
+            "status": "Suspended",
+            "timeout": 120,
+            "watch": []
+          },
+          {
+            "active": false,
+            "building": false,
+            "builds": 0,
+            "command": [],
+            "id": "image12",
+            "kind": "image",
+            "label": "Texture 13",
+            "log": "",
+            "maps": {},
+            "path": "/tmp/asset-preview-ui-tmc83zut/image12.png",
+            "revisions": 0,
+            "settings": {},
+            "status": "Suspended",
+            "timeout": 120,
+            "watch": []
+          },
+          {
+            "active": false,
+            "building": false,
+            "builds": 0,
+            "command": [],
+            "id": "image13",
+            "kind": "image",
+            "label": "Texture 14",
+            "log": "",
+            "maps": {},
+            "path": "/tmp/asset-preview-ui-tmc83zut/image13.png",
+            "revisions": 0,
+            "settings": {},
+            "status": "Suspended",
+            "timeout": 120,
+            "watch": []
+          },
+          {
+            "active": false,
+            "building": false,
+            "builds": 0,
+            "command": [],
+            "id": "image14",
+            "kind": "image",
+            "label": "Texture 15",
+            "log": "",
+            "maps": {},
+            "path": "/tmp/asset-preview-ui-tmc83zut/image14.png",
+            "revisions": 0,
+            "settings": {},
+            "status": "Suspended",
+            "timeout": 120,
+            "watch": []
+          },
+          {
+            "active": false,
+            "building": false,
+            "builds": 0,
+            "command": [],
+            "id": "image15",
+            "kind": "image",
+            "label": "Texture 16",
+            "log": "",
+            "maps": {},
+            "path": "/tmp/asset-preview-ui-tmc83zut/image15.png",
+            "revisions": 0,
+            "settings": {},
+            "status": "Suspended",
+            "timeout": 120,
+            "watch": []
+          }
+        ],
+        "grid_size": 2,
+        "layout": "grid",
+        "ok": true,
+        "options_open": false,
+        "pid": 691308,
+        "platform": "xcb",
+        "selected": "model",
+        "watched_directories": 3,
+        "watched_files": 6,
+        "window_visible": true
+      }
+    },
+    {
+      "file": "after-small-2x2.png",
+      "state": {
+        "active": 4,
+        "compact": false,
+        "entries": [
+          {
+            "active": true,
+            "building": false,
+            "builds": 0,
+            "command": [],
+            "controls": {
+              "options": {
+                "height": 28,
+                "width": 32,
+                "x": 270,
+                "y": 53
+              }
+            },
+            "id": "model",
+            "kind": "model",
+            "label": "Sugar cube \u00b7 textured GLB",
+            "log": "",
+            "maps": {},
+            "metrics": {
+              "camera": {
+                "focal": [
+                  0,
+                  0,
+                  0
+                ],
+                "position": [
+                  1.5721363955790428,
+                  1.144421704394655,
+                  2.723020113571106
+                ],
+                "up": [
+                  -0.17101007166283438,
+                  0.9396926207859083,
+                  -0.29619813272602397
+                ]
+              },
+              "engine": true,
+              "lighting": "studio",
+              "lights": 5,
+              "loads": 1,
+              "renderer": "NVIDIA GeForce RTX 2080 Ti/PCIe/SSE2",
+              "renders": 6
+            },
+            "path": "/workspace/material-atlas/assets/models/sugar_cube/sugar_cube_textured.glb",
+            "revisions": 1,
+            "settings": {},
+            "status": "Live \u00b7 model ready",
+            "status_visible": true,
+            "timeout": 120,
+            "viewport": {
+              "height": 209,
+              "width": 337,
+              "x": 9,
+              "y": 45
+            },
+            "watch": []
+          },
+          {
+            "active": true,
+            "building": false,
+            "builds": 0,
+            "command": [],
+            "controls": {
+              "options": {
+                "height": 28,
+                "width": 32,
+                "x": 615,
+                "y": 53
+              }
+            },
+            "id": "material",
+            "kind": "material",
+            "label": "Smoked walnut \u00b7 baked material",
+            "log": "",
+            "maps": {
+              "normal": "/workspace/material-atlas/assets/materials/smoked_walnut_normal.png",
+              "orm": "/workspace/material-atlas/assets/materials/smoked_walnut_orm.png"
+            },
+            "metrics": {
+              "camera": {
+                "focal": [
+                  0,
+                  0,
+                  0
+                ],
+                "position": [
+                  3.1442727911580857,
+                  2.28884340878931,
+                  5.446040227142212
+                ],
+                "up": [
+                  -0.17101007166283438,
+                  0.9396926207859083,
+                  -0.29619813272602397
+                ]
+              },
+              "engine": true,
+              "lighting": "studio",
+              "lights": 5,
+              "loads": 1,
+              "renderer": "NVIDIA GeForce RTX 2080 Ti/PCIe/SSE2",
+              "renders": 6
+            },
+            "path": "/workspace/material-atlas/assets/materials/smoked_walnut_albedo.png",
+            "revisions": 1,
+            "settings": {},
+            "status": "Live \u00b7 model ready",
+            "status_visible": true,
+            "timeout": 120,
+            "viewport": {
+              "height": 209,
+              "width": 337,
+              "x": 354,
+              "y": 45
+            },
+            "watch": []
+          },
+          {
+            "active": true,
+            "building": false,
+            "builds": 0,
+            "command": [],
+            "controls": {
+              "options": {
+                "height": 28,
+                "width": 32,
+                "x": 270,
+                "y": 270
+              }
+            },
+            "id": "image0",
+            "kind": "image",
+            "label": "Very long asset name to check truncation and control reachability",
+            "log": "",
+            "maps": {},
+            "metrics": {
+              "decoded_height": 64,
+              "decoded_width": 64,
+              "height": 64,
+              "image_bytes": 16384,
+              "loads": 1,
+              "renders": 6,
+              "width": 64
+            },
+            "path": "/tmp/asset-preview-ui-tmc83zut/image0.png",
+            "revisions": 1,
+            "settings": {},
+            "status": "Live \u00b7 refreshed 07:02:09",
+            "status_visible": true,
+            "timeout": 120,
+            "viewport": {
+              "height": 209,
+              "width": 337,
+              "x": 9,
+              "y": 262
+            },
+            "watch": []
+          },
+          {
+            "active": true,
+            "building": false,
+            "builds": 0,
+            "command": [],
+            "controls": {
+              "options": {
+                "height": 28,
+                "width": 32,
+                "x": 615,
+                "y": 270
+              }
+            },
+            "id": "image1",
+            "kind": "image",
+            "label": "Texture 2",
+            "log": "",
+            "maps": {},
+            "metrics": {
+              "decoded_height": 64,
+              "decoded_width": 64,
+              "height": 64,
+              "image_bytes": 16384,
+              "loads": 1,
+              "renders": 6,
+              "width": 64
+            },
+            "path": "/tmp/asset-preview-ui-tmc83zut/image1.png",
+            "revisions": 1,
+            "settings": {},
+            "status": "Live \u00b7 refreshed 07:02:09",
+            "status_visible": true,
+            "timeout": 120,
+            "viewport": {
+              "height": 209,
+              "width": 337,
+              "x": 354,
+              "y": 262
+            },
+            "watch": []
+          },
+          {
+            "active": false,
+            "building": false,
+            "builds": 0,
+            "command": [],
+            "id": "image2",
+            "kind": "image",
+            "label": "Texture 3",
+            "log": "",
+            "maps": {},
+            "path": "/tmp/asset-preview-ui-tmc83zut/image2.png",
+            "revisions": 0,
+            "settings": {},
+            "status": "Suspended",
+            "timeout": 120,
+            "watch": []
+          },
+          {
+            "active": false,
+            "building": false,
+            "builds": 0,
+            "command": [],
+            "id": "image3",
+            "kind": "image",
+            "label": "Texture 4",
+            "log": "",
+            "maps": {},
+            "path": "/tmp/asset-preview-ui-tmc83zut/image3.png",
+            "revisions": 0,
+            "settings": {},
+            "status": "Suspended",
+            "timeout": 120,
+            "watch": []
+          },
+          {
+            "active": false,
+            "building": false,
+            "builds": 0,
+            "command": [],
+            "id": "image4",
+            "kind": "image",
+            "label": "Texture 5",
+            "log": "",
+            "maps": {},
+            "path": "/tmp/asset-preview-ui-tmc83zut/image4.png",
+            "revisions": 0,
+            "settings": {},
+            "status": "Suspended",
+            "timeout": 120,
+            "watch": []
+          },
+          {
+            "active": false,
+            "building": false,
+            "builds": 0,
+            "command": [],
+            "id": "image5",
+            "kind": "image",
+            "label": "Texture 6",
+            "log": "",
+            "maps": {},
+            "path": "/tmp/asset-preview-ui-tmc83zut/image5.png",
+            "revisions": 0,
+            "settings": {},
+            "status": "Suspended",
+            "timeout": 120,
+            "watch": []
+          },
+          {
+            "active": false,
+            "building": false,
+            "builds": 0,
+            "command": [],
+            "id": "image6",
+            "kind": "image",
+            "label": "Texture 7",
+            "log": "",
+            "maps": {},
+            "path": "/tmp/asset-preview-ui-tmc83zut/image6.png",
+            "revisions": 0,
+            "settings": {},
+            "status": "Suspended",
+            "timeout": 120,
+            "watch": []
+          },
+          {
+            "active": false,
+            "building": false,
+            "builds": 0,
+            "command": [],
+            "id": "image7",
+            "kind": "image",
+            "label": "Texture 8",
+            "log": "",
+            "maps": {},
+            "path": "/tmp/asset-preview-ui-tmc83zut/image7.png",
+            "revisions": 0,
+            "settings": {},
+            "status": "Suspended",
+            "timeout": 120,
+            "watch": []
+          },
+          {
+            "active": false,
+            "building": false,
+            "builds": 0,
+            "command": [],
+            "id": "image8",
+            "kind": "image",
+            "label": "Texture 9",
+            "log": "",
+            "maps": {},
+            "path": "/tmp/asset-preview-ui-tmc83zut/image8.png",
+            "revisions": 0,
+            "settings": {},
+            "status": "Suspended",
+            "timeout": 120,
+            "watch": []
+          },
+          {
+            "active": false,
+            "building": false,
+            "builds": 0,
+            "command": [],
+            "id": "image9",
+            "kind": "image",
+            "label": "Texture 10",
+            "log": "",
+            "maps": {},
+            "path": "/tmp/asset-preview-ui-tmc83zut/image9.png",
+            "revisions": 0,
+            "settings": {},
+            "status": "Suspended",
+            "timeout": 120,
+            "watch": []
+          },
+          {
+            "active": false,
+            "building": false,
+            "builds": 0,
+            "command": [],
+            "id": "image10",
+            "kind": "image",
+            "label": "Texture 11",
+            "log": "",
+            "maps": {},
+            "path": "/tmp/asset-preview-ui-tmc83zut/image10.png",
+            "revisions": 0,
+            "settings": {},
+            "status": "Suspended",
+            "timeout": 120,
+            "watch": []
+          },
+          {
+            "active": false,
+            "building": false,
+            "builds": 0,
+            "command": [],
+            "id": "image11",
+            "kind": "image",
+            "label": "Texture 12",
+            "log": "",
+            "maps": {},
+            "path": "/tmp/asset-preview-ui-tmc83zut/image11.png",
+            "revisions": 0,
+            "settings": {},
+            "status": "Suspended",
+            "timeout": 120,
+            "watch": []
+          },
+          {
+            "active": false,
+            "building": false,
+            "builds": 0,
+            "command": [],
+            "id": "image12",
+            "kind": "image",
+            "label": "Texture 13",
+            "log": "",
+            "maps": {},
+            "path": "/tmp/asset-preview-ui-tmc83zut/image12.png",
+            "revisions": 0,
+            "settings": {},
+            "status": "Suspended",
+            "timeout": 120,
+            "watch": []
+          },
+          {
+            "active": false,
+            "building": false,
+            "builds": 0,
+            "command": [],
+            "id": "image13",
+            "kind": "image",
+            "label": "Texture 14",
+            "log": "",
+            "maps": {},
+            "path": "/tmp/asset-preview-ui-tmc83zut/image13.png",
+            "revisions": 0,
+            "settings": {},
+            "status": "Suspended",
+            "timeout": 120,
+            "watch": []
+          },
+          {
+            "active": false,
+            "building": false,
+            "builds": 0,
+            "command": [],
+            "id": "image14",
+            "kind": "image",
+            "label": "Texture 15",
+            "log": "",
+            "maps": {},
+            "path": "/tmp/asset-preview-ui-tmc83zut/image14.png",
+            "revisions": 0,
+            "settings": {},
+            "status": "Suspended",
+            "timeout": 120,
+            "watch": []
+          },
+          {
+            "active": false,
+            "building": false,
+            "builds": 0,
+            "command": [],
+            "id": "image15",
+            "kind": "image",
+            "label": "Texture 16",
+            "log": "",
+            "maps": {},
+            "path": "/tmp/asset-preview-ui-tmc83zut/image15.png",
+            "revisions": 0,
+            "settings": {},
+            "status": "Suspended",
+            "timeout": 120,
+            "watch": []
+          }
+        ],
+        "grid_size": 2,
+        "layout": "grid",
+        "ok": true,
+        "options_open": false,
+        "pid": 691308,
+        "platform": "xcb",
+        "selected": "model",
+        "watched_directories": 3,
+        "watched_files": 6,
+        "window_visible": true
+      }
+    },
+    {
+      "file": "after-compact-3x3.png",
+      "state": {
+        "active": 9,
+        "compact": true,
+        "entries": [
+          {
+            "active": true,
+            "building": false,
+            "builds": 0,
+            "command": [],
+            "controls": {
+              "options": {
+                "height": 28,
+                "width": 32,
+                "x": 293,
+                "y": 46
+              }
+            },
+            "id": "model",
+            "kind": "model",
+            "label": "Sugar cube \u00b7 textured GLB",
+            "log": "",
+            "maps": {},
+            "metrics": {
+              "camera": {
+                "focal": [
+                  0,
+                  0,
+                  0
+                ],
+                "position": [
+                  1.5721363955790428,
+                  1.144421704394655,
+                  2.723020113571106
+                ],
+                "up": [
+                  -0.17101007166283438,
+                  0.9396926207859083,
+                  -0.29619813272602397
+                ]
+              },
+              "engine": true,
+              "lighting": "studio",
+              "lights": 5,
+              "loads": 1,
+              "renderer": "NVIDIA GeForce RTX 2080 Ti/PCIe/SSE2",
+              "renders": 10
+            },
+            "path": "/workspace/material-atlas/assets/models/sugar_cube/sugar_cube_textured.glb",
+            "revisions": 1,
+            "settings": {},
+            "status": "Live \u00b7 model ready",
+            "status_visible": false,
+            "timeout": 120,
+            "viewport": {
+              "height": 222,
+              "width": 327,
+              "x": 5,
+              "y": 41
+            },
+            "watch": []
+          },
+          {
+            "active": true,
+            "building": false,
+            "builds": 0,
+            "command": [],
+            "controls": {
+              "options": {
+                "height": 28,
+                "width": 32,
+                "x": 625,
+                "y": 46
+              }
+            },
+            "id": "material",
+            "kind": "material",
+            "label": "Smoked walnut \u00b7 baked material",
+            "log": "",
+            "maps": {
+              "normal": "/workspace/material-atlas/assets/materials/smoked_walnut_normal.png",
+              "orm": "/workspace/material-atlas/assets/materials/smoked_walnut_orm.png"
+            },
+            "metrics": {
+              "camera": {
+                "focal": [
+                  0,
+                  0,
+                  0
+                ],
+                "position": [
+                  3.1442727911580857,
+                  2.28884340878931,
+                  5.446040227142212
+                ],
+                "up": [
+                  -0.17101007166283438,
+                  0.9396926207859083,
+                  -0.29619813272602397
+                ]
+              },
+              "engine": true,
+              "lighting": "studio",
+              "lights": 5,
+              "loads": 1,
+              "renderer": "NVIDIA GeForce RTX 2080 Ti/PCIe/SSE2",
+              "renders": 10
+            },
+            "path": "/workspace/material-atlas/assets/materials/smoked_walnut_albedo.png",
+            "revisions": 1,
+            "settings": {},
+            "status": "Live \u00b7 model ready",
+            "status_visible": false,
+            "timeout": 120,
+            "viewport": {
+              "height": 222,
+              "width": 328,
+              "x": 336,
+              "y": 41
+            },
+            "watch": []
+          },
+          {
+            "active": true,
+            "building": false,
+            "builds": 0,
+            "command": [],
+            "controls": {
+              "options": {
+                "height": 28,
+                "width": 32,
+                "x": 956,
+                "y": 46
+              }
+            },
+            "id": "image0",
+            "kind": "image",
+            "label": "Very long asset name to check truncation and control reachability",
+            "log": "",
+            "maps": {},
+            "metrics": {
+              "decoded_height": 64,
+              "decoded_width": 64,
+              "height": 64,
+              "image_bytes": 16384,
+              "loads": 1,
+              "renders": 9,
+              "width": 64
+            },
+            "path": "/tmp/asset-preview-ui-tmc83zut/image0.png",
+            "revisions": 1,
+            "settings": {},
+            "status": "Live \u00b7 refreshed 07:02:09",
+            "status_visible": false,
+            "timeout": 120,
+            "viewport": {
+              "height": 222,
+              "width": 327,
+              "x": 668,
+              "y": 41
+            },
+            "watch": []
+          },
+          {
+            "active": true,
+            "building": false,
+            "builds": 0,
+            "command": [],
+            "controls": {
+              "options": {
+                "height": 28,
+                "width": 32,
+                "x": 293,
+                "y": 272
+              }
+            },
+            "id": "image1",
+            "kind": "image",
+            "label": "Texture 2",
+            "log": "",
+            "maps": {},
+            "metrics": {
+              "decoded_height": 64,
+              "decoded_width": 64,
+              "height": 64,
+              "image_bytes": 16384,
+              "loads": 1,
+              "renders": 9,
+              "width": 64
+            },
+            "path": "/tmp/asset-preview-ui-tmc83zut/image1.png",
+            "revisions": 1,
+            "settings": {},
+            "status": "Live \u00b7 refreshed 07:02:09",
+            "status_visible": false,
+            "timeout": 120,
+            "viewport": {
+              "height": 222,
+              "width": 327,
+              "x": 5,
+              "y": 267
+            },
+            "watch": []
+          },
+          {
+            "active": true,
+            "building": false,
+            "builds": 0,
+            "command": [],
+            "controls": {
+              "options": {
+                "height": 28,
+                "width": 32,
+                "x": 625,
+                "y": 272
+              }
+            },
+            "id": "image2",
+            "kind": "image",
+            "label": "Texture 3",
+            "log": "",
+            "maps": {},
+            "metrics": {
+              "decoded_height": 64,
+              "decoded_width": 64,
+              "height": 64,
+              "image_bytes": 16384,
+              "loads": 1,
+              "renders": 3,
+              "width": 64
+            },
+            "path": "/tmp/asset-preview-ui-tmc83zut/image2.png",
+            "revisions": 1,
+            "settings": {},
+            "status": "Live \u00b7 refreshed 07:02:10",
+            "status_visible": false,
+            "timeout": 120,
+            "viewport": {
+              "height": 222,
+              "width": 328,
+              "x": 336,
+              "y": 267
+            },
+            "watch": []
+          },
+          {
+            "active": true,
+            "building": false,
+            "builds": 0,
+            "command": [],
+            "controls": {
+              "options": {
+                "height": 28,
+                "width": 32,
+                "x": 956,
+                "y": 272
+              }
+            },
+            "id": "image3",
+            "kind": "image",
+            "label": "Texture 4",
+            "log": "",
+            "maps": {},
+            "metrics": {
+              "decoded_height": 64,
+              "decoded_width": 64,
+              "height": 64,
+              "image_bytes": 16384,
+              "loads": 1,
+              "renders": 3,
+              "width": 64
+            },
+            "path": "/tmp/asset-preview-ui-tmc83zut/image3.png",
+            "revisions": 1,
+            "settings": {},
+            "status": "Live \u00b7 refreshed 07:02:10",
+            "status_visible": false,
+            "timeout": 120,
+            "viewport": {
+              "height": 222,
+              "width": 327,
+              "x": 668,
+              "y": 267
+            },
+            "watch": []
+          },
+          {
+            "active": true,
+            "building": false,
+            "builds": 0,
+            "command": [],
+            "controls": {
+              "options": {
+                "height": 28,
+                "width": 32,
+                "x": 293,
+                "y": 498
+              }
+            },
+            "id": "image4",
+            "kind": "image",
+            "label": "Texture 5",
+            "log": "",
+            "maps": {},
+            "metrics": {
+              "decoded_height": 64,
+              "decoded_width": 64,
+              "height": 64,
+              "image_bytes": 16384,
+              "loads": 1,
+              "renders": 3,
+              "width": 64
+            },
+            "path": "/tmp/asset-preview-ui-tmc83zut/image4.png",
+            "revisions": 1,
+            "settings": {},
+            "status": "Live \u00b7 refreshed 07:02:10",
+            "status_visible": false,
+            "timeout": 120,
+            "viewport": {
+              "height": 222,
+              "width": 327,
+              "x": 5,
+              "y": 493
+            },
+            "watch": []
+          },
+          {
+            "active": true,
+            "building": false,
+            "builds": 0,
+            "command": [],
+            "controls": {
+              "options": {
+                "height": 28,
+                "width": 32,
+                "x": 625,
+                "y": 498
+              }
+            },
+            "id": "image5",
+            "kind": "image",
+            "label": "Texture 6",
+            "log": "",
+            "maps": {},
+            "metrics": {
+              "decoded_height": 64,
+              "decoded_width": 64,
+              "height": 64,
+              "image_bytes": 16384,
+              "loads": 1,
+              "renders": 3,
+              "width": 64
+            },
+            "path": "/tmp/asset-preview-ui-tmc83zut/image5.png",
+            "revisions": 1,
+            "settings": {},
+            "status": "Live \u00b7 refreshed 07:02:10",
+            "status_visible": false,
+            "timeout": 120,
+            "viewport": {
+              "height": 222,
+              "width": 328,
+              "x": 336,
+              "y": 493
+            },
+            "watch": []
+          },
+          {
+            "active": true,
+            "building": false,
+            "builds": 0,
+            "command": [],
+            "controls": {
+              "options": {
+                "height": 28,
+                "width": 32,
+                "x": 956,
+                "y": 498
+              }
+            },
+            "id": "image6",
+            "kind": "image",
+            "label": "Texture 7",
+            "log": "",
+            "maps": {},
+            "metrics": {
+              "decoded_height": 64,
+              "decoded_width": 64,
+              "height": 64,
+              "image_bytes": 16384,
+              "loads": 1,
+              "renders": 3,
+              "width": 64
+            },
+            "path": "/tmp/asset-preview-ui-tmc83zut/image6.png",
+            "revisions": 1,
+            "settings": {},
+            "status": "Live \u00b7 refreshed 07:02:10",
+            "status_visible": false,
+            "timeout": 120,
+            "viewport": {
+              "height": 222,
+              "width": 327,
+              "x": 668,
+              "y": 493
+            },
+            "watch": []
+          },
+          {
+            "active": false,
+            "building": false,
+            "builds": 0,
+            "command": [],
+            "id": "image7",
+            "kind": "image",
+            "label": "Texture 8",
+            "log": "",
+            "maps": {},
+            "path": "/tmp/asset-preview-ui-tmc83zut/image7.png",
+            "revisions": 0,
+            "settings": {},
+            "status": "Suspended",
+            "timeout": 120,
+            "watch": []
+          },
+          {
+            "active": false,
+            "building": false,
+            "builds": 0,
+            "command": [],
+            "id": "image8",
+            "kind": "image",
+            "label": "Texture 9",
+            "log": "",
+            "maps": {},
+            "path": "/tmp/asset-preview-ui-tmc83zut/image8.png",
+            "revisions": 0,
+            "settings": {},
+            "status": "Suspended",
+            "timeout": 120,
+            "watch": []
+          },
+          {
+            "active": false,
+            "building": false,
+            "builds": 0,
+            "command": [],
+            "id": "image9",
+            "kind": "image",
+            "label": "Texture 10",
+            "log": "",
+            "maps": {},
+            "path": "/tmp/asset-preview-ui-tmc83zut/image9.png",
+            "revisions": 0,
+            "settings": {},
+            "status": "Suspended",
+            "timeout": 120,
+            "watch": []
+          },
+          {
+            "active": false,
+            "building": false,
+            "builds": 0,
+            "command": [],
+            "id": "image10",
+            "kind": "image",
+            "label": "Texture 11",
+            "log": "",
+            "maps": {},
+            "path": "/tmp/asset-preview-ui-tmc83zut/image10.png",
+            "revisions": 0,
+            "settings": {},
+            "status": "Suspended",
+            "timeout": 120,
+            "watch": []
+          },
+          {
+            "active": false,
+            "building": false,
+            "builds": 0,
+            "command": [],
+            "id": "image11",
+            "kind": "image",
+            "label": "Texture 12",
+            "log": "",
+            "maps": {},
+            "path": "/tmp/asset-preview-ui-tmc83zut/image11.png",
+            "revisions": 0,
+            "settings": {},
+            "status": "Suspended",
+            "timeout": 120,
+            "watch": []
+          },
+          {
+            "active": false,
+            "building": false,
+            "builds": 0,
+            "command": [],
+            "id": "image12",
+            "kind": "image",
+            "label": "Texture 13",
+            "log": "",
+            "maps": {},
+            "path": "/tmp/asset-preview-ui-tmc83zut/image12.png",
+            "revisions": 0,
+            "settings": {},
+            "status": "Suspended",
+            "timeout": 120,
+            "watch": []
+          },
+          {
+            "active": false,
+            "building": false,
+            "builds": 0,
+            "command": [],
+            "id": "image13",
+            "kind": "image",
+            "label": "Texture 14",
+            "log": "",
+            "maps": {},
+            "path": "/tmp/asset-preview-ui-tmc83zut/image13.png",
+            "revisions": 0,
+            "settings": {},
+            "status": "Suspended",
+            "timeout": 120,
+            "watch": []
+          },
+          {
+            "active": false,
+            "building": false,
+            "builds": 0,
+            "command": [],
+            "id": "image14",
+            "kind": "image",
+            "label": "Texture 15",
+            "log": "",
+            "maps": {},
+            "path": "/tmp/asset-preview-ui-tmc83zut/image14.png",
+            "revisions": 0,
+            "settings": {},
+            "status": "Suspended",
+            "timeout": 120,
+            "watch": []
+          },
+          {
+            "active": false,
+            "building": false,
+            "builds": 0,
+            "command": [],
+            "id": "image15",
+            "kind": "image",
+            "label": "Texture 16",
+            "log": "",
+            "maps": {},
+            "path": "/tmp/asset-preview-ui-tmc83zut/image15.png",
+            "revisions": 0,
+            "settings": {},
+            "status": "Suspended",
+            "timeout": 120,
+            "watch": []
+          }
+        ],
+        "grid_size": 3,
+        "layout": "grid",
+        "ok": true,
+        "options_open": false,
+        "pid": 691308,
+        "platform": "xcb",
+        "selected": "model",
+        "watched_directories": 3,
+        "watched_files": 11,
+        "window_visible": true
+      }
+    },
+    {
+      "file": "after-compact-4x4.png",
+      "state": {
+        "active": 16,
+        "compact": true,
+        "entries": [
+          {
+            "active": true,
+            "building": false,
+            "builds": 0,
+            "command": [],
+            "controls": {
+              "options": {
+                "height": 28,
+                "width": 32,
+                "x": 361,
+                "y": 46
+              }
+            },
+            "id": "model",
+            "kind": "model",
+            "label": "Sugar cube \u00b7 textured GLB",
+            "log": "",
+            "maps": {},
+            "metrics": {
+              "camera": {
+                "focal": [
+                  0,
+                  0,
+                  0
+                ],
+                "position": [
+                  1.5721363955790428,
+                  1.144421704394655,
+                  2.723020113571106
+                ],
+                "up": [
+                  -0.17101007166283438,
+                  0.9396926207859083,
+                  -0.29619813272602397
+                ]
+              },
+              "engine": true,
+              "lighting": "studio",
+              "lights": 5,
+              "loads": 1,
+              "renderer": "NVIDIA GeForce RTX 2080 Ti/PCIe/SSE2",
+              "renders": 14
+            },
+            "path": "/workspace/material-atlas/assets/models/sugar_cube/sugar_cube_textured.glb",
+            "revisions": 1,
+            "settings": {},
+            "status": "Live \u00b7 model ready",
+            "status_visible": false,
+            "timeout": 120,
+            "viewport": {
+              "height": 236,
+              "width": 395,
+              "x": 5,
+              "y": 41
+            },
+            "watch": []
+          },
+          {
+            "active": true,
+            "building": false,
+            "builds": 0,
+            "command": [],
+            "controls": {
+              "options": {
+                "height": 28,
+                "width": 32,
+                "x": 759,
+                "y": 46
+              }
+            },
+            "id": "material",
+            "kind": "material",
+            "label": "Smoked walnut \u00b7 baked material",
+            "log": "",
+            "maps": {
+              "normal": "/workspace/material-atlas/assets/materials/smoked_walnut_normal.png",
+              "orm": "/workspace/material-atlas/assets/materials/smoked_walnut_orm.png"
+            },
+            "metrics": {
+              "camera": {
+                "focal": [
+                  0,
+                  0,
+                  0
+                ],
+                "position": [
+                  3.1442727911580857,
+                  2.28884340878931,
+                  5.446040227142212
+                ],
+                "up": [
+                  -0.17101007166283438,
+                  0.9396926207859083,
+                  -0.29619813272602397
+                ]
+              },
+              "engine": true,
+              "lighting": "studio",
+              "lights": 5,
+              "loads": 1,
+              "renderer": "NVIDIA GeForce RTX 2080 Ti/PCIe/SSE2",
+              "renders": 14
+            },
+            "path": "/workspace/material-atlas/assets/materials/smoked_walnut_albedo.png",
+            "revisions": 1,
+            "settings": {},
+            "status": "Live \u00b7 model ready",
+            "status_visible": false,
+            "timeout": 120,
+            "viewport": {
+              "height": 236,
+              "width": 394,
+              "x": 404,
+              "y": 41
+            },
+            "watch": []
+          },
+          {
+            "active": true,
+            "building": false,
+            "builds": 0,
+            "command": [],
+            "controls": {
+              "options": {
+                "height": 28,
+                "width": 32,
+                "x": 1158,
+                "y": 46
+              }
+            },
+            "id": "image0",
+            "kind": "image",
+            "label": "Very long asset name to check truncation and control reachability",
+            "log": "",
+            "maps": {},
+            "metrics": {
+              "decoded_height": 64,
+              "decoded_width": 64,
+              "height": 64,
+              "image_bytes": 16384,
+              "loads": 1,
+              "renders": 12,
+              "width": 64
+            },
+            "path": "/tmp/asset-preview-ui-tmc83zut/image0.png",
+            "revisions": 1,
+            "settings": {},
+            "status": "Live \u00b7 refreshed 07:02:09",
+            "status_visible": false,
+            "timeout": 120,
+            "viewport": {
+              "height": 236,
+              "width": 395,
+              "x": 802,
+              "y": 41
+            },
+            "watch": []
+          },
+          {
+            "active": true,
+            "building": false,
+            "builds": 0,
+            "command": [],
+            "controls": {
+              "options": {
+                "height": 28,
+                "width": 32,
+                "x": 1556,
+                "y": 46
+              }
+            },
+            "id": "image1",
+            "kind": "image",
+            "label": "Texture 2",
+            "log": "",
+            "maps": {},
+            "metrics": {
+              "decoded_height": 64,
+              "decoded_width": 64,
+              "height": 64,
+              "image_bytes": 16384,
+              "loads": 1,
+              "renders": 12,
+              "width": 64
+            },
+            "path": "/tmp/asset-preview-ui-tmc83zut/image1.png",
+            "revisions": 1,
+            "settings": {},
+            "status": "Live \u00b7 refreshed 07:02:09",
+            "status_visible": false,
+            "timeout": 120,
+            "viewport": {
+              "height": 236,
+              "width": 394,
+              "x": 1201,
+              "y": 41
+            },
+            "watch": []
+          },
+          {
+            "active": true,
+            "building": false,
+            "builds": 0,
+            "command": [],
+            "controls": {
+              "options": {
+                "height": 28,
+                "width": 32,
+                "x": 361,
+                "y": 286
+              }
+            },
+            "id": "image2",
+            "kind": "image",
+            "label": "Texture 3",
+            "log": "",
+            "maps": {},
+            "metrics": {
+              "decoded_height": 64,
+              "decoded_width": 64,
+              "height": 64,
+              "image_bytes": 16384,
+              "loads": 1,
+              "renders": 6,
+              "width": 64
+            },
+            "path": "/tmp/asset-preview-ui-tmc83zut/image2.png",
+            "revisions": 1,
+            "settings": {},
+            "status": "Live \u00b7 refreshed 07:02:10",
+            "status_visible": false,
+            "timeout": 120,
+            "viewport": {
+              "height": 235,
+              "width": 395,
+              "x": 5,
+              "y": 281
+            },
+            "watch": []
+          },
+          {
+            "active": true,
+            "building": false,
+            "builds": 0,
+            "command": [],
+            "controls": {
+              "options": {
+                "height": 28,
+                "width": 32,
+                "x": 759,
+                "y": 286
+              }
+            },
+            "id": "image3",
+            "kind": "image",
+            "label": "Texture 4",
+            "log": "",
+            "maps": {},
+            "metrics": {
+              "decoded_height": 64,
+              "decoded_width": 64,
+              "height": 64,
+              "image_bytes": 16384,
+              "loads": 1,
+              "renders": 6,
+              "width": 64
+            },
+            "path": "/tmp/asset-preview-ui-tmc83zut/image3.png",
+            "revisions": 1,
+            "settings": {},
+            "status": "Live \u00b7 refreshed 07:02:10",
+            "status_visible": false,
+            "timeout": 120,
+            "viewport": {
+              "height": 235,
+              "width": 394,
+              "x": 404,
+              "y": 281
+            },
+            "watch": []
+          },
+          {
+            "active": true,
+            "building": false,
+            "builds": 0,
+            "command": [],
+            "controls": {
+              "options": {
+                "height": 28,
+                "width": 32,
+                "x": 1158,
+                "y": 286
+              }
+            },
+            "id": "image4",
+            "kind": "image",
+            "label": "Texture 5",
+            "log": "",
+            "maps": {},
+            "metrics": {
+              "decoded_height": 64,
+              "decoded_width": 64,
+              "height": 64,
+              "image_bytes": 16384,
+              "loads": 1,
+              "renders": 6,
+              "width": 64
+            },
+            "path": "/tmp/asset-preview-ui-tmc83zut/image4.png",
+            "revisions": 1,
+            "settings": {},
+            "status": "Live \u00b7 refreshed 07:02:10",
+            "status_visible": false,
+            "timeout": 120,
+            "viewport": {
+              "height": 235,
+              "width": 395,
+              "x": 802,
+              "y": 281
+            },
+            "watch": []
+          },
+          {
+            "active": true,
+            "building": false,
+            "builds": 0,
+            "command": [],
+            "controls": {
+              "options": {
+                "height": 28,
+                "width": 32,
+                "x": 1556,
+                "y": 286
+              }
+            },
+            "id": "image5",
+            "kind": "image",
+            "label": "Texture 6",
+            "log": "",
+            "maps": {},
+            "metrics": {
+              "decoded_height": 64,
+              "decoded_width": 64,
+              "height": 64,
+              "image_bytes": 16384,
+              "loads": 1,
+              "renders": 6,
+              "width": 64
+            },
+            "path": "/tmp/asset-preview-ui-tmc83zut/image5.png",
+            "revisions": 1,
+            "settings": {},
+            "status": "Live \u00b7 refreshed 07:02:10",
+            "status_visible": false,
+            "timeout": 120,
+            "viewport": {
+              "height": 235,
+              "width": 394,
+              "x": 1201,
+              "y": 281
+            },
+            "watch": []
+          },
+          {
+            "active": true,
+            "building": false,
+            "builds": 0,
+            "command": [],
+            "controls": {
+              "options": {
+                "height": 28,
+                "width": 32,
+                "x": 361,
+                "y": 525
+              }
+            },
+            "id": "image6",
+            "kind": "image",
+            "label": "Texture 7",
+            "log": "",
+            "maps": {},
+            "metrics": {
+              "decoded_height": 64,
+              "decoded_width": 64,
+              "height": 64,
+              "image_bytes": 16384,
+              "loads": 1,
+              "renders": 6,
+              "width": 64
+            },
+            "path": "/tmp/asset-preview-ui-tmc83zut/image6.png",
+            "revisions": 1,
+            "settings": {},
+            "status": "Live \u00b7 refreshed 07:02:10",
+            "status_visible": false,
+            "timeout": 120,
+            "viewport": {
+              "height": 236,
+              "width": 395,
+              "x": 5,
+              "y": 520
+            },
+            "watch": []
+          },
+          {
+            "active": true,
+            "building": false,
+            "builds": 0,
+            "command": [],
+            "controls": {
+              "options": {
+                "height": 28,
+                "width": 32,
+                "x": 759,
+                "y": 525
+              }
+            },
+            "id": "image7",
+            "kind": "image",
+            "label": "Texture 8",
+            "log": "",
+            "maps": {},
+            "metrics": {
+              "decoded_height": 64,
+              "decoded_width": 64,
+              "height": 64,
+              "image_bytes": 16384,
+              "loads": 1,
+              "renders": 3,
+              "width": 64
+            },
+            "path": "/tmp/asset-preview-ui-tmc83zut/image7.png",
+            "revisions": 1,
+            "settings": {},
+            "status": "Live \u00b7 refreshed 07:02:11",
+            "status_visible": false,
+            "timeout": 120,
+            "viewport": {
+              "height": 236,
+              "width": 394,
+              "x": 404,
+              "y": 520
+            },
+            "watch": []
+          },
+          {
+            "active": true,
+            "building": false,
+            "builds": 0,
+            "command": [],
+            "controls": {
+              "options": {
+                "height": 28,
+                "width": 32,
+                "x": 1158,
+                "y": 525
+              }
+            },
+            "id": "image8",
+            "kind": "image",
+            "label": "Texture 9",
+            "log": "",
+            "maps": {},
+            "metrics": {
+              "decoded_height": 64,
+              "decoded_width": 64,
+              "height": 64,
+              "image_bytes": 16384,
+              "loads": 1,
+              "renders": 3,
+              "width": 64
+            },
+            "path": "/tmp/asset-preview-ui-tmc83zut/image8.png",
+            "revisions": 1,
+            "settings": {},
+            "status": "Live \u00b7 refreshed 07:02:11",
+            "status_visible": false,
+            "timeout": 120,
+            "viewport": {
+              "height": 236,
+              "width": 395,
+              "x": 802,
+              "y": 520
+            },
+            "watch": []
+          },
+          {
+            "active": true,
+            "building": false,
+            "builds": 0,
+            "command": [],
+            "controls": {
+              "options": {
+                "height": 28,
+                "width": 32,
+                "x": 1556,
+                "y": 525
+              }
+            },
+            "id": "image9",
+            "kind": "image",
+            "label": "Texture 10",
+            "log": "",
+            "maps": {},
+            "metrics": {
+              "decoded_height": 64,
+              "decoded_width": 64,
+              "height": 64,
+              "image_bytes": 16384,
+              "loads": 1,
+              "renders": 3,
+              "width": 64
+            },
+            "path": "/tmp/asset-preview-ui-tmc83zut/image9.png",
+            "revisions": 1,
+            "settings": {},
+            "status": "Live \u00b7 refreshed 07:02:11",
+            "status_visible": false,
+            "timeout": 120,
+            "viewport": {
+              "height": 236,
+              "width": 394,
+              "x": 1201,
+              "y": 520
+            },
+            "watch": []
+          },
+          {
+            "active": true,
+            "building": false,
+            "builds": 0,
+            "command": [],
+            "controls": {
+              "options": {
+                "height": 28,
+                "width": 32,
+                "x": 361,
+                "y": 765
+              }
+            },
+            "id": "image10",
+            "kind": "image",
+            "label": "Texture 11",
+            "log": "",
+            "maps": {},
+            "metrics": {
+              "decoded_height": 64,
+              "decoded_width": 64,
+              "height": 64,
+              "image_bytes": 16384,
+              "loads": 1,
+              "renders": 3,
+              "width": 64
+            },
+            "path": "/tmp/asset-preview-ui-tmc83zut/image10.png",
+            "revisions": 1,
+            "settings": {},
+            "status": "Live \u00b7 refreshed 07:02:11",
+            "status_visible": false,
+            "timeout": 120,
+            "viewport": {
+              "height": 235,
+              "width": 395,
+              "x": 5,
+              "y": 760
+            },
+            "watch": []
+          },
+          {
+            "active": true,
+            "building": false,
+            "builds": 0,
+            "command": [],
+            "controls": {
+              "options": {
+                "height": 28,
+                "width": 32,
+                "x": 759,
+                "y": 765
+              }
+            },
+            "id": "image11",
+            "kind": "image",
+            "label": "Texture 12",
+            "log": "",
+            "maps": {},
+            "metrics": {
+              "decoded_height": 64,
+              "decoded_width": 64,
+              "height": 64,
+              "image_bytes": 16384,
+              "loads": 1,
+              "renders": 3,
+              "width": 64
+            },
+            "path": "/tmp/asset-preview-ui-tmc83zut/image11.png",
+            "revisions": 1,
+            "settings": {},
+            "status": "Live \u00b7 refreshed 07:02:11",
+            "status_visible": false,
+            "timeout": 120,
+            "viewport": {
+              "height": 235,
+              "width": 394,
+              "x": 404,
+              "y": 760
+            },
+            "watch": []
+          },
+          {
+            "active": true,
+            "building": false,
+            "builds": 0,
+            "command": [],
+            "controls": {
+              "options": {
+                "height": 28,
+                "width": 32,
+                "x": 1158,
+                "y": 765
+              }
+            },
+            "id": "image12",
+            "kind": "image",
+            "label": "Texture 13",
+            "log": "",
+            "maps": {},
+            "metrics": {
+              "decoded_height": 64,
+              "decoded_width": 64,
+              "height": 64,
+              "image_bytes": 16384,
+              "loads": 1,
+              "renders": 3,
+              "width": 64
+            },
+            "path": "/tmp/asset-preview-ui-tmc83zut/image12.png",
+            "revisions": 1,
+            "settings": {},
+            "status": "Live \u00b7 refreshed 07:02:11",
+            "status_visible": false,
+            "timeout": 120,
+            "viewport": {
+              "height": 235,
+              "width": 395,
+              "x": 802,
+              "y": 760
+            },
+            "watch": []
+          },
+          {
+            "active": true,
+            "building": false,
+            "builds": 0,
+            "command": [],
+            "controls": {
+              "options": {
+                "height": 28,
+                "width": 32,
+                "x": 1556,
+                "y": 765
+              }
+            },
+            "id": "image13",
+            "kind": "image",
+            "label": "Texture 14",
+            "log": "",
+            "maps": {},
+            "metrics": {
+              "decoded_height": 64,
+              "decoded_width": 64,
+              "height": 64,
+              "image_bytes": 16384,
+              "loads": 1,
+              "renders": 3,
+              "width": 64
+            },
+            "path": "/tmp/asset-preview-ui-tmc83zut/image13.png",
+            "revisions": 1,
+            "settings": {},
+            "status": "Live \u00b7 refreshed 07:02:11",
+            "status_visible": false,
+            "timeout": 120,
+            "viewport": {
+              "height": 235,
+              "width": 394,
+              "x": 1201,
+              "y": 760
+            },
+            "watch": []
+          },
+          {
+            "active": false,
+            "building": false,
+            "builds": 0,
+            "command": [],
+            "id": "image14",
+            "kind": "image",
+            "label": "Texture 15",
+            "log": "",
+            "maps": {},
+            "path": "/tmp/asset-preview-ui-tmc83zut/image14.png",
+            "revisions": 0,
+            "settings": {},
+            "status": "Suspended",
+            "timeout": 120,
+            "watch": []
+          },
+          {
+            "active": false,
+            "building": false,
+            "builds": 0,
+            "command": [],
+            "id": "image15",
+            "kind": "image",
+            "label": "Texture 16",
+            "log": "",
+            "maps": {},
+            "path": "/tmp/asset-preview-ui-tmc83zut/image15.png",
+            "revisions": 0,
+            "settings": {},
+            "status": "Suspended",
+            "timeout": 120,
+            "watch": []
+          }
+        ],
+        "grid_size": 4,
+        "layout": "grid",
+        "ok": true,
+        "options_open": false,
+        "pid": 691308,
+        "platform": "xcb",
+        "selected": "model",
+        "watched_directories": 3,
+        "watched_files": 18,
+        "window_visible": true
+      }
+    },
+    {
+      "file": "after-studio.png",
+      "state": {
+        "active": 1,
+        "compact": false,
+        "entries": [
+          {
+            "active": true,
+            "building": false,
+            "builds": 0,
+            "command": [],
+            "controls": {
+              "options": {
+                "height": 28,
+                "width": 32,
+                "x": 915,
+                "y": 53
+              }
+            },
+            "id": "model",
+            "kind": "model",
+            "label": "Sugar cube \u00b7 textured GLB",
+            "log": "",
+            "maps": {},
+            "metrics": {
+              "camera": {
+                "focal": [
+                  0,
+                  0,
+                  0
+                ],
+                "position": [
+                  1.5721363955790428,
+                  1.144421704394655,
+                  2.723020113571106
+                ],
+                "up": [
+                  -0.17101007166283438,
+                  0.9396926207859083,
+                  -0.29619813272602397
+                ]
+              },
+              "engine": true,
+              "lighting": "studio",
+              "lights": 5,
+              "loads": 1,
+              "renderer": "NVIDIA GeForce RTX 2080 Ti/PCIe/SSE2",
+              "renders": 18
+            },
+            "path": "/workspace/material-atlas/assets/models/sugar_cube/sugar_cube_textured.glb",
+            "revisions": 1,
+            "settings": {},
+            "status": "Live \u00b7 model ready",
+            "status_visible": true,
+            "timeout": 120,
+            "viewport": {
+              "height": 646,
+              "width": 982,
+              "x": 9,
+              "y": 45
+            },
+            "watch": []
+          },
+          {
+            "active": false,
+            "building": false,
+            "builds": 0,
+            "command": [],
+            "id": "material",
+            "kind": "material",
+            "label": "Smoked walnut \u00b7 baked material",
+            "log": "",
+            "maps": {
+              "normal": "/workspace/material-atlas/assets/materials/smoked_walnut_normal.png",
+              "orm": "/workspace/material-atlas/assets/materials/smoked_walnut_orm.png"
+            },
+            "path": "/workspace/material-atlas/assets/materials/smoked_walnut_albedo.png",
+            "revisions": 1,
+            "settings": {},
+            "status": "Suspended",
+            "timeout": 120,
+            "watch": []
+          },
+          {
+            "active": false,
+            "building": false,
+            "builds": 0,
+            "command": [],
+            "id": "image0",
+            "kind": "image",
+            "label": "Very long asset name to check truncation and control reachability",
+            "log": "",
+            "maps": {},
+            "path": "/tmp/asset-preview-ui-tmc83zut/image0.png",
+            "revisions": 1,
+            "settings": {},
+            "status": "Suspended",
+            "timeout": 120,
+            "watch": []
+          },
+          {
+            "active": false,
+            "building": false,
+            "builds": 0,
+            "command": [],
+            "id": "image1",
+            "kind": "image",
+            "label": "Texture 2",
+            "log": "",
+            "maps": {},
+            "path": "/tmp/asset-preview-ui-tmc83zut/image1.png",
+            "revisions": 1,
+            "settings": {},
+            "status": "Suspended",
+            "timeout": 120,
+            "watch": []
+          },
+          {
+            "active": false,
+            "building": false,
+            "builds": 0,
+            "command": [],
+            "id": "image2",
+            "kind": "image",
+            "label": "Texture 3",
+            "log": "",
+            "maps": {},
+            "path": "/tmp/asset-preview-ui-tmc83zut/image2.png",
+            "revisions": 1,
+            "settings": {},
+            "status": "Suspended",
+            "timeout": 120,
+            "watch": []
+          },
+          {
+            "active": false,
+            "building": false,
+            "builds": 0,
+            "command": [],
+            "id": "image3",
+            "kind": "image",
+            "label": "Texture 4",
+            "log": "",
+            "maps": {},
+            "path": "/tmp/asset-preview-ui-tmc83zut/image3.png",
+            "revisions": 1,
+            "settings": {},
+            "status": "Suspended",
+            "timeout": 120,
+            "watch": []
+          },
+          {
+            "active": false,
+            "building": false,
+            "builds": 0,
+            "command": [],
+            "id": "image4",
+            "kind": "image",
+            "label": "Texture 5",
+            "log": "",
+            "maps": {},
+            "path": "/tmp/asset-preview-ui-tmc83zut/image4.png",
+            "revisions": 1,
+            "settings": {},
+            "status": "Suspended",
+            "timeout": 120,
+            "watch": []
+          },
+          {
+            "active": false,
+            "building": false,
+            "builds": 0,
+            "command": [],
+            "id": "image5",
+            "kind": "image",
+            "label": "Texture 6",
+            "log": "",
+            "maps": {},
+            "path": "/tmp/asset-preview-ui-tmc83zut/image5.png",
+            "revisions": 1,
+            "settings": {},
+            "status": "Suspended",
+            "timeout": 120,
+            "watch": []
+          },
+          {
+            "active": false,
+            "building": false,
+            "builds": 0,
+            "command": [],
+            "id": "image6",
+            "kind": "image",
+            "label": "Texture 7",
+            "log": "",
+            "maps": {},
+            "path": "/tmp/asset-preview-ui-tmc83zut/image6.png",
+            "revisions": 1,
+            "settings": {},
+            "status": "Suspended",
+            "timeout": 120,
+            "watch": []
+          },
+          {
+            "active": false,
+            "building": false,
+            "builds": 0,
+            "command": [],
+            "id": "image7",
+            "kind": "image",
+            "label": "Texture 8",
+            "log": "",
+            "maps": {},
+            "path": "/tmp/asset-preview-ui-tmc83zut/image7.png",
+            "revisions": 1,
+            "settings": {},
+            "status": "Suspended",
+            "timeout": 120,
+            "watch": []
+          },
+          {
+            "active": false,
+            "building": false,
+            "builds": 0,
+            "command": [],
+            "id": "image8",
+            "kind": "image",
+            "label": "Texture 9",
+            "log": "",
+            "maps": {},
+            "path": "/tmp/asset-preview-ui-tmc83zut/image8.png",
+            "revisions": 1,
+            "settings": {},
+            "status": "Suspended",
+            "timeout": 120,
+            "watch": []
+          },
+          {
+            "active": false,
+            "building": false,
+            "builds": 0,
+            "command": [],
+            "id": "image9",
+            "kind": "image",
+            "label": "Texture 10",
+            "log": "",
+            "maps": {},
+            "path": "/tmp/asset-preview-ui-tmc83zut/image9.png",
+            "revisions": 1,
+            "settings": {},
+            "status": "Suspended",
+            "timeout": 120,
+            "watch": []
+          },
+          {
+            "active": false,
+            "building": false,
+            "builds": 0,
+            "command": [],
+            "id": "image10",
+            "kind": "image",
+            "label": "Texture 11",
+            "log": "",
+            "maps": {},
+            "path": "/tmp/asset-preview-ui-tmc83zut/image10.png",
+            "revisions": 1,
+            "settings": {},
+            "status": "Suspended",
+            "timeout": 120,
+            "watch": []
+          },
+          {
+            "active": false,
+            "building": false,
+            "builds": 0,
+            "command": [],
+            "id": "image11",
+            "kind": "image",
+            "label": "Texture 12",
+            "log": "",
+            "maps": {},
+            "path": "/tmp/asset-preview-ui-tmc83zut/image11.png",
+            "revisions": 1,
+            "settings": {},
+            "status": "Suspended",
+            "timeout": 120,
+            "watch": []
+          },
+          {
+            "active": false,
+            "building": false,
+            "builds": 0,
+            "command": [],
+            "id": "image12",
+            "kind": "image",
+            "label": "Texture 13",
+            "log": "",
+            "maps": {},
+            "path": "/tmp/asset-preview-ui-tmc83zut/image12.png",
+            "revisions": 1,
+            "settings": {},
+            "status": "Suspended",
+            "timeout": 120,
+            "watch": []
+          },
+          {
+            "active": false,
+            "building": false,
+            "builds": 0,
+            "command": [],
+            "id": "image13",
+            "kind": "image",
+            "label": "Texture 14",
+            "log": "",
+            "maps": {},
+            "path": "/tmp/asset-preview-ui-tmc83zut/image13.png",
+            "revisions": 1,
+            "settings": {},
+            "status": "Suspended",
+            "timeout": 120,
+            "watch": []
+          },
+          {
+            "active": false,
+            "building": false,
+            "builds": 0,
+            "command": [],
+            "id": "image14",
+            "kind": "image",
+            "label": "Texture 15",
+            "log": "",
+            "maps": {},
+            "path": "/tmp/asset-preview-ui-tmc83zut/image14.png",
+            "revisions": 0,
+            "settings": {},
+            "status": "Suspended",
+            "timeout": 120,
+            "watch": []
+          },
+          {
+            "active": false,
+            "building": false,
+            "builds": 0,
+            "command": [],
+            "id": "image15",
+            "kind": "image",
+            "label": "Texture 16",
+            "log": "",
+            "maps": {},
+            "path": "/tmp/asset-preview-ui-tmc83zut/image15.png",
+            "revisions": 0,
+            "settings": {},
+            "status": "Suspended",
+            "timeout": 120,
+            "watch": []
+          }
+        ],
+        "grid_size": 4,
+        "layout": "single",
+        "ok": true,
+        "options_open": false,
+        "pid": 691308,
+        "platform": "xcb",
+        "selected": "model",
+        "watched_directories": 1,
+        "watched_files": 1,
+        "window_visible": true
+      }
+    },
+    {
+      "file": "after-no-textures.png",
+      "state": {
+        "active": 1,
+        "compact": false,
+        "entries": [
+          {
+            "active": true,
+            "building": false,
+            "builds": 0,
+            "command": [],
+            "controls": {
+              "options": {
+                "height": 28,
+                "width": 32,
+                "x": 915,
+                "y": 53
+              }
+            },
+            "id": "model",
+            "kind": "model",
+            "label": "Sugar cube \u00b7 textured GLB",
+            "log": "",
+            "maps": {},
+            "metrics": {
+              "camera": {
+                "focal": [
+                  0,
+                  0,
+                  0
+                ],
+                "position": [
+                  1.5721363955790426,
+                  1.144421704394655,
+                  2.723020113571106
+                ],
+                "up": [
+                  -0.17101007166283438,
+                  0.9396926207859083,
+                  -0.29619813272602397
+                ]
+              },
+              "engine": true,
+              "lighting": "studio",
+              "lights": 5,
+              "loads": 2,
+              "renderer": "NVIDIA GeForce RTX 2080 Ti/PCIe/SSE2",
+              "renders": 20
+            },
+            "path": "/workspace/material-atlas/assets/models/sugar_cube/sugar_cube_textured.glb",
+            "revisions": 1,
+            "settings": {
+              "textures": false
+            },
+            "status": "Live \u00b7 model ready",
+            "status_visible": true,
+            "timeout": 120,
+            "viewport": {
+              "height": 646,
+              "width": 982,
+              "x": 9,
+              "y": 45
+            },
+            "watch": []
+          },
+          {
+            "active": false,
+            "building": false,
+            "builds": 0,
+            "command": [],
+            "id": "material",
+            "kind": "material",
+            "label": "Smoked walnut \u00b7 baked material",
+            "log": "",
+            "maps": {
+              "normal": "/workspace/material-atlas/assets/materials/smoked_walnut_normal.png",
+              "orm": "/workspace/material-atlas/assets/materials/smoked_walnut_orm.png"
+            },
+            "path": "/workspace/material-atlas/assets/materials/smoked_walnut_albedo.png",
+            "revisions": 1,
+            "settings": {},
+            "status": "Suspended",
+            "timeout": 120,
+            "watch": []
+          },
+          {
+            "active": false,
+            "building": false,
+            "builds": 0,
+            "command": [],
+            "id": "image0",
+            "kind": "image",
+            "label": "Very long asset name to check truncation and control reachability",
+            "log": "",
+            "maps": {},
+            "path": "/tmp/asset-preview-ui-tmc83zut/image0.png",
+            "revisions": 1,
+            "settings": {},
+            "status": "Suspended",
+            "timeout": 120,
+            "watch": []
+          },
+          {
+            "active": false,
+            "building": false,
+            "builds": 0,
+            "command": [],
+            "id": "image1",
+            "kind": "image",
+            "label": "Texture 2",
+            "log": "",
+            "maps": {},
+            "path": "/tmp/asset-preview-ui-tmc83zut/image1.png",
+            "revisions": 1,
+            "settings": {},
+            "status": "Suspended",
+            "timeout": 120,
+            "watch": []
+          },
+          {
+            "active": false,
+            "building": false,
+            "builds": 0,
+            "command": [],
+            "id": "image2",
+            "kind": "image",
+            "label": "Texture 3",
+            "log": "",
+            "maps": {},
+            "path": "/tmp/asset-preview-ui-tmc83zut/image2.png",
+            "revisions": 1,
+            "settings": {},
+            "status": "Suspended",
+            "timeout": 120,
+            "watch": []
+          },
+          {
+            "active": false,
+            "building": false,
+            "builds": 0,
+            "command": [],
+            "id": "image3",
+            "kind": "image",
+            "label": "Texture 4",
+            "log": "",
+            "maps": {},
+            "path": "/tmp/asset-preview-ui-tmc83zut/image3.png",
+            "revisions": 1,
+            "settings": {},
+            "status": "Suspended",
+            "timeout": 120,
+            "watch": []
+          },
+          {
+            "active": false,
+            "building": false,
+            "builds": 0,
+            "command": [],
+            "id": "image4",
+            "kind": "image",
+            "label": "Texture 5",
+            "log": "",
+            "maps": {},
+            "path": "/tmp/asset-preview-ui-tmc83zut/image4.png",
+            "revisions": 1,
+            "settings": {},
+            "status": "Suspended",
+            "timeout": 120,
+            "watch": []
+          },
+          {
+            "active": false,
+            "building": false,
+            "builds": 0,
+            "command": [],
+            "id": "image5",
+            "kind": "image",
+            "label": "Texture 6",
+            "log": "",
+            "maps": {},
+            "path": "/tmp/asset-preview-ui-tmc83zut/image5.png",
+            "revisions": 1,
+            "settings": {},
+            "status": "Suspended",
+            "timeout": 120,
+            "watch": []
+          },
+          {
+            "active": false,
+            "building": false,
+            "builds": 0,
+            "command": [],
+            "id": "image6",
+            "kind": "image",
+            "label": "Texture 7",
+            "log": "",
+            "maps": {},
+            "path": "/tmp/asset-preview-ui-tmc83zut/image6.png",
+            "revisions": 1,
+            "settings": {},
+            "status": "Suspended",
+            "timeout": 120,
+            "watch": []
+          },
+          {
+            "active": false,
+            "building": false,
+            "builds": 0,
+            "command": [],
+            "id": "image7",
+            "kind": "image",
+            "label": "Texture 8",
+            "log": "",
+            "maps": {},
+            "path": "/tmp/asset-preview-ui-tmc83zut/image7.png",
+            "revisions": 1,
+            "settings": {},
+            "status": "Suspended",
+            "timeout": 120,
+            "watch": []
+          },
+          {
+            "active": false,
+            "building": false,
+            "builds": 0,
+            "command": [],
+            "id": "image8",
+            "kind": "image",
+            "label": "Texture 9",
+            "log": "",
+            "maps": {},
+            "path": "/tmp/asset-preview-ui-tmc83zut/image8.png",
+            "revisions": 1,
+            "settings": {},
+            "status": "Suspended",
+            "timeout": 120,
+            "watch": []
+          },
+          {
+            "active": false,
+            "building": false,
+            "builds": 0,
+            "command": [],
+            "id": "image9",
+            "kind": "image",
+            "label": "Texture 10",
+            "log": "",
+            "maps": {},
+            "path": "/tmp/asset-preview-ui-tmc83zut/image9.png",
+            "revisions": 1,
+            "settings": {},
+            "status": "Suspended",
+            "timeout": 120,
+            "watch": []
+          },
+          {
+            "active": false,
+            "building": false,
+            "builds": 0,
+            "command": [],
+            "id": "image10",
+            "kind": "image",
+            "label": "Texture 11",
+            "log": "",
+            "maps": {},
+            "path": "/tmp/asset-preview-ui-tmc83zut/image10.png",
+            "revisions": 1,
+            "settings": {},
+            "status": "Suspended",
+            "timeout": 120,
+            "watch": []
+          },
+          {
+            "active": false,
+            "building": false,
+            "builds": 0,
+            "command": [],
+            "id": "image11",
+            "kind": "image",
+            "label": "Texture 12",
+            "log": "",
+            "maps": {},
+            "path": "/tmp/asset-preview-ui-tmc83zut/image11.png",
+            "revisions": 1,
+            "settings": {},
+            "status": "Suspended",
+            "timeout": 120,
+            "watch": []
+          },
+          {
+            "active": false,
+            "building": false,
+            "builds": 0,
+            "command": [],
+            "id": "image12",
+            "kind": "image",
+            "label": "Texture 13",
+            "log": "",
+            "maps": {},
+            "path": "/tmp/asset-preview-ui-tmc83zut/image12.png",
+            "revisions": 1,
+            "settings": {},
+            "status": "Suspended",
+            "timeout": 120,
+            "watch": []
+          },
+          {
+            "active": false,
+            "building": false,
+            "builds": 0,
+            "command": [],
+            "id": "image13",
+            "kind": "image",
+            "label": "Texture 14",
+            "log": "",
+            "maps": {},
+            "path": "/tmp/asset-preview-ui-tmc83zut/image13.png",
+            "revisions": 1,
+            "settings": {},
+            "status": "Suspended",
+            "timeout": 120,
+            "watch": []
+          },
+          {
+            "active": false,
+            "building": false,
+            "builds": 0,
+            "command": [],
+            "id": "image14",
+            "kind": "image",
+            "label": "Texture 15",
+            "log": "",
+            "maps": {},
+            "path": "/tmp/asset-preview-ui-tmc83zut/image14.png",
+            "revisions": 0,
+            "settings": {},
+            "status": "Suspended",
+            "timeout": 120,
+            "watch": []
+          },
+          {
+            "active": false,
+            "building": false,
+            "builds": 0,
+            "command": [],
+            "id": "image15",
+            "kind": "image",
+            "label": "Texture 16",
+            "log": "",
+            "maps": {},
+            "path": "/tmp/asset-preview-ui-tmc83zut/image15.png",
+            "revisions": 0,
+            "settings": {},
+            "status": "Suspended",
+            "timeout": 120,
+            "watch": []
+          }
+        ],
+        "grid_size": 4,
+        "layout": "single",
+        "ok": true,
+        "options_open": false,
+        "pid": 691308,
+        "platform": "xcb",
+        "selected": "model",
+        "watched_directories": 1,
+        "watched_files": 1,
+        "window_visible": true
+      }
+    },
+    {
+      "file": "after-clay.png",
+      "state": {
+        "active": 1,
+        "compact": false,
+        "entries": [
+          {
+            "active": true,
+            "building": false,
+            "builds": 0,
+            "command": [],
+            "controls": {
+              "options": {
+                "height": 28,
+                "width": 32,
+                "x": 915,
+                "y": 53
+              }
+            },
+            "id": "model",
+            "kind": "model",
+            "label": "Sugar cube \u00b7 textured GLB",
+            "log": "",
+            "maps": {},
+            "metrics": {
+              "camera": {
+                "focal": [
+                  0,
+                  0,
+                  0
+                ],
+                "position": [
+                  1.5721363955790426,
+                  1.144421704394655,
+                  2.723020113571106
+                ],
+                "up": [
+                  -0.17101007166283438,
+                  0.9396926207859083,
+                  -0.29619813272602397
+                ]
+              },
+              "engine": true,
+              "lighting": "studio",
+              "lights": 5,
+              "loads": 3,
+              "renderer": "NVIDIA GeForce RTX 2080 Ti/PCIe/SSE2",
+              "renders": 22
+            },
+            "path": "/workspace/material-atlas/assets/models/sugar_cube/sugar_cube_textured.glb",
+            "revisions": 1,
+            "settings": {
+              "materials": false,
+              "textures": false
+            },
+            "status": "Live \u00b7 model ready",
+            "status_visible": true,
+            "timeout": 120,
+            "viewport": {
+              "height": 646,
+              "width": 982,
+              "x": 9,
+              "y": 45
+            },
+            "watch": []
+          },
+          {
+            "active": false,
+            "building": false,
+            "builds": 0,
+            "command": [],
+            "id": "material",
+            "kind": "material",
+            "label": "Smoked walnut \u00b7 baked material",
+            "log": "",
+            "maps": {
+              "normal": "/workspace/material-atlas/assets/materials/smoked_walnut_normal.png",
+              "orm": "/workspace/material-atlas/assets/materials/smoked_walnut_orm.png"
+            },
+            "path": "/workspace/material-atlas/assets/materials/smoked_walnut_albedo.png",
+            "revisions": 1,
+            "settings": {},
+            "status": "Suspended",
+            "timeout": 120,
+            "watch": []
+          },
+          {
+            "active": false,
+            "building": false,
+            "builds": 0,
+            "command": [],
+            "id": "image0",
+            "kind": "image",
+            "label": "Very long asset name to check truncation and control reachability",
+            "log": "",
+            "maps": {},
+            "path": "/tmp/asset-preview-ui-tmc83zut/image0.png",
+            "revisions": 1,
+            "settings": {},
+            "status": "Suspended",
+            "timeout": 120,
+            "watch": []
+          },
+          {
+            "active": false,
+            "building": false,
+            "builds": 0,
+            "command": [],
+            "id": "image1",
+            "kind": "image",
+            "label": "Texture 2",
+            "log": "",
+            "maps": {},
+            "path": "/tmp/asset-preview-ui-tmc83zut/image1.png",
+            "revisions": 1,
+            "settings": {},
+            "status": "Suspended",
+            "timeout": 120,
+            "watch": []
+          },
+          {
+            "active": false,
+            "building": false,
+            "builds": 0,
+            "command": [],
+            "id": "image2",
+            "kind": "image",
+            "label": "Texture 3",
+            "log": "",
+            "maps": {},
+            "path": "/tmp/asset-preview-ui-tmc83zut/image2.png",
+            "revisions": 1,
+            "settings": {},
+            "status": "Suspended",
+            "timeout": 120,
+            "watch": []
+          },
+          {
+            "active": false,
+            "building": false,
+            "builds": 0,
+            "command": [],
+            "id": "image3",
+            "kind": "image",
+            "label": "Texture 4",
+            "log": "",
+            "maps": {},
+            "path": "/tmp/asset-preview-ui-tmc83zut/image3.png",
+            "revisions": 1,
+            "settings": {},
+            "status": "Suspended",
+            "timeout": 120,
+            "watch": []
+          },
+          {
+            "active": false,
+            "building": false,
+            "builds": 0,
+            "command": [],
+            "id": "image4",
+            "kind": "image",
+            "label": "Texture 5",
+            "log": "",
+            "maps": {},
+            "path": "/tmp/asset-preview-ui-tmc83zut/image4.png",
+            "revisions": 1,
+            "settings": {},
+            "status": "Suspended",
+            "timeout": 120,
+            "watch": []
+          },
+          {
+            "active": false,
+            "building": false,
+            "builds": 0,
+            "command": [],
+            "id": "image5",
+            "kind": "image",
+            "label": "Texture 6",
+            "log": "",
+            "maps": {},
+            "path": "/tmp/asset-preview-ui-tmc83zut/image5.png",
+            "revisions": 1,
+            "settings": {},
+            "status": "Suspended",
+            "timeout": 120,
+            "watch": []
+          },
+          {
+            "active": false,
+            "building": false,
+            "builds": 0,
+            "command": [],
+            "id": "image6",
+            "kind": "image",
+            "label": "Texture 7",
+            "log": "",
+            "maps": {},
+            "path": "/tmp/asset-preview-ui-tmc83zut/image6.png",
+            "revisions": 1,
+            "settings": {},
+            "status": "Suspended",
+            "timeout": 120,
+            "watch": []
+          },
+          {
+            "active": false,
+            "building": false,
+            "builds": 0,
+            "command": [],
+            "id": "image7",
+            "kind": "image",
+            "label": "Texture 8",
+            "log": "",
+            "maps": {},
+            "path": "/tmp/asset-preview-ui-tmc83zut/image7.png",
+            "revisions": 1,
+            "settings": {},
+            "status": "Suspended",
+            "timeout": 120,
+            "watch": []
+          },
+          {
+            "active": false,
+            "building": false,
+            "builds": 0,
+            "command": [],
+            "id": "image8",
+            "kind": "image",
+            "label": "Texture 9",
+            "log": "",
+            "maps": {},
+            "path": "/tmp/asset-preview-ui-tmc83zut/image8.png",
+            "revisions": 1,
+            "settings": {},
+            "status": "Suspended",
+            "timeout": 120,
+            "watch": []
+          },
+          {
+            "active": false,
+            "building": false,
+            "builds": 0,
+            "command": [],
+            "id": "image9",
+            "kind": "image",
+            "label": "Texture 10",
+            "log": "",
+            "maps": {},
+            "path": "/tmp/asset-preview-ui-tmc83zut/image9.png",
+            "revisions": 1,
+            "settings": {},
+            "status": "Suspended",
+            "timeout": 120,
+            "watch": []
+          },
+          {
+            "active": false,
+            "building": false,
+            "builds": 0,
+            "command": [],
+            "id": "image10",
+            "kind": "image",
+            "label": "Texture 11",
+            "log": "",
+            "maps": {},
+            "path": "/tmp/asset-preview-ui-tmc83zut/image10.png",
+            "revisions": 1,
+            "settings": {},
+            "status": "Suspended",
+            "timeout": 120,
+            "watch": []
+          },
+          {
+            "active": false,
+            "building": false,
+            "builds": 0,
+            "command": [],
+            "id": "image11",
+            "kind": "image",
+            "label": "Texture 12",
+            "log": "",
+            "maps": {},
+            "path": "/tmp/asset-preview-ui-tmc83zut/image11.png",
+            "revisions": 1,
+            "settings": {},
+            "status": "Suspended",
+            "timeout": 120,
+            "watch": []
+          },
+          {
+            "active": false,
+            "building": false,
+            "builds": 0,
+            "command": [],
+            "id": "image12",
+            "kind": "image",
+            "label": "Texture 13",
+            "log": "",
+            "maps": {},
+            "path": "/tmp/asset-preview-ui-tmc83zut/image12.png",
+            "revisions": 1,
+            "settings": {},
+            "status": "Suspended",
+            "timeout": 120,
+            "watch": []
+          },
+          {
+            "active": false,
+            "building": false,
+            "builds": 0,
+            "command": [],
+            "id": "image13",
+            "kind": "image",
+            "label": "Texture 14",
+            "log": "",
+            "maps": {},
+            "path": "/tmp/asset-preview-ui-tmc83zut/image13.png",
+            "revisions": 1,
+            "settings": {},
+            "status": "Suspended",
+            "timeout": 120,
+            "watch": []
+          },
+          {
+            "active": false,
+            "building": false,
+            "builds": 0,
+            "command": [],
+            "id": "image14",
+            "kind": "image",
+            "label": "Texture 15",
+            "log": "",
+            "maps": {},
+            "path": "/tmp/asset-preview-ui-tmc83zut/image14.png",
+            "revisions": 0,
+            "settings": {},
+            "status": "Suspended",
+            "timeout": 120,
+            "watch": []
+          },
+          {
+            "active": false,
+            "building": false,
+            "builds": 0,
+            "command": [],
+            "id": "image15",
+            "kind": "image",
+            "label": "Texture 16",
+            "log": "",
+            "maps": {},
+            "path": "/tmp/asset-preview-ui-tmc83zut/image15.png",
+            "revisions": 0,
+            "settings": {},
+            "status": "Suspended",
+            "timeout": 120,
+            "watch": []
+          }
+        ],
+        "grid_size": 4,
+        "layout": "single",
+        "ok": true,
+        "options_open": false,
+        "pid": 691308,
+        "platform": "xcb",
+        "selected": "model",
+        "watched_directories": 1,
+        "watched_files": 1,
+        "window_visible": true
+      }
+    },
+    {
+      "file": "after-light-kit.png",
+      "state": {
+        "active": 1,
+        "compact": false,
+        "entries": [
+          {
+            "active": true,
+            "building": false,
+            "builds": 0,
+            "command": [],
+            "controls": {
+              "options": {
+                "height": 28,
+                "width": 32,
+                "x": 915,
+                "y": 53
+              }
+            },
+            "id": "model",
+            "kind": "model",
+            "label": "Sugar cube \u00b7 textured GLB",
+            "log": "",
+            "maps": {},
+            "metrics": {
+              "camera": {
+                "focal": [
+                  0,
+                  0,
+                  0
+                ],
+                "position": [
+                  1.5721363955790426,
+                  1.144421704394655,
+                  2.723020113571106
+                ],
+                "up": [
+                  -0.17101007166283438,
+                  0.9396926207859083,
+                  -0.29619813272602397
+                ]
+              },
+              "engine": true,
+              "lighting": "lightkit",
+              "lights": 5,
+              "loads": 4,
+              "renderer": "NVIDIA GeForce RTX 2080 Ti/PCIe/SSE2",
+              "renders": 24
+            },
+            "path": "/workspace/material-atlas/assets/models/sugar_cube/sugar_cube_textured.glb",
+            "revisions": 1,
+            "settings": {
+              "lighting": "lightkit",
+              "materials": true,
+              "textures": true
+            },
+            "status": "Live \u00b7 model ready",
+            "status_visible": true,
+            "timeout": 120,
+            "viewport": {
+              "height": 646,
+              "width": 982,
+              "x": 9,
+              "y": 45
+            },
+            "watch": []
+          },
+          {
+            "active": false,
+            "building": false,
+            "builds": 0,
+            "command": [],
+            "id": "material",
+            "kind": "material",
+            "label": "Smoked walnut \u00b7 baked material",
+            "log": "",
+            "maps": {
+              "normal": "/workspace/material-atlas/assets/materials/smoked_walnut_normal.png",
+              "orm": "/workspace/material-atlas/assets/materials/smoked_walnut_orm.png"
+            },
+            "path": "/workspace/material-atlas/assets/materials/smoked_walnut_albedo.png",
+            "revisions": 1,
+            "settings": {},
+            "status": "Suspended",
+            "timeout": 120,
+            "watch": []
+          },
+          {
+            "active": false,
+            "building": false,
+            "builds": 0,
+            "command": [],
+            "id": "image0",
+            "kind": "image",
+            "label": "Very long asset name to check truncation and control reachability",
+            "log": "",
+            "maps": {},
+            "path": "/tmp/asset-preview-ui-tmc83zut/image0.png",
+            "revisions": 1,
+            "settings": {},
+            "status": "Suspended",
+            "timeout": 120,
+            "watch": []
+          },
+          {
+            "active": false,
+            "building": false,
+            "builds": 0,
+            "command": [],
+            "id": "image1",
+            "kind": "image",
+            "label": "Texture 2",
+            "log": "",
+            "maps": {},
+            "path": "/tmp/asset-preview-ui-tmc83zut/image1.png",
+            "revisions": 1,
+            "settings": {},
+            "status": "Suspended",
+            "timeout": 120,
+            "watch": []
+          },
+          {
+            "active": false,
+            "building": false,
+            "builds": 0,
+            "command": [],
+            "id": "image2",
+            "kind": "image",
+            "label": "Texture 3",
+            "log": "",
+            "maps": {},
+            "path": "/tmp/asset-preview-ui-tmc83zut/image2.png",
+            "revisions": 1,
+            "settings": {},
+            "status": "Suspended",
+            "timeout": 120,
+            "watch": []
+          },
+          {
+            "active": false,
+            "building": false,
+            "builds": 0,
+            "command": [],
+            "id": "image3",
+            "kind": "image",
+            "label": "Texture 4",
+            "log": "",
+            "maps": {},
+            "path": "/tmp/asset-preview-ui-tmc83zut/image3.png",
+            "revisions": 1,
+            "settings": {},
+            "status": "Suspended",
+            "timeout": 120,
+            "watch": []
+          },
+          {
+            "active": false,
+            "building": false,
+            "builds": 0,
+            "command": [],
+            "id": "image4",
+            "kind": "image",
+            "label": "Texture 5",
+            "log": "",
+            "maps": {},
+            "path": "/tmp/asset-preview-ui-tmc83zut/image4.png",
+            "revisions": 1,
+            "settings": {},
+            "status": "Suspended",
+            "timeout": 120,
+            "watch": []
+          },
+          {
+            "active": false,
+            "building": false,
+            "builds": 0,
+            "command": [],
+            "id": "image5",
+            "kind": "image",
+            "label": "Texture 6",
+            "log": "",
+            "maps": {},
+            "path": "/tmp/asset-preview-ui-tmc83zut/image5.png",
+            "revisions": 1,
+            "settings": {},
+            "status": "Suspended",
+            "timeout": 120,
+            "watch": []
+          },
+          {
+            "active": false,
+            "building": false,
+            "builds": 0,
+            "command": [],
+            "id": "image6",
+            "kind": "image",
+            "label": "Texture 7",
+            "log": "",
+            "maps": {},
+            "path": "/tmp/asset-preview-ui-tmc83zut/image6.png",
+            "revisions": 1,
+            "settings": {},
+            "status": "Suspended",
+            "timeout": 120,
+            "watch": []
+          },
+          {
+            "active": false,
+            "building": false,
+            "builds": 0,
+            "command": [],
+            "id": "image7",
+            "kind": "image",
+            "label": "Texture 8",
+            "log": "",
+            "maps": {},
+            "path": "/tmp/asset-preview-ui-tmc83zut/image7.png",
+            "revisions": 1,
+            "settings": {},
+            "status": "Suspended",
+            "timeout": 120,
+            "watch": []
+          },
+          {
+            "active": false,
+            "building": false,
+            "builds": 0,
+            "command": [],
+            "id": "image8",
+            "kind": "image",
+            "label": "Texture 9",
+            "log": "",
+            "maps": {},
+            "path": "/tmp/asset-preview-ui-tmc83zut/image8.png",
+            "revisions": 1,
+            "settings": {},
+            "status": "Suspended",
+            "timeout": 120,
+            "watch": []
+          },
+          {
+            "active": false,
+            "building": false,
+            "builds": 0,
+            "command": [],
+            "id": "image9",
+            "kind": "image",
+            "label": "Texture 10",
+            "log": "",
+            "maps": {},
+            "path": "/tmp/asset-preview-ui-tmc83zut/image9.png",
+            "revisions": 1,
+            "settings": {},
+            "status": "Suspended",
+            "timeout": 120,
+            "watch": []
+          },
+          {
+            "active": false,
+            "building": false,
+            "builds": 0,
+            "command": [],
+            "id": "image10",
+            "kind": "image",
+            "label": "Texture 11",
+            "log": "",
+            "maps": {},
+            "path": "/tmp/asset-preview-ui-tmc83zut/image10.png",
+            "revisions": 1,
+            "settings": {},
+            "status": "Suspended",
+            "timeout": 120,
+            "watch": []
+          },
+          {
+            "active": false,
+            "building": false,
+            "builds": 0,
+            "command": [],
+            "id": "image11",
+            "kind": "image",
+            "label": "Texture 12",
+            "log": "",
+            "maps": {},
+            "path": "/tmp/asset-preview-ui-tmc83zut/image11.png",
+            "revisions": 1,
+            "settings": {},
+            "status": "Suspended",
+            "timeout": 120,
+            "watch": []
+          },
+          {
+            "active": false,
+            "building": false,
+            "builds": 0,
+            "command": [],
+            "id": "image12",
+            "kind": "image",
+            "label": "Texture 13",
+            "log": "",
+            "maps": {},
+            "path": "/tmp/asset-preview-ui-tmc83zut/image12.png",
+            "revisions": 1,
+            "settings": {},
+            "status": "Suspended",
+            "timeout": 120,
+            "watch": []
+          },
+          {
+            "active": false,
+            "building": false,
+            "builds": 0,
+            "command": [],
+            "id": "image13",
+            "kind": "image",
+            "label": "Texture 14",
+            "log": "",
+            "maps": {},
+            "path": "/tmp/asset-preview-ui-tmc83zut/image13.png",
+            "revisions": 1,
+            "settings": {},
+            "status": "Suspended",
+            "timeout": 120,
+            "watch": []
+          },
+          {
+            "active": false,
+            "building": false,
+            "builds": 0,
+            "command": [],
+            "id": "image14",
+            "kind": "image",
+            "label": "Texture 15",
+            "log": "",
+            "maps": {},
+            "path": "/tmp/asset-preview-ui-tmc83zut/image14.png",
+            "revisions": 0,
+            "settings": {},
+            "status": "Suspended",
+            "timeout": 120,
+            "watch": []
+          },
+          {
+            "active": false,
+            "building": false,
+            "builds": 0,
+            "command": [],
+            "id": "image15",
+            "kind": "image",
+            "label": "Texture 16",
+            "log": "",
+            "maps": {},
+            "path": "/tmp/asset-preview-ui-tmc83zut/image15.png",
+            "revisions": 0,
+            "settings": {},
+            "status": "Suspended",
+            "timeout": 120,
+            "watch": []
+          }
+        ],
+        "grid_size": 4,
+        "layout": "single",
+        "ok": true,
+        "options_open": false,
+        "pid": 691308,
+        "platform": "xcb",
+        "selected": "model",
+        "watched_directories": 1,
+        "watched_files": 1,
+        "window_visible": true
+      }
+    },
+    {
+      "file": "after-compact-waiting.png",
+      "state": {
+        "active": 16,
+        "compact": true,
+        "entries": [
+          {
+            "active": true,
+            "building": false,
+            "builds": 0,
+            "command": [],
+            "controls": {
+              "options": {
+                "height": 28,
+                "width": 32,
+                "x": 361,
+                "y": 46
+              }
+            },
+            "id": "model",
+            "kind": "model",
+            "label": "Sugar cube \u00b7 textured GLB",
+            "log": "",
+            "maps": {},
+            "metrics": {
+              "camera": {
+                "focal": [
+                  0,
+                  0,
+                  0
+                ],
+                "position": [
+                  1.5721363955790426,
+                  1.144421704394655,
+                  2.723020113571106
+                ],
+                "up": [
+                  -0.17101007166283438,
+                  0.9396926207859083,
+                  -0.29619813272602397
+                ]
+              },
+              "engine": true,
+              "lighting": "lightkit",
+              "lights": 5,
+              "loads": 4,
+              "renderer": "NVIDIA GeForce RTX 2080 Ti/PCIe/SSE2",
+              "renders": 28
+            },
+            "path": "/workspace/material-atlas/assets/models/sugar_cube/sugar_cube_textured.glb",
+            "revisions": 1,
+            "settings": {
+              "lighting": "lightkit",
+              "materials": true,
+              "textures": true
+            },
+            "status": "Live \u00b7 model ready",
+            "status_visible": false,
+            "timeout": 120,
+            "viewport": {
+              "height": 236,
+              "width": 395,
+              "x": 5,
+              "y": 41
+            },
+            "watch": []
+          },
+          {
+            "active": true,
+            "building": false,
+            "builds": 0,
+            "command": [],
+            "controls": {
+              "options": {
+                "height": 28,
+                "width": 32,
+                "x": 759,
+                "y": 46
+              }
+            },
+            "id": "material",
+            "kind": "material",
+            "label": "Smoked walnut \u00b7 baked material",
+            "log": "",
+            "maps": {
+              "normal": "/workspace/material-atlas/assets/materials/smoked_walnut_normal.png",
+              "orm": "/workspace/material-atlas/assets/materials/smoked_walnut_orm.png"
+            },
+            "metrics": {
+              "camera": {
+                "focal": [
+                  0,
+                  0,
+                  0
+                ],
+                "position": [
+                  3.1442727911580857,
+                  2.28884340878931,
+                  5.446040227142212
+                ],
+                "up": [
+                  -0.17101007166283438,
+                  0.9396926207859083,
+                  -0.29619813272602397
+                ]
+              },
+              "engine": true,
+              "lighting": "studio",
+              "lights": 5,
+              "loads": 1,
+              "renderer": "NVIDIA GeForce RTX 2080 Ti/PCIe/SSE2",
+              "renders": 4
+            },
+            "path": "/workspace/material-atlas/assets/materials/smoked_walnut_albedo.png",
+            "revisions": 2,
+            "settings": {},
+            "status": "Live \u00b7 model ready",
+            "status_visible": false,
+            "timeout": 120,
+            "viewport": {
+              "height": 236,
+              "width": 394,
+              "x": 404,
+              "y": 41
+            },
+            "watch": []
+          },
+          {
+            "active": true,
+            "building": false,
+            "builds": 0,
+            "command": [],
+            "controls": {
+              "options": {
+                "height": 28,
+                "width": 32,
+                "x": 1158,
+                "y": 46
+              }
+            },
+            "id": "image0",
+            "kind": "image",
+            "label": "Texture baking \u00b7 waiting for output",
+            "log": "",
+            "maps": {},
+            "metrics": {
+              "decoded_height": 0,
+              "decoded_width": 0,
+              "height": -1,
+              "image_bytes": 0,
+              "loads": 0,
+              "renders": 5,
+              "width": -1
+            },
+            "path": "/tmp/asset-preview-ui-tmc83zut/pending.png",
+            "revisions": 2,
+            "settings": {},
+            "status": "Waiting \u00b7 File not found",
+            "status_visible": true,
+            "timeout": 120,
+            "viewport": {
+              "height": 236,
+              "width": 395,
+              "x": 802,
+              "y": 41
+            },
+            "watch": []
+          },
+          {
+            "active": true,
+            "building": false,
+            "builds": 0,
+            "command": [],
+            "controls": {
+              "options": {
+                "height": 28,
+                "width": 32,
+                "x": 1556,
+                "y": 46
+              }
+            },
+            "id": "image1",
+            "kind": "image",
+            "label": "Texture 2",
+            "log": "",
+            "maps": {},
+            "metrics": {
+              "decoded_height": 64,
+              "decoded_width": 64,
+              "height": 64,
+              "image_bytes": 16384,
+              "loads": 1,
+              "renders": 5,
+              "width": 64
+            },
+            "path": "/tmp/asset-preview-ui-tmc83zut/image1.png",
+            "revisions": 2,
+            "settings": {},
+            "status": "Live \u00b7 refreshed 07:02:14",
+            "status_visible": false,
+            "timeout": 120,
+            "viewport": {
+              "height": 236,
+              "width": 394,
+              "x": 1201,
+              "y": 41
+            },
+            "watch": []
+          },
+          {
+            "active": true,
+            "building": false,
+            "builds": 0,
+            "command": [],
+            "controls": {
+              "options": {
+                "height": 28,
+                "width": 32,
+                "x": 361,
+                "y": 286
+              }
+            },
+            "id": "image2",
+            "kind": "image",
+            "label": "Texture 3",
+            "log": "",
+            "maps": {},
+            "metrics": {
+              "decoded_height": 64,
+              "decoded_width": 64,
+              "height": 64,
+              "image_bytes": 16384,
+              "loads": 1,
+              "renders": 5,
+              "width": 64
+            },
+            "path": "/tmp/asset-preview-ui-tmc83zut/image2.png",
+            "revisions": 2,
+            "settings": {},
+            "status": "Live \u00b7 refreshed 07:02:14",
+            "status_visible": false,
+            "timeout": 120,
+            "viewport": {
+              "height": 235,
+              "width": 395,
+              "x": 5,
+              "y": 281
+            },
+            "watch": []
+          },
+          {
+            "active": true,
+            "building": false,
+            "builds": 0,
+            "command": [],
+            "controls": {
+              "options": {
+                "height": 28,
+                "width": 32,
+                "x": 759,
+                "y": 286
+              }
+            },
+            "id": "image3",
+            "kind": "image",
+            "label": "Texture 4",
+            "log": "",
+            "maps": {},
+            "metrics": {
+              "decoded_height": 64,
+              "decoded_width": 64,
+              "height": 64,
+              "image_bytes": 16384,
+              "loads": 1,
+              "renders": 5,
+              "width": 64
+            },
+            "path": "/tmp/asset-preview-ui-tmc83zut/image3.png",
+            "revisions": 2,
+            "settings": {},
+            "status": "Live \u00b7 refreshed 07:02:14",
+            "status_visible": false,
+            "timeout": 120,
+            "viewport": {
+              "height": 235,
+              "width": 394,
+              "x": 404,
+              "y": 281
+            },
+            "watch": []
+          },
+          {
+            "active": true,
+            "building": false,
+            "builds": 0,
+            "command": [],
+            "controls": {
+              "options": {
+                "height": 28,
+                "width": 32,
+                "x": 1158,
+                "y": 286
+              }
+            },
+            "id": "image4",
+            "kind": "image",
+            "label": "Texture 5",
+            "log": "",
+            "maps": {},
+            "metrics": {
+              "decoded_height": 64,
+              "decoded_width": 64,
+              "height": 64,
+              "image_bytes": 16384,
+              "loads": 1,
+              "renders": 5,
+              "width": 64
+            },
+            "path": "/tmp/asset-preview-ui-tmc83zut/image4.png",
+            "revisions": 2,
+            "settings": {},
+            "status": "Live \u00b7 refreshed 07:02:14",
+            "status_visible": false,
+            "timeout": 120,
+            "viewport": {
+              "height": 235,
+              "width": 395,
+              "x": 802,
+              "y": 281
+            },
+            "watch": []
+          },
+          {
+            "active": true,
+            "building": false,
+            "builds": 0,
+            "command": [],
+            "controls": {
+              "options": {
+                "height": 28,
+                "width": 32,
+                "x": 1556,
+                "y": 286
+              }
+            },
+            "id": "image5",
+            "kind": "image",
+            "label": "Texture 6",
+            "log": "",
+            "maps": {},
+            "metrics": {
+              "decoded_height": 64,
+              "decoded_width": 64,
+              "height": 64,
+              "image_bytes": 16384,
+              "loads": 1,
+              "renders": 5,
+              "width": 64
+            },
+            "path": "/tmp/asset-preview-ui-tmc83zut/image5.png",
+            "revisions": 2,
+            "settings": {},
+            "status": "Live \u00b7 refreshed 07:02:14",
+            "status_visible": false,
+            "timeout": 120,
+            "viewport": {
+              "height": 235,
+              "width": 394,
+              "x": 1201,
+              "y": 281
+            },
+            "watch": []
+          },
+          {
+            "active": true,
+            "building": false,
+            "builds": 0,
+            "command": [],
+            "controls": {
+              "options": {
+                "height": 28,
+                "width": 32,
+                "x": 361,
+                "y": 525
+              }
+            },
+            "id": "image6",
+            "kind": "image",
+            "label": "Texture 7",
+            "log": "",
+            "maps": {},
+            "metrics": {
+              "decoded_height": 64,
+              "decoded_width": 64,
+              "height": 64,
+              "image_bytes": 16384,
+              "loads": 1,
+              "renders": 5,
+              "width": 64
+            },
+            "path": "/tmp/asset-preview-ui-tmc83zut/image6.png",
+            "revisions": 2,
+            "settings": {},
+            "status": "Live \u00b7 refreshed 07:02:14",
+            "status_visible": false,
+            "timeout": 120,
+            "viewport": {
+              "height": 236,
+              "width": 395,
+              "x": 5,
+              "y": 520
+            },
+            "watch": []
+          },
+          {
+            "active": true,
+            "building": false,
+            "builds": 0,
+            "command": [],
+            "controls": {
+              "options": {
+                "height": 28,
+                "width": 32,
+                "x": 759,
+                "y": 525
+              }
+            },
+            "id": "image7",
+            "kind": "image",
+            "label": "Texture 8",
+            "log": "",
+            "maps": {},
+            "metrics": {
+              "decoded_height": 64,
+              "decoded_width": 64,
+              "height": 64,
+              "image_bytes": 16384,
+              "loads": 1,
+              "renders": 5,
+              "width": 64
+            },
+            "path": "/tmp/asset-preview-ui-tmc83zut/image7.png",
+            "revisions": 2,
+            "settings": {},
+            "status": "Live \u00b7 refreshed 07:02:14",
+            "status_visible": false,
+            "timeout": 120,
+            "viewport": {
+              "height": 236,
+              "width": 394,
+              "x": 404,
+              "y": 520
+            },
+            "watch": []
+          },
+          {
+            "active": true,
+            "building": false,
+            "builds": 0,
+            "command": [],
+            "controls": {
+              "options": {
+                "height": 28,
+                "width": 32,
+                "x": 1158,
+                "y": 525
+              }
+            },
+            "id": "image8",
+            "kind": "image",
+            "label": "Texture 9",
+            "log": "",
+            "maps": {},
+            "metrics": {
+              "decoded_height": 64,
+              "decoded_width": 64,
+              "height": 64,
+              "image_bytes": 16384,
+              "loads": 1,
+              "renders": 5,
+              "width": 64
+            },
+            "path": "/tmp/asset-preview-ui-tmc83zut/image8.png",
+            "revisions": 2,
+            "settings": {},
+            "status": "Live \u00b7 refreshed 07:02:14",
+            "status_visible": false,
+            "timeout": 120,
+            "viewport": {
+              "height": 236,
+              "width": 395,
+              "x": 802,
+              "y": 520
+            },
+            "watch": []
+          },
+          {
+            "active": true,
+            "building": false,
+            "builds": 0,
+            "command": [],
+            "controls": {
+              "options": {
+                "height": 28,
+                "width": 32,
+                "x": 1556,
+                "y": 525
+              }
+            },
+            "id": "image9",
+            "kind": "image",
+            "label": "Texture 10",
+            "log": "",
+            "maps": {},
+            "metrics": {
+              "decoded_height": 64,
+              "decoded_width": 64,
+              "height": 64,
+              "image_bytes": 16384,
+              "loads": 1,
+              "renders": 5,
+              "width": 64
+            },
+            "path": "/tmp/asset-preview-ui-tmc83zut/image9.png",
+            "revisions": 2,
+            "settings": {},
+            "status": "Live \u00b7 refreshed 07:02:14",
+            "status_visible": false,
+            "timeout": 120,
+            "viewport": {
+              "height": 236,
+              "width": 394,
+              "x": 1201,
+              "y": 520
+            },
+            "watch": []
+          },
+          {
+            "active": true,
+            "building": false,
+            "builds": 0,
+            "command": [],
+            "controls": {
+              "options": {
+                "height": 28,
+                "width": 32,
+                "x": 361,
+                "y": 765
+              }
+            },
+            "id": "image10",
+            "kind": "image",
+            "label": "Texture 11",
+            "log": "",
+            "maps": {},
+            "metrics": {
+              "decoded_height": 64,
+              "decoded_width": 64,
+              "height": 64,
+              "image_bytes": 16384,
+              "loads": 1,
+              "renders": 5,
+              "width": 64
+            },
+            "path": "/tmp/asset-preview-ui-tmc83zut/image10.png",
+            "revisions": 2,
+            "settings": {},
+            "status": "Live \u00b7 refreshed 07:02:14",
+            "status_visible": false,
+            "timeout": 120,
+            "viewport": {
+              "height": 235,
+              "width": 395,
+              "x": 5,
+              "y": 760
+            },
+            "watch": []
+          },
+          {
+            "active": true,
+            "building": false,
+            "builds": 0,
+            "command": [],
+            "controls": {
+              "options": {
+                "height": 28,
+                "width": 32,
+                "x": 759,
+                "y": 765
+              }
+            },
+            "id": "image11",
+            "kind": "image",
+            "label": "Texture 12",
+            "log": "",
+            "maps": {},
+            "metrics": {
+              "decoded_height": 64,
+              "decoded_width": 64,
+              "height": 64,
+              "image_bytes": 16384,
+              "loads": 1,
+              "renders": 5,
+              "width": 64
+            },
+            "path": "/tmp/asset-preview-ui-tmc83zut/image11.png",
+            "revisions": 2,
+            "settings": {},
+            "status": "Live \u00b7 refreshed 07:02:14",
+            "status_visible": false,
+            "timeout": 120,
+            "viewport": {
+              "height": 235,
+              "width": 394,
+              "x": 404,
+              "y": 760
+            },
+            "watch": []
+          },
+          {
+            "active": true,
+            "building": false,
+            "builds": 0,
+            "command": [],
+            "controls": {
+              "options": {
+                "height": 28,
+                "width": 32,
+                "x": 1158,
+                "y": 765
+              }
+            },
+            "id": "image12",
+            "kind": "image",
+            "label": "Texture 13",
+            "log": "",
+            "maps": {},
+            "metrics": {
+              "decoded_height": 64,
+              "decoded_width": 64,
+              "height": 64,
+              "image_bytes": 16384,
+              "loads": 1,
+              "renders": 5,
+              "width": 64
+            },
+            "path": "/tmp/asset-preview-ui-tmc83zut/image12.png",
+            "revisions": 2,
+            "settings": {},
+            "status": "Live \u00b7 refreshed 07:02:14",
+            "status_visible": false,
+            "timeout": 120,
+            "viewport": {
+              "height": 235,
+              "width": 395,
+              "x": 802,
+              "y": 760
+            },
+            "watch": []
+          },
+          {
+            "active": true,
+            "building": false,
+            "builds": 0,
+            "command": [],
+            "controls": {
+              "options": {
+                "height": 28,
+                "width": 32,
+                "x": 1556,
+                "y": 765
+              }
+            },
+            "id": "image13",
+            "kind": "image",
+            "label": "Texture 14",
+            "log": "",
+            "maps": {},
+            "metrics": {
+              "decoded_height": 64,
+              "decoded_width": 64,
+              "height": 64,
+              "image_bytes": 16384,
+              "loads": 1,
+              "renders": 5,
+              "width": 64
+            },
+            "path": "/tmp/asset-preview-ui-tmc83zut/image13.png",
+            "revisions": 2,
+            "settings": {},
+            "status": "Live \u00b7 refreshed 07:02:14",
+            "status_visible": false,
+            "timeout": 120,
+            "viewport": {
+              "height": 235,
+              "width": 394,
+              "x": 1201,
+              "y": 760
+            },
+            "watch": []
+          },
+          {
+            "active": false,
+            "building": false,
+            "builds": 0,
+            "command": [],
+            "id": "image14",
+            "kind": "image",
+            "label": "Texture 15",
+            "log": "",
+            "maps": {},
+            "path": "/tmp/asset-preview-ui-tmc83zut/image14.png",
+            "revisions": 0,
+            "settings": {},
+            "status": "Suspended",
+            "timeout": 120,
+            "watch": []
+          },
+          {
+            "active": false,
+            "building": false,
+            "builds": 0,
+            "command": [],
+            "id": "image15",
+            "kind": "image",
+            "label": "Texture 16",
+            "log": "",
+            "maps": {},
+            "path": "/tmp/asset-preview-ui-tmc83zut/image15.png",
+            "revisions": 0,
+            "settings": {},
+            "status": "Suspended",
+            "timeout": 120,
+            "watch": []
+          }
+        ],
+        "grid_size": 4,
+        "layout": "grid",
+        "ok": true,
+        "options_open": false,
+        "pid": 691308,
+        "platform": "xcb",
+        "selected": "model",
+        "watched_directories": 3,
+        "watched_files": 17,
+        "window_visible": true
+      }
+    },
+    {
+      "file": "after-empty.png",
+      "state": {
+        "active": 0,
+        "compact": true,
+        "entries": [],
+        "grid_size": 4,
+        "layout": "grid",
+        "ok": true,
+        "options_open": false,
+        "pid": 691308,
+        "platform": "xcb",
+        "selected": "",
+        "watched_directories": 0,
+        "watched_files": 0,
+        "window_visible": true
+      }
+    }
+  ],
+  "renderer": "NVIDIA GeForce RTX 2080 Ti/PCIe/SSE2"
+}

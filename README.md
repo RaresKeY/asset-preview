@@ -15,6 +15,7 @@ asset-preview                      # open / return to the same window
 asset-preview add /path/to/model.glb --id chair --label "Chair"
 asset-preview add /path/to/image.png --id texture
 asset-preview layout grid
+asset-preview layout grid --size 3 --compact
 asset-preview select chair
 asset-preview status
 asset-preview hide                  # release every active preview and stop its generator
@@ -23,22 +24,37 @@ asset-preview stop                  # stop the server too
 
 `add` connects quietly to the running app. It does not raise the window or
 change the current selection. Reusing an ID replaces that registration.
-Registrations, layout and selection survive restart; closing the window suspends
+Registrations, layout, grid size, compact mode and selection survive restart; closing the window suspends
 all previews while keeping the server available. Window size and placement are
 remembered on close, subject to the desktop's placement policy.
 
 ## Window
 
-Drop files or use **Add files**. **Single view** loads one preview; **Grid view**
-loads a page of up to four. Left/right buttons and Alt+Left/Right switch previews
+Drop files or use **Add files**. Choose **Single**, **2×2**, **3×3** or **4×4**
+in the toolbar. Single loads one preview; grids load only the current page, up to
+4, 9 or 16 previews. Left/right buttons and Alt+Left/Right switch previews
 or pages. Every preview outside the current page is unloaded. Minimizing or
 closing the window releases the visible previews and stops their generators.
 
 Images have fit, wheel zoom, drag pan, checker/dark/light backgrounds and pixel
 filtering. Models have drag orbit, right/middle/Shift drag pan, wheel zoom and
-double click to fit. **Options** controls ground grid, axes, edges, orthographic
-projection and light intensity. Cameras stay in place across file refreshes;
+double click to fit. Orbit defaults to a locked horizon: Y is up and the XZ plane
+is the floor, with pitch clamped before the poles. The **⋯** menu inside each
+view can unlock orbit or choose Z-up / XY floor for Blender-oriented assets.
+It also controls ground grid, axes, edges and orthographic projection.
+
+**Show materials** switches authored shading to neutral clay; **Show textures**
+independently removes texture maps while retaining material properties. Turning
+them back on restores the imported appearance through a scene reload. Default
+**Studio** lighting adds F3D's embedded HDRI environment to its normal lighting;
+**F3D light kit** is available without the environment. Both use tone mapping,
+with adjustable light intensity. Cameras stay in place across file refreshes and display-mode changes;
 switching away releases the camera with the renderer.
+
+Names, fit/options/remove actions and live status overlay the views. Long names
+are elided with full name/path tooltips. **Compact** reduces gaps, moves fit/remove
+into **⋯**, and hides steady Live footers; building, waiting and error status stays
+visible. `layout ... --no-compact` restores normal density.
 
 ## Save a script, see its output
 
@@ -103,7 +119,8 @@ PBR lighting is an inspection environment, not proof of a Godot shader match.
 - OBJ material files and ordinary MTL texture paths, glTF/GLB external buffers and
   texture URIs, explicit dependencies and material maps are watched. Complex MTL
   options or several `mtllib` files on one line may need explicit `--watch` paths.
-- At most four decoded images/renderers/generators are active. Only `native` and
+- Default grids activate at most four decoded images/renderers/generators; larger
+  grids explicitly allow nine or sixteen and can use more memory. Only `native` and
   `assimp` F3D readers are loaded. F3D/VTK stays unloaded until a 3D preview is shown.
   The backend remains resident after first use; hiding frees views and trims free heap
   pages, while library/driver caches remain. PNG/JPEG and related images depend on Qt's installed

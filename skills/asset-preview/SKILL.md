@@ -30,7 +30,12 @@ Registration starts the service if needed but does not raise the window or chang
 selection. Preserve the user's placed window; do not call `gui` on every save.
 For a requested visible launch, `gui` opens/returns to it. `select <id>` follows a
 particular view without raising it; use when the user wants that asset shown.
-`layout single|grid` controls one view or a page of up to four. Hidden/off-page
+`layout single|grid` controls one view or a default 2×2 page. Use
+`layout grid --size 3 --compact` or `--size 4` only when the user wants more
+simultaneously visible previews (9/16); they can use more memory. `--no-compact`
+restores normal density. Per-view `settings` can control `materials`, `textures`,
+`lock_horizon`, `up_axis` (`y` / `z`) and `lighting` (`studio` / `lightkit`), alongside
+the existing options; preserve the user's inspection choices. Hidden/off-page
 previews are unloaded. Automated visual checks use Gamescope headless through
 the owning project's runtime, rather than opening desktop windows.
 

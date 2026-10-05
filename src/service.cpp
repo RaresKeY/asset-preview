@@ -3,14 +3,10 @@
 #include <QCheckBox>
 #include <QCloseEvent>
 #include <QComboBox>
-#include <QDialog>
-#include <QDialogButtonBox>
 #include <QDir>
-#include <QDoubleSpinBox>
 #include <QDragEnterEvent>
 #include <QFileDialog>
 #include <QFileInfo>
-#include <QFormLayout>
 #include <QFrame>
 #include <QGridLayout>
 #include <QHBoxLayout>
@@ -18,6 +14,10 @@
 #include <QLabel>
 #include <QLocalSocket>
 #include <QMimeData>
+#include <QMenu>
+#include <QResizeEvent>
+#include <QShowEvent>
+#include <QToolButton>
 #include <QPushButton>
 #include <QPainter>
 #include <QRegularExpression>
@@ -53,6 +53,65 @@ bool imagePath(const QString& path) {
 }
 QString absolute(const QString& path) { return QDir::cleanPath(QFileInfo(path).absoluteFilePath()); }
 QByteArray readSmall(const QString& path) { QFile f(path); return f.open(QIODevice::ReadOnly) ? f.read(4*1024*1024) : QByteArray{}; }
+
+class PreviewCard final : public QFrame {
+public:
+    PreviewCard(QWidget* parent, const QString& title, const QString& path) : QFrame(parent), fullTitle(title) {
+        setFrameShape(QFrame::StyledPanel); setMinimumSize(100,100);
+        content=new QVBoxLayout(this); content->setContentsMargins(0,0,0,0); content->setSpacing(0);
+        header=new QFrame(this); header->setObjectName("viewOverlay");
+        // Small native overlays share the container's stacking context with the
+        // embedded OpenGL window. A full-window overlay would intercept orbiting.
+        header->setAttribute(Qt::WA_NativeWindow);
+        header->setStyleSheet("QFrame#viewOverlay {background:#20262e;border:1px solid #414b57;border-radius:4px;}"
+            "QFrame#viewOverlay QLabel {color:#e8edf3;background:transparent;border:none;}"
+            "QToolButton {color:#e8edf3;background:transparent;border:1px solid transparent;border-radius:3px;padding:2px;}"
+            "QToolButton:hover {background:#394453;} QToolButton:pressed {background:#485566;}"
+            "QToolButton:focus {border-color:#82d9c8;}");
+        auto* row=new QHBoxLayout(header); row->setContentsMargins(7,1,3,1); row->setSpacing(3);
+        name=new QLabel(title,header); name->setTextFormat(Qt::PlainText); name->setToolTip(title+"\n"+path);
+        name->setSizePolicy(QSizePolicy::Ignored,QSizePolicy::Preferred);
+        auto font=name->font(); font.setBold(true); name->setFont(font); row->addWidget(name,1);
+        fit=new QToolButton(header); fit->setText("Fit"); fit->setToolTip("Fit camera / image (also double click)");
+        options=new QToolButton(header); options->setText("⋯"); options->setToolTip("Preview options");
+        remove=new QToolButton(header); remove->setText("×"); remove->setToolTip("Remove this preview");
+        for (auto* button:{fit,options,remove}) { button->setFixedSize(32,28); button->setFocusPolicy(Qt::StrongFocus); row->addWidget(button); }
+        footer=new QLabel(this); footer->setTextFormat(Qt::PlainText); footer->setAttribute(Qt::WA_NativeWindow);
+        footer->setTextInteractionFlags(Qt::TextSelectableByMouse);
+        footer->setStyleSheet("color:#e8edf3;background:#20262e;border:1px solid #414b57;border-radius:3px;padding:2px 5px;");
+    }
+    void setSurface(QWidget* surface) { content->addWidget(surface); }
+    void setCompact(bool value) {
+        compact=value; fit->setVisible(!value); remove->setVisible(!value);
+        updateStatus(); place();
+    }
+    void updateStatus() { footer->setVisible(!compact || !footer->text().startsWith("Live")); place(); }
+    void compose(QPainter& painter, QWidget* window) {
+        for (auto* widget: {static_cast<QWidget*>(header),static_cast<QWidget*>(footer)})
+            if (widget->isVisible()) painter.drawPixmap(widget->mapTo(window,QPoint()),widget->grab());
+    }
+    QToolButton *fit, *options, *remove;
+    QLabel* footer;
+protected:
+    void resizeEvent(QResizeEvent* event) override { QFrame::resizeEvent(event); place(); }
+    void showEvent(QShowEvent* event) override {
+        QFrame::showEvent(event); QTimer::singleShot(0,this,[this] { place(); });
+    }
+private:
+    void place() {
+        const int inset=compact?4:6;
+        header->setGeometry(inset,inset,std::max(1,width()-2*inset),compact?30:34);
+        header->layout()->activate();
+        name->setText(name->fontMetrics().elidedText(fullTitle,Qt::ElideRight,std::max(0,name->width())));
+        footer->setGeometry(inset,std::max(inset,height()-inset-24),std::max(1,width()-2*inset),24);
+        header->raise(); footer->raise();
+    }
+    QString fullTitle;
+    QFrame* header;
+    QLabel* name;
+    QVBoxLayout* content;
+    bool compact=false;
+};
 }
 
 Service::Service(QString sock, QString state) : socketPath(std::move(sock)), statePath(std::move(state)) {
@@ -99,6 +158,10 @@ bool Service::start(QString& error) {
         }
         layout=doc.object()["layout"].toString("single");
         if (layout != "single" && layout != "grid") { error="Invalid saved layout"; return false; }
+        gridSize=doc.object()["grid_size"].toInt(2);
+        if (gridSize<2 || gridSize>4 || (doc.object().contains("grid_size") && doc.object()["grid_size"].toDouble()!=gridSize)) { error="Invalid saved grid size"; return false; }
+        if (doc.object().contains("compact") && !doc.object()["compact"].isBool()) { error="Invalid saved compact mode"; return false; }
+        compact=doc.object()["compact"].toBool(false);
         selected=doc.object()["selected"].toString();
     }
     if (!entries.contains(selected)) selected=order.value(0);
@@ -112,7 +175,7 @@ void Service::save() {
     QSaveFile file(statePath + "/previews.json");
     if (!file.open(QIODevice::WriteOnly)) throw std::runtime_error(file.errorString().toStdString());
     file.setPermissions(QFileDevice::ReadOwner|QFileDevice::WriteOwner);
-    auto data=QJsonDocument(QJsonObject{{"version",1},{"entries",rows},{"selected",selected},{"layout",layout}}).toJson();
+    auto data=QJsonDocument(QJsonObject{{"version",1},{"entries",rows},{"selected",selected},{"layout",layout},{"grid_size",gridSize},{"compact",compact}}).toJson();
     if (file.write(data) != data.size() || !file.commit()) throw std::runtime_error("Cannot save preview registry");
 }
 QString Service::validate(QJsonObject& c, bool restore) {
@@ -153,11 +216,13 @@ QString Service::validate(QJsonObject& c, bool restore) {
     if (c.contains("maps") && !c.value("maps").isObject()) return "maps must be an object";
     if (c.contains("settings") && !c.value("settings").isObject()) return "settings must be an object";
     auto settings=c.value("settings").toObject();
-    const QSet<QString> known{"grid","axes","edges","orthographic","nearest","light","background","shape","roughness","metallic"};
+    const QSet<QString> known{"grid","axes","edges","orthographic","nearest","light","background","shape","roughness","metallic","materials","textures","lock_horizon","up_axis","lighting"};
     for (auto i=settings.begin();i!=settings.end();++i) {
         if (!known.contains(i.key())) return "Unknown setting: " + i.key();
         if (i.key()=="background") { if (!QSet<QString>{"dark","light","checker"}.contains(i.value().toString())) return "Invalid background"; }
         else if (i.key()=="shape") { if (!QSet<QString>{"sphere","cube","plane"}.contains(i.value().toString())) return "Invalid material shape"; }
+        else if (i.key()=="up_axis") { if (!QSet<QString>{"y","z"}.contains(i.value().toString())) return "Up axis must be y or z"; }
+        else if (i.key()=="lighting") { if (!QSet<QString>{"studio","lightkit"}.contains(i.value().toString())) return "Lighting must be studio or lightkit"; }
         else if (i.key()=="light" || i.key()=="roughness" || i.key()=="metallic") {
             if (!i.value().isDouble() || i.value().toDouble()<0 || i.value().toDouble()>(i.key()=="light"?5.0:1.0)) return "Invalid numeric setting";
         } else if (!i.value().isBool()) return "Boolean setting required: " + i.key();
@@ -201,6 +266,11 @@ QJsonObject Service::describe(const Entry& e) const {
         const auto position=e.surface->mapTo(window.get(),QPoint());
         result["viewport"]=QJsonObject{{"x",position.x()},{"y",position.y()},{"width",e.surface->width()},{"height",e.surface->height()}};
     }
+    if (e.optionsButton && window) {
+        const auto p=e.optionsButton->mapTo(window.get(),QPoint());
+        result["controls"]=QJsonObject{{"options",QJsonObject{{"x",p.x()},{"y",p.y()},{"width",e.optionsButton->width()},{"height",e.optionsButton->height()}}}};
+        result["status_visible"]=e.statusLabel->isVisible();
+    }
     return result;
 }
 QJsonObject Service::request(const QJsonObject& r) {
@@ -210,10 +280,10 @@ QJsonObject Service::request(const QJsonObject& r) {
         if (method=="list") {
             QJsonArray rows; int active=0;
             for (const auto& key:order) { rows.append(describe(*entries[key])); active+=entries[key]->active; }
-            return success({{"entries",rows},{"selected",selected},{"layout",layout},{"active",active},
+            return success({{"entries",rows},{"selected",selected},{"layout",layout},{"active",active},{"grid_size",gridSize},{"compact",compact},
                 {"window_visible",bool(window && window->isVisible())},{"watched_files",watcher.files().size()},
                 {"watched_directories",watcher.directories().size()},{"pid",qint64(QCoreApplication::applicationPid())},
-                {"platform",QGuiApplication::platformName()}});
+                {"platform",QGuiApplication::platformName()},{"options_open",bool(QApplication::activePopupWidget())}});
         }
         if (method=="add") return add(r["entry"].toObject());
         if (method=="show") {
@@ -223,9 +293,16 @@ QJsonObject Service::request(const QJsonObject& r) {
         if (method=="hide") { if (window) window->hide(); reconcile(); return success(); }
         if (method=="quit") { QTimer::singleShot(0,qApp,&QCoreApplication::quit); return success(); }
         if (method=="layout") {
-            QString next=r["layout"].toString();
+            if (r.contains("layout") && !r["layout"].isString()) return failure("layout must be a string");
+            QString next=r["layout"].toString(layout);
             if (next!="single" && next!="grid") return failure("Layout must be single or grid");
-            layout=next; save(); reconcile(); return success();
+            const int size=r["grid_size"].toInt(gridSize);
+            if (r.contains("grid_size") && (!r["grid_size"].isDouble() || r["grid_size"].toDouble()!=size || size<2 || size>4)) return failure("Grid size must be 2, 3 or 4");
+            if (r.contains("compact") && !r["compact"].isBool()) return failure("compact must be boolean");
+            const auto previous=layout; const auto previousSize=gridSize; const auto previousCompact=compact;
+            layout=next; gridSize=size; compact=r["compact"].toBool(compact);
+            try { save(); } catch (...) { layout=previous; gridSize=previousSize; compact=previousCompact; throw; }
+            reconcile(); return success();
         }
         if (method=="capture") {
             const QString path=r["path"].toString();
@@ -239,6 +316,7 @@ QJsonObject Service::request(const QJsonObject& r) {
                     painter.drawImage(QRect(e->surface->mapTo(window.get(),QPoint()),e->surface->size()),image);
                 }
             }
+            for (const auto& e:entries) if (e->active && e->card) static_cast<PreviewCard*>(e->card)->compose(painter,window.get());
             painter.end();
             if (!capture.save(path,"PNG")) return failure("Cannot save capture");
             return success();
@@ -270,6 +348,7 @@ QJsonObject Service::request(const QJsonObject& r) {
 void Service::status(Entry& e, const QString& text) {
     e.status=text;
     if (e.statusLabel) { e.statusLabel->setText(text.left(140)); e.statusLabel->setToolTip(text + (e.log.isEmpty()?"":"\n\n"+e.log)); }
+    if (e.card) static_cast<PreviewCard*>(e.card)->updateStatus();
 }
 QStringList Service::dependencies(const Entry& e) const {
     QStringList paths{e.config["path"].toString()};
@@ -448,7 +527,7 @@ void Service::deactivate(const QString& id) {
     e->active=false; ++e->token;
     stopBuilder(*e);
     if (window) window->removeCard(*e);
-    e->view=nullptr; e->surface=nullptr; e->statusLabel=nullptr; e->card=nullptr; e->stamps.clear();
+    e->view=nullptr; e->surface=nullptr; e->statusLabel=nullptr; e->optionsButton=nullptr; e->card=nullptr; e->stamps.clear();
     status(*e,"Suspended");
 }
 void Service::reconcile() {
@@ -457,7 +536,7 @@ void Service::reconcile() {
     QStringList visible;
     if (window && window->isVisible() && !window->isMinimized() && !order.isEmpty()) {
         int i=std::max(0,int(order.indexOf(selected)));
-        visible=layout=="grid" ? order.mid((i/4)*4,4) : order.mid(i,1);
+        const int count=pageSize(); visible=order.mid((i/count)*count,count);
     }
     for (const auto& id:order) if (!visible.contains(id)) deactivate(id);
     for (const auto& id:visible) activate(id);
@@ -470,7 +549,7 @@ void Service::reconcile() {
 void Service::navigate(int delta) {
     if (order.isEmpty()) return;
     int index=std::max(0,int(order.indexOf(selected)));
-    if (layout=="grid") index=std::clamp((index/4+delta)*4,0,int(order.size())-1);
+    if (layout=="grid") index=std::clamp((index/pageSize()+delta)*pageSize(),0,int(order.size())-1);
     else index=std::clamp(index+delta,0,int(order.size())-1);
     selected=order[index]; save(); reconcile();
 }
@@ -478,30 +557,33 @@ void Service::navigate(int delta) {
 PreviewWindow::PreviewWindow(Service* s) : service(s) {
     setWindowTitle("Asset Preview"); setWindowIcon(QIcon(QStringLiteral(ASSET_PREVIEW_ROOT "/icon.svg")));
     setMinimumSize(540,380); resize(1000,720); setAcceptDrops(true);
-    auto* central=new QWidget; auto* vertical=new QVBoxLayout(central); vertical->setContentsMargins(16,12,16,12); vertical->setSpacing(12);
-    auto* top=new QHBoxLayout;
-    auto* title=new QLabel("Asset Preview"); auto font=title->font(); font.setPointSize(15); font.setBold(true); title->setFont(font);
-    top->addWidget(title); top->addStretch();
-    auto* addButton=new QPushButton("Add files"); addButton->setMinimumHeight(36); top->addWidget(addButton);
-    mode=new QPushButton; mode->setMinimumHeight(36); top->addWidget(mode);
-    vertical->addLayout(top);
+    auto* central=new QWidget; auto* vertical=new QVBoxLayout(central); vertical->setContentsMargins(8,6,8,6); vertical->setSpacing(6);
+    auto* addButton=new QPushButton("Add files"); addButton->setMinimumHeight(32);
     auto* controls=new QHBoxLayout;
-    previous=new QPushButton("←"); next=new QPushButton("→"); previous->setFixedSize(40,36); next->setFixedSize(40,36);
+    previous=new QPushButton("←"); next=new QPushButton("→"); previous->setFixedSize(32,32); next->setFixedSize(32,32);
     previous->setToolTip("Previous preview / page (Alt+Left)"); next->setToolTip("Next preview / page (Alt+Right)");
-    selection=new QComboBox; selection->setMinimumHeight(36); selection->setSizePolicy(QSizePolicy::Expanding,QSizePolicy::Fixed);
-    selection->setSizeAdjustPolicy(QComboBox::AdjustToMinimumContentsLengthWithIcon); selection->setMinimumContentsLength(12);
+    selection=new QComboBox; selection->setMinimumHeight(32); selection->setSizePolicy(QSizePolicy::Expanding,QSizePolicy::Fixed);
+    selection->setSizeAdjustPolicy(QComboBox::AdjustToMinimumContentsLengthWithIcon); selection->setMinimumContentsLength(3);
+    density=new QComboBox; density->addItems({"Single","2×2","3×3","4×4"}); density->setMinimumHeight(32);
+    density->setToolTip("Visible previews per page: 1, 4, 9 or 16");
+    compactButton=new QCheckBox("Compact"); compactButton->setToolTip("Tight spacing; keep names and options inside views; show only busy/error status");
     position=new QLabel; position->setMinimumWidth(65); position->setAlignment(Qt::AlignRight|Qt::AlignVCenter);
     controls->addWidget(previous); controls->addWidget(selection,1); controls->addWidget(next); controls->addWidget(position);
+    controls->addWidget(density); controls->addWidget(compactButton); controls->addWidget(addButton);
     vertical->addLayout(controls);
-    canvas=new QWidget; grid=new QGridLayout(canvas); grid->setContentsMargins(0,0,0,0); grid->setSpacing(12);
+    canvas=new QWidget; grid=new QGridLayout(canvas); grid->setContentsMargins(0,0,0,0); grid->setSpacing(6);
     vertical->addWidget(canvas,1); setCentralWidget(central);
-    statusBar()->showMessage("Live on save · drag files here · Alt+Left / Right to switch · close to suspend");
-    statusBar()->setToolTip("Local socket: " + service->socketPath);
+    statusBar()->showMessage("Drag files to add · Alt+Left / Right to switch · close to suspend");
     connect(addButton,&QPushButton::clicked,this,[this] {
         for (const auto& path:QFileDialog::getOpenFileNames(this,"Add asset previews",QDir::homePath(),"Assets (*.png *.jpg *.jpeg *.webp *.bmp *.svg *.glb *.gltf *.obj *.stl *.ply *.fbx);;All files (*)"))
             service->request({{"method","add"},{"entry",QJsonObject{{"path",path}}}});
     });
-    connect(mode,&QPushButton::clicked,this,[this] { service->request({{"method","layout"},{"layout",service->layout=="single"?"grid":"single"}}); });
+    connect(density,&QComboBox::activated,this,[this](int index) {
+        QJsonObject request{{"method","layout"},{"layout",index==0?"single":"grid"}};
+        if (index>0) request["grid_size"]=index+1;
+        service->request(request);
+    });
+    connect(compactButton,&QCheckBox::toggled,this,[this](bool value) { service->request({{"method","layout"},{"compact",value}}); });
     connect(previous,&QPushButton::clicked,this,[this] { service->navigate(-1); });
     connect(next,&QPushButton::clicked,this,[this] { service->navigate(1); });
     connect(selection,&QComboBox::activated,this,[this](int index) { service->request({{"method","select"},{"id",selection->itemData(index).toString()}}); });
@@ -515,45 +597,43 @@ void PreviewWindow::navigation() {
     for (const auto& id:service->order) selection->addItem(service->entries[id]->config["label"].toString(),id);
     selection->setCurrentIndex(service->order.indexOf(service->selected));
     const int i=std::max(0,int(service->order.indexOf(service->selected))), n=service->order.size();
-    previous->setEnabled(n>0 && (service->layout=="grid"?i/4>0:i>0));
-    next->setEnabled(n>0 && (service->layout=="grid"?(i/4+1)*4<n:i+1<n));
-    mode->setText(service->layout=="single"?"Grid view":"Single view");
-    position->setText(n==0?"0 / 0":service->layout=="single"?QString("%1 / %2").arg(i+1).arg(n):QString("%1–%2 / %3").arg((i/4)*4+1).arg(std::min((i/4+1)*4,n)).arg(n));
+    const int count=service->pageSize();
+    previous->setEnabled(n>0 && i/count>0);
+    next->setEnabled(n>0 && (i/count+1)*count<n);
+    QSignalBlocker densityBlock(density), compactBlock(compactButton);
+    density->setCurrentIndex(service->layout=="single"?0:service->gridSize-1);
+    compactButton->setChecked(service->compact);
+    position->setText(n==0?"0 / 0":service->layout=="single"?QString("%1 / %2").arg(i+1).arg(n):QString("%1–%2 / %3").arg((i/count)*count+1).arg(std::min((i/count+1)*count,n)).arg(n));
 }
 void PreviewWindow::arrange(const QStringList& ids) {
     while (auto* item=grid->takeAt(0)) { if (item->widget() && item->widget()->property("empty").toBool()) delete item->widget(); delete item; }
-    for (int i=0;i<2;++i) { grid->setRowStretch(i,0); grid->setColumnStretch(i,0); }
+    for (int i=0;i<4;++i) { grid->setRowStretch(i,0); grid->setColumnStretch(i,0); }
+    const int inset=service->compact?4:8;
+    centralWidget()->layout()->setContentsMargins(inset,service->compact?4:6,inset,service->compact?4:6);
+    centralWidget()->layout()->setSpacing(service->compact?4:6);
+    grid->setSpacing(service->compact?2:6); statusBar()->setVisible(!service->compact);
     if (ids.isEmpty()) {
         auto* empty=new QLabel("Watch your work take shape\n\nAdd or drop an image, model, or exported material.\nPreviews refresh when the files are saved.");
         empty->setProperty("empty",true); empty->setAlignment(Qt::AlignCenter); empty->setWordWrap(true);
         grid->addWidget(empty,0,0); grid->setRowStretch(0,1); grid->setColumnStretch(0,1);
     } else {
-        for (int i=0;i<ids.size();++i) { const int cols=service->layout=="grid" && ids.size()>1?2:1;
+        for (int i=0;i<ids.size();++i) { const int cols=service->layout=="grid"?std::min(service->gridSize,int(ids.size())):1;
+            static_cast<PreviewCard*>(service->entries[ids[i]]->card)->setCompact(service->compact);
             grid->addWidget(service->entries[ids[i]]->card,i/cols,i%cols); grid->setRowStretch(i/cols,1); grid->setColumnStretch(i%cols,1); }
     }
 }
 void PreviewWindow::createCard(Entry& e) {
     const QString id=e.config["id"].toString();
-    e.card=new QFrame(canvas); e.card->setFrameShape(QFrame::StyledPanel);
-    auto* vertical=new QVBoxLayout(e.card); vertical->setContentsMargins(10,8,10,8); vertical->setSpacing(6);
-    auto* header=new QHBoxLayout;
-    auto* label=new QLabel(e.config["label"].toString()); label->setToolTip(e.config["path"].toString());
-    label->setSizePolicy(QSizePolicy::Ignored,QSizePolicy::Preferred); auto font=label->font(); font.setBold(true); label->setFont(font);
-    header->addWidget(label,1);
-    auto* fit=new QPushButton("Fit"); auto* settings=new QPushButton("Options"); auto* remove=new QPushButton("×");
-    fit->setToolTip("Fit camera / image (also double click)"); remove->setToolTip("Remove this preview"); remove->setFixedWidth(30);
-    header->addWidget(fit); header->addWidget(settings); header->addWidget(remove); vertical->addLayout(header);
-    e.statusLabel=new QLabel(e.status); e.statusLabel->setTextInteractionFlags(Qt::TextSelectableByMouse);
-    label->setTextFormat(Qt::PlainText); e.statusLabel->setTextFormat(Qt::PlainText);
-    e.statusLabel->setSizePolicy(QSizePolicy::Ignored,QSizePolicy::Fixed);
+    auto* card=new PreviewCard(canvas,e.config["label"].toString(),e.config["path"].toString());
+    e.card=card; e.statusLabel=card->footer; e.optionsButton=card->options;
+    service->status(e,e.status);
     QWidget* widget=nullptr;
     if (e.config["kind"].toString()=="image") { auto* image=new ImageView(e.card); e.view=image; widget=image; }
     else {
         auto loaded=[this,id](bool ok,QString error) {
             const auto e=service->entries.value(id); if (!e || !e->active) return;
             if (e->process && e->process->state()!=QProcess::NotRunning) return;
-            e->status=ok?"Live · model ready":"Waiting · "+error;
-            if (e->statusLabel) { e->statusLabel->setText(e->status); e->statusLabel->setToolTip(e->status); }
+            service->status(*e,ok?"Live · model ready":"Waiting · "+error);
         };
         try {
             const auto handle=createModel(e.config,e.card,std::move(loaded));
@@ -567,36 +647,54 @@ void PreviewWindow::createCard(Entry& e) {
         }
     }
     e.surface=widget;
-    vertical->addWidget(widget,1); vertical->addWidget(e.statusLabel);
+    card->setSurface(widget);
     widget->setToolTip(e.config["kind"].toString()=="image"?"Scroll to zoom · drag to pan · double click to fit":"Drag to orbit · right / middle drag to pan · scroll to zoom · double click to fit");
-    connect(fit,&QPushButton::clicked,this,[this,id] { const auto e=service->entries.value(id); if (e && e->view) e->view->fit(); });
-    connect(settings,&QPushButton::clicked,this,[this,id] { options(id); });
-    connect(remove,&QPushButton::clicked,this,[this,id] { service->request({{"method","remove"},{"id",id}}); });
+    connect(card->fit,&QToolButton::clicked,this,[this,id] { const auto e=service->entries.value(id); if (e && e->view) e->view->fit(); });
+    connect(card->options,&QToolButton::clicked,this,[this,id] { options(id); });
+    connect(card->remove,&QToolButton::clicked,this,[this,id] { service->request({{"method","remove"},{"id",id}}); });
 }
 void PreviewWindow::removeCard(Entry& e) { if (e.card) { grid->removeWidget(e.card); delete e.card; } }
 void PreviewWindow::options(const QString& id) {
     auto e=service->entries.value(id); if (!e) return;
-    QDialog dialog(this); dialog.setWindowTitle("Preview options");
-    auto* form=new QFormLayout(&dialog); auto settings=e->config["settings"].toObject();
-    auto* background=new QComboBox; background->addItems({"dark","light","checker"});
-    background->setCurrentText(settings["background"].toString(e->config["kind"].toString()=="image"?"checker":"dark"));
-    form->addRow("Background",background);
-    QMap<QString,QCheckBox*> checks;
-    for (const auto& name : e->config["kind"].toString()=="image"?QStringList{"nearest"}:QStringList{"grid","axes","edges","orthographic"}) {
-        auto* check=new QCheckBox; check->setChecked(settings[name].toBool(name=="grid")); checks[name]=check;
-        form->addRow(name=="nearest"?"Pixel filtering":name=="edges"?"Show edges":name=="axes"?"Axis indicator":name=="grid"?"Ground grid":"Orthographic camera",check);
+    QMenu menu(this); const auto settings=e->config["settings"].toObject();
+    menu.addAction(e->config["label"].toString())->setEnabled(false);
+    connect(menu.addAction("Fit view"),&QAction::triggered,this,[e] { if (e->view) e->view->fit(); });
+    connect(menu.addAction("Reload / rebuild"),&QAction::triggered,this,[this,id] { service->request({{"method","reload"},{"id",id}}); });
+    menu.addSeparator();
+    auto patch=[this,id](QJsonObject fields) {
+        auto result=service->request({{"method","settings"},{"id",id},{"settings",fields}});
+        if (!result["ok"].toBool()) statusBar()->showMessage(result["error"].toString(),5000);
+    };
+    auto toggle=[&](const QString& label,const QString& key,bool defaultValue=false) {
+        auto* action=menu.addAction(label); action->setCheckable(true); action->setChecked(settings[key].toBool(defaultValue));
+        connect(action,&QAction::toggled,this,[patch,key](bool value) { patch({{key,value}}); }); return action;
+    };
+    auto choice=[&](const QString& label,const QString& key,const QStringList& labels,const QStringList& values,const QString& fallback) {
+        auto* sub=menu.addMenu(label);
+        for (int i=0;i<values.size();++i) {
+            auto* action=sub->addAction(labels[i]); action->setCheckable(true); action->setChecked(settings[key].toString(fallback)==values[i]);
+            connect(action,&QAction::triggered,this,[patch,key,value=values[i]] { patch({{key,value}}); });
+        }
+    };
+    if (e->config["kind"].toString()=="image") toggle("Pixel filtering","nearest");
+    else {
+        toggle("Show &materials","materials",true);
+        toggle("Show &textures","textures",true)->setEnabled(settings["materials"].toBool(true));
+        toggle("Lock &horizon","lock_horizon",true);
+        toggle("Ground grid","grid",true); toggle("Axis indicator","axes"); toggle("Show edges","edges"); toggle("Orthographic camera","orthographic");
+        choice("Floor / up axis","up_axis",{"Y up · XZ floor","Z up · XY floor"},{"y","z"},"y");
+        choice("Lighting","lighting",{"Studio · HDRI + light kit","F3D light kit"},{"studio","lightkit"},"studio");
+        auto* intensity=menu.addMenu(QString("Light intensity · %1").arg(settings["light"].toDouble(1)));
+        for (double value:{0.5,1.0,1.5,2.0,3.0,5.0}) {
+            auto* action=intensity->addAction(QString::number(value)); action->setCheckable(true); action->setChecked(settings["light"].toDouble(1)==value);
+            connect(action,&QAction::triggered,this,[patch,value] { patch({{"light",value}}); });
+        }
+        if (e->config["kind"].toString()=="material") choice("Sample shape","shape",{"Sphere","Cube","Plane"},{"sphere","cube","plane"},"sphere");
     }
-    QDoubleSpinBox* light=nullptr; QComboBox* shape=nullptr;
-    if (e->config["kind"].toString()!="image") { light=new QDoubleSpinBox; light->setRange(0,5); light->setSingleStep(.1); light->setValue(settings["light"].toDouble(1)); form->addRow("Light intensity",light); }
-    if (e->config["kind"].toString()=="material") { shape=new QComboBox; shape->addItems({"sphere","cube","plane"}); shape->setCurrentText(settings["shape"].toString("sphere")); form->addRow("Sample shape",shape); }
-    auto* buttons=new QDialogButtonBox(QDialogButtonBox::Ok|QDialogButtonBox::Cancel); form->addRow(buttons);
-    connect(buttons,&QDialogButtonBox::accepted,&dialog,&QDialog::accept); connect(buttons,&QDialogButtonBox::rejected,&dialog,&QDialog::reject);
-    if (dialog.exec()==QDialog::Accepted) {
-        settings["background"]=background->currentText(); for (auto i=checks.begin();i!=checks.end();++i) settings[i.key()]=i.value()->isChecked();
-        if (light) settings["light"]=light->value();
-        if (shape) settings["shape"]=shape->currentText();
-        service->request({{"method","settings"},{"id",id},{"settings",settings}});
-    }
+    choice("Background","background",{"Dark","Light","Checker"},{"dark","light","checker"},e->config["kind"].toString()=="image"?"checker":"dark");
+    menu.addSeparator();
+    connect(menu.addAction("Remove preview"),&QAction::triggered,this,[this,id] { service->request({{"method","remove"},{"id",id}}); });
+    menu.exec(e->optionsButton->mapToGlobal(QPoint(0,e->optionsButton->height())));
 }
 void PreviewWindow::closeEvent(QCloseEvent* event) {
     QSettings settings(service->statePath+"/window.ini",QSettings::IniFormat); settings.setValue("geometry",saveGeometry());
