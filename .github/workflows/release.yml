@@ -3,7 +3,7 @@ on:
   workflow_dispatch:
     inputs:
       staged:
-        description: Publish locally validated assets from draft release 0.0.1
+        description: Publish locally validated assets from the current draft release
         type: boolean
         default: false
 permissions:
@@ -15,52 +15,67 @@ jobs:
     timeout-minutes: 120
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+      - name: Read release version
+        run: echo "ASSET_PREVIEW_VERSION=$(cat VERSION)" >> "$GITHUB_ENV"
       - name: Build runtime and standalone artifacts
         if: ${{ !inputs.staged }}
         run: |
-          docker build -f packaging/Containerfile --build-arg SOURCE_COMMIT="$GITHUB_SHA" --target runtime -t ghcr.io/rareskey/asset-preview:0.0.1 .
-          docker build -f packaging/Containerfile --build-arg SOURCE_COMMIT="$GITHUB_SHA" --target artifacts --output type=local,dest=release .
+          mkdir build-context
+          git archive "$GITHUB_SHA" | tar -x -C build-context
+          docker build -f packaging/Containerfile --build-arg SOURCE_COMMIT="$GITHUB_SHA" --target runtime -t ghcr.io/rareskey/asset-preview:${ASSET_PREVIEW_VERSION} build-context
+          docker build -f packaging/Containerfile --build-arg SOURCE_COMMIT="$GITHUB_SHA" --target artifacts --output type=local,dest=release build-context
+      - name: Build desktop formats
+        if: ${{ !inputs.staged }}
+        run: |
+          docker build -f packaging/Packaging.Containerfile -t asset-preview-packaging .
+          docker run --rm -v "$PWD:/project" -w /project asset-preview-packaging python3 packaging/extra-formats.py release --formats appimage deb rpm
+          docker run --rm -v "$PWD:/project" -w /project archlinux:base-devel bash packaging/build-arch.sh /project/release
+          sudo apt-get update
+          sudo apt-get install -y flatpak
+          flatpak remote-add --user --if-not-exists flathub https://dl.flathub.org/repo/flathub.flatpakrepo
+          flatpak install --user -y flathub org.freedesktop.Platform//25.08 org.freedesktop.Sdk//25.08
+          python3 packaging/extra-formats.py release --formats flatpak
       - name: Load locally validated container
         if: ${{ inputs.staged }}
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           mkdir release
-          gh release download 0.0.1 --dir release
+          gh release download ${ASSET_PREVIEW_VERSION} --dir release
           cd release && sha256sum -c SHA256SUMS
-          gzip -dc asset-preview-0.0.1-container.tar.gz | docker load
-          docker tag localhost/asset-preview:0.0.1 ghcr.io/rareskey/asset-preview:0.0.1
+          gzip -dc asset-preview-${ASSET_PREVIEW_VERSION}-container.tar.gz | docker load
+          docker tag localhost/asset-preview:${ASSET_PREVIEW_VERSION} ghcr.io/rareskey/asset-preview:${ASSET_PREVIEW_VERSION}
       - name: Install host graphics loaders
         run: |
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends libgl1 libegl1 libopengl0
       - name: Check standalone service
         run: |
-          chmod +x release/asset-preview-0.0.1-linux-x86_64.run
+          chmod +x release/asset-preview-${ASSET_PREVIEW_VERSION}-linux-x86_64.run
           export QT_QPA_PLATFORM=offscreen
-          if ! release/asset-preview-0.0.1-linux-x86_64.run start; then
+          if ! release/asset-preview-${ASSET_PREVIEW_VERSION}-linux-x86_64.run start; then
             tail -30 "$HOME/.local/state/asset-preview/server.log"
             exit 1
           fi
-          release/asset-preview-0.0.1-linux-x86_64.run status --json
-          release/asset-preview-0.0.1-linux-x86_64.run stop
+          release/asset-preview-${ASSET_PREVIEW_VERSION}-linux-x86_64.run status --json
+          release/asset-preview-${ASSET_PREVIEW_VERSION}-linux-x86_64.run stop
           cd release && sha256sum -c SHA256SUMS
       - name: Push private container package
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           printf '%s' "$GH_TOKEN" | docker login ghcr.io -u "${{ github.actor }}" --password-stdin
-          docker push ghcr.io/rareskey/asset-preview:0.0.1
-          docker tag ghcr.io/rareskey/asset-preview:0.0.1 ghcr.io/rareskey/asset-preview:latest
+          docker push ghcr.io/rareskey/asset-preview:${ASSET_PREVIEW_VERSION}
+          docker tag ghcr.io/rareskey/asset-preview:${ASSET_PREVIEW_VERSION} ghcr.io/rareskey/asset-preview:latest
           docker push ghcr.io/rareskey/asset-preview:latest
-          docker buildx imagetools inspect ghcr.io/rareskey/asset-preview:0.0.1
+          docker buildx imagetools inspect ghcr.io/rareskey/asset-preview:${ASSET_PREVIEW_VERSION}
           docker logout ghcr.io
       - name: Upload draft release for hardware validation
         if: ${{ !inputs.staged }}
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          gh release create 0.0.1 --draft --target "$GITHUB_SHA" --title 'Asset Preview 0.0.1' --notes-file packaging/release-notes.md release/*
+          gh release create ${ASSET_PREVIEW_VERSION} --draft --target "$GITHUB_SHA" --title "Asset Preview ${ASSET_PREVIEW_VERSION}" --notes-file packaging/release-notes.md release/*
       - name: Verify package visibility
         env:
           GH_TOKEN: ${{ github.token }}
