@@ -63,7 +63,9 @@ polling still uses a short probe while watching the exact spawned child.
 Flatpak packages keep the server in a foreground sandbox process; their host CLI
 bridge serializes startup and uses a separate private `asset-preview-flatpak`
 socket and app data directory. Generators run via `flatpak-spawn --host --watch-bus`
-in the specified host cwd. Flatpak owns their host session/process group; local
-helper cancellation forwards signals and bus disconnect retires the host group.
+in the specified host cwd. Flatpak owns the host supervisor session; local helper cancellation closes its
+bus. Watch-bus SIGINT reaches the host Python supervisor, which retires the
+generator’s separate child group with TERM/KILL, including SIGINT-ignoring
+background jobs and descendants left behind after normal generator completion.
 Packaged desktop launchers set the canonical reverse-DNS desktop identity;
 source-checkout launchers keep their existing desktop entry identity.

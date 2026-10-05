@@ -6,6 +6,7 @@
 #include <QComboBox>
 #include <QDir>
 #include <QDragEnterEvent>
+#include <QFile>
 #include <QFileDialog>
 #include <QFileInfo>
 #include <QFrame>
@@ -598,9 +599,13 @@ void Service::build(const QString& id) {
     });
     status(*e,"Building · waiting for output");
     if (qEnvironmentVariableIsSet("ASSET_PREVIEW_FLATPAK")) {
-        // Flatpak owns the host session; watch-bus cancels its process group
-        // when our local helper is stopped on hide, timeout or shutdown.
+        // Watch-bus sends SIGINT, which shell background jobs may ignore.
+        // A host supervisor retires its separately owned child group instead.
+        QFile helper(QCoreApplication::applicationDirPath()+"/../flatpak/host-generator.py");
+        if (!helper.open(QIODevice::ReadOnly)) { status(*e,"Generator failed · missing host supervisor"); return; }
         arguments.prepend(args[0].toString());
+        arguments.prepend(QString::fromUtf8(helper.readAll()));
+        arguments.prepend("-c"); arguments.prepend("python3");
         arguments.prepend(QStringLiteral("--directory=")+e->config["cwd"].toString());
         arguments.prepend("--watch-bus"); arguments.prepend("--host");
         p->start("/usr/bin/flatpak-spawn",arguments);

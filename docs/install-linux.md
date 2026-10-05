@@ -93,8 +93,9 @@ service. The supported display backend is X11/XWayland.
 This developer tool has broad host/project filesystem access and permission to
 run **explicitly registered generators on the host** through `flatpak-spawn`.
 It is not a tightly confined read-only viewer. Host generator tools need to be
-installed on the host; the app does not install them. Flatpak's watch-bus helper
-owns and cancels the host process group when the viewer's generator is stopped.
+installed on the host; the app does not install them. Host Python 3 also runs the generator supervisor. Flatpak's watch-bus helper
+cancels that supervisor, which sends TERM/KILL to the generator's own child
+process group when the viewer's generator is stopped.
 Read-only preview registration needs no generator. The same `--watch`, `--cwd`
 and `--exec` syntax works through `asset-preview-flatpak`.
 
