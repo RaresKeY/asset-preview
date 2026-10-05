@@ -135,6 +135,8 @@ class XInput:
         self.xt.XTestFakeKeyEvent(self.display,code,pressed,0)
     def shortcut(self,key):
         self.key("Alt_L",1); self.key(key,1); self.key(key,0); self.key("Alt_L",0); self.x.XFlush(self.display)
+    def press(self,key):
+        self.key(key,1); self.key(key,0); self.x.XFlush(self.display)
     def motion(self,x,y):
         ox=ctypes.c_int(); oy=ctypes.c_int(); child=ctypes.c_ulong()
         self.x.XTranslateCoordinates(self.display,self.window,self.root,0,0,ctypes.byref(ox),ctypes.byref(oy),ctypes.byref(child))
@@ -382,7 +384,10 @@ class PreviewIntegration(unittest.TestCase):
             eventually(lambda:row("orbit")["settings"].get("textures") is False)
             self.assertFalse(client.rpc({"method":"list"})["options_open"])
             # Global navigation also works while the native child has focus.
-            input.shortcut("Right"); eventually(lambda:client.rpc({"method":"list"})["selected"]=="next")
+            input.press("Right"); eventually(lambda:client.rpc({"method":"list"})["selected"]=="next")
+            view=row("next")["viewport"]
+            input.click(view["x"]+view["width"]//2,view["y"]+view["height"]//2)
+            input.press("Left"); eventually(lambda:client.rpc({"method":"list"})["selected"]=="orbit")
         finally: input.close()
 
     def test_13_corrupt_state_is_preserved(self):
@@ -482,7 +487,7 @@ class PreviewIntegration(unittest.TestCase):
     @unittest.skipUnless(GPU,"Hardware Gamescope video lane")
     def test_18_video_playback_pause_seek_reload_failure_and_unload(self):
         samples={"before_video":memory(self.pid)}
-        asset=self.root/"clip.mp4"; video(asset)
+        asset=self.root/"clip.mp4"; video(asset,duration=12)
         client.rpc({"method":"add","entry":{"id":"clip","path":str(asset)}})
         self.add("image-after-video"); self.show()
         eventually(lambda:row("clip").get("metrics",{}).get("loads",0)==1,timeout=30)
@@ -513,9 +518,14 @@ class PreviewIntegration(unittest.TestCase):
             client.rpc({"method":"settings","id":"clip","settings":{"paused":True}})
             input.key("Home",1); input.key("Home",0); input.x.XFlush(input.display)
             eventually(lambda:row("clip")["metrics"]["position"]<.2)
-            input.shortcut("Right"); eventually(lambda:client.rpc({"method":"list"})["selected"]=="image-after-video")
+            input.key("Shift_L",1); input.press("Right"); input.key("Shift_L",0); input.x.XFlush(input.display)
+            eventually(lambda:abs(row("clip")["metrics"]["position"]-5)<.2)
+            self.assertEqual(client.rpc({"method":"list"})["selected"],"clip")
+            input.key("Shift_L",1); input.press("Left"); input.key("Shift_L",0); input.x.XFlush(input.display)
+            eventually(lambda:row("clip")["metrics"]["position"]<.2)
+            input.press("Right"); eventually(lambda:client.rpc({"method":"list"})["selected"]=="image-after-video")
             self.assertNotIn("metrics",row("clip"))
-            client.rpc({"method":"select","id":"clip"})
+            input.press("Left"); eventually(lambda:client.rpc({"method":"list"})["selected"]=="clip")
             eventually(lambda:row("clip").get("metrics",{}).get("loads",0)==1,timeout=20)
         finally: input.close()
         # Same watched filename, atomically replaced with a visibly different clip.
@@ -565,5 +575,24 @@ class PreviewIntegration(unittest.TestCase):
         cpu=ticks(self.pid); time.sleep(.8); self.assertLessEqual(ticks(self.pid)-cpu,2)
         samples["hidden"]={**memory(self.pid),"cpu_ticks":ticks(self.pid)-cpu,"idle_seconds":.8}
         if evidence: (target/"resources.json").write_text(json.dumps(samples,indent=2))
+
+    @unittest.skipUnless(GPU and os.environ.get("QT_QPA_PLATFORM")!="wayland","Hardware Gamescope X11 input lane")
+    def test_19_plain_arrows_navigate_grid_pages_and_clamp_at_edges(self):
+        for i in range(5): self.add(f"page-{i}")
+        client.rpc({"method":"layout","layout":"grid","grid_size":2,"compact":True})
+        self.show()
+        input=XInput()
+        try:
+            input.press("Right")
+            eventually(lambda:client.rpc({"method":"list"})["selected"]=="page-4")
+            self.assertEqual(client.rpc({"method":"list"})["active"],1)
+            input.press("Right"); time.sleep(.1)
+            self.assertEqual(client.rpc({"method":"list"})["selected"],"page-4")
+            input.press("Left")
+            eventually(lambda:client.rpc({"method":"list"})["selected"]=="page-0")
+            self.assertEqual(client.rpc({"method":"list"})["active"],4)
+            input.press("Left"); time.sleep(.1)
+            self.assertEqual(client.rpc({"method":"list"})["selected"],"page-0")
+        finally: input.close()
 
 if __name__ == "__main__": unittest.main(verbosity=2)

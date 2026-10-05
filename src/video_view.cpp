@@ -207,11 +207,13 @@ QImage VideoView::snapshot() {
 void VideoView::mousePressEvent(QMouseEvent* e) { if (focusSurface) focusSurface(); requestActivate(); e->accept(); }
 void VideoView::mouseDoubleClickEvent(QMouseEvent* e) { change({{"paused",!config["settings"].toObject()["paused"].toBool()}}); e->accept(); }
 void VideoView::keyPressEvent(QKeyEvent* e) {
-    if (e->modifiers()!=Qt::NoModifier) { QOpenGLWindow::keyPressEvent(e); return; }
+    const bool seekArrow=e->modifiers()==Qt::ShiftModifier &&
+        (e->key()==Qt::Key_Left || e->key()==Qt::Key_Right);
+    if (e->modifiers()!=Qt::NoModifier && !seekArrow) { QOpenGLWindow::keyPressEvent(e); return; }
     const auto s=config["settings"].toObject();
     if (e->key()==Qt::Key_Space) change({{"paused",!s["paused"].toBool()}});
     else if (e->key()==Qt::Key_M) change({{"muted",!s["muted"].toBool(true)}});
-    else if (e->key()==Qt::Key_Left || e->key()==Qt::Key_Right || e->key()==Qt::Key_Home) {
+    else if (seekArrow || e->key()==Qt::Key_Home) {
         QString error; const double at=current?current->properties["time-pos"].toDouble():0;
         seek(e->key()==Qt::Key_Home?0:std::max(0.0,at+(e->key()==Qt::Key_Left?-5:5)),error);
     } else { QOpenGLWindow::keyPressEvent(e); return; }

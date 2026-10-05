@@ -593,7 +593,7 @@ PreviewWindow::PreviewWindow(Service* s) : service(s) {
     auto* addButton=new QPushButton("Add files"); addButton->setMinimumHeight(32);
     auto* controls=new QHBoxLayout;
     previous=new QPushButton("←"); next=new QPushButton("→"); previous->setFixedSize(32,32); next->setFixedSize(32,32);
-    previous->setToolTip("Previous preview / page (Alt+Left)"); next->setToolTip("Next preview / page (Alt+Right)");
+    previous->setToolTip("Previous preview / page (Left)"); next->setToolTip("Next preview / page (Right)");
     selection=new QComboBox; selection->setMinimumHeight(32); selection->setSizePolicy(QSizePolicy::Expanding,QSizePolicy::Fixed);
     selection->setSizeAdjustPolicy(QComboBox::AdjustToMinimumContentsLengthWithIcon); selection->setMinimumContentsLength(3);
     density=new QComboBox; density->addItems({"Single","2×2","3×3","4×4"}); density->setMinimumHeight(32);
@@ -603,9 +603,10 @@ PreviewWindow::PreviewWindow(Service* s) : service(s) {
     controls->addWidget(previous); controls->addWidget(selection,1); controls->addWidget(next); controls->addWidget(position);
     controls->addWidget(density); controls->addWidget(compactButton); controls->addWidget(addButton);
     vertical->addLayout(controls);
-    canvas=new QWidget; grid=new QGridLayout(canvas); grid->setContentsMargins(0,0,0,0); grid->setSpacing(6);
+    canvas=new QWidget; canvas->setFocusPolicy(Qt::StrongFocus);
+    grid=new QGridLayout(canvas); grid->setContentsMargins(0,0,0,0); grid->setSpacing(6);
     vertical->addWidget(canvas,1); setCentralWidget(central);
-    statusBar()->showMessage("Drag files to add · Alt+Left / Right to switch · close to suspend");
+    statusBar()->showMessage("Drag files to add · Left / Right to switch · close to suspend");
     connect(addButton,&QPushButton::clicked,this,[this] {
         for (const auto& path:QFileDialog::getOpenFileNames(this,"Add asset previews",QDir::homePath(),"Assets (*.png *.jpg *.jpeg *.webp *.bmp *.svg *.glb *.gltf *.obj *.stl *.ply *.fbx *.mp4 *.m4v *.mov *.mkv *.webm *.avi *.ogv *.mpg *.mpeg *.wmv *.gif);;All files (*)"))
             service->request({{"method","add"},{"entry",QJsonObject{{"path",path}}}});
@@ -616,11 +617,19 @@ PreviewWindow::PreviewWindow(Service* s) : service(s) {
         service->request(request);
     });
     connect(compactButton,&QCheckBox::toggled,this,[this](bool value) { service->request({{"method","layout"},{"compact",value}}); });
-    connect(previous,&QPushButton::clicked,this,[this] { service->navigate(-1); });
-    connect(next,&QPushButton::clicked,this,[this] { service->navigate(1); });
+    auto navigate=[this](int delta) {
+        // Move focus before destroying a native view so the next key still
+        // reaches this window after the focused OpenGL child is unloaded.
+        canvas->setFocus(Qt::OtherFocusReason); service->navigate(delta);
+        activateWindow();
+    };
+    connect(previous,&QPushButton::clicked,this,[navigate] { navigate(-1); });
+    connect(next,&QPushButton::clicked,this,[navigate] { navigate(1); });
     connect(selection,&QComboBox::activated,this,[this](int index) { service->request({{"method","select"},{"id",selection->itemData(index).toString()}}); });
-    auto* left=new QShortcut(QKeySequence("Alt+Left"),this); connect(left,&QShortcut::activated,this,[this] { service->navigate(-1); });
-    auto* right=new QShortcut(QKeySequence("Alt+Right"),this); connect(right,&QShortcut::activated,this,[this] { service->navigate(1); });
+    auto* left=new QShortcut(this); left->setKeys({QKeySequence("Left"),QKeySequence("Alt+Left")});
+    connect(left,&QShortcut::activated,this,[navigate] { navigate(-1); });
+    auto* right=new QShortcut(this); right->setKeys({QKeySequence("Right"),QKeySequence("Alt+Right")});
+    connect(right,&QShortcut::activated,this,[navigate] { navigate(1); });
     QSettings settings(service->statePath+"/window.ini",QSettings::IniFormat);
     restoreGeometry(settings.value("geometry").toByteArray());
 }
@@ -729,7 +738,7 @@ void PreviewWindow::options(const QString& id) {
     else if (e->config["kind"].toString()=="video") {
         toggle("&Paused · Space","paused"); toggle("&Muted · M","muted",true); toggle("&Loop","loop",true);
         connect(menu.addAction("Restart · Home"),&QAction::triggered,this,[this,id] { service->request({{"method","seek"},{"id",id},{"seconds",0}}); });
-        for (int delta:{-5,5}) connect(menu.addAction(delta<0?"Back 5 seconds":"Forward 5 seconds"),&QAction::triggered,this,[this,id,delta] {
+        for (int delta:{-5,5}) connect(menu.addAction(delta<0?"Back 5 seconds · Shift+Left":"Forward 5 seconds · Shift+Right"),&QAction::triggered,this,[this,id,delta] {
             const auto e=service->entries.value(id); if (!e || !e->view) return;
             service->request({{"method","seek"},{"id",id},{"seconds",std::max(0.0,e->view->metrics()["position"].toDouble()+delta)}});
         });

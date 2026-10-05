@@ -76,11 +76,12 @@ Reusing an ID updates its registration. Files can be registered before they exis
 |---|---|
 | Image | Wheel zoom, drag pan, fit, pixel filtering, checker/dark/light background |
 | Model | Drag orbit, right/middle/Shift drag pan, wheel zoom, double-click fit |
-| Video | Space/double-click pause, Left/Right seek, Home restart, M mute |
+| Video | Space/double-click pause, Shift+Left/Right seek, Home restart, M mute |
 
 The **⋯** menu provides display options, including clay/textured shading,
 lighting, grid, axes, projection and Y/Z-up. Videos loop and start muted.
-Alt+Left/Right navigates previews or pages. Compact mode reduces spacing and
+Left/Right navigates previews or pages, matching the toolbar arrows;
+Alt+Left/Right also works. Compact mode reduces spacing and
 hides steady live status; waiting, building and errors remain visible.
 Only the current page is loaded. Minimizing or closing releases views and stops
 their generators; closing leaves the service running.

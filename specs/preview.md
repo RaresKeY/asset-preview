@@ -6,6 +6,9 @@ provenance are in [vendored/rendering.md](../vendored/rendering.md).
 
 Single view activates exactly one entry; grids have 2, 3 or 4 columns/rows,
 activating at most 4 (default), 9 or 16 entries on the selected page.
+Left/Right and Alt+Left/Right use the toolbar's navigation path: one preview in
+single mode or one page in grid mode, clamped at either end. These shortcuts
+also work while a native 3D or video surface has focus.
 Only those entries own decoded content, GPU engines and running generators.
 Hidden/minimized/closed windows activate none. Unchanged visible entries are retained
 when unrelated registrations change. Navigation destroys prior off-page views; camera
@@ -85,8 +88,8 @@ remains resident after use, while every off-page/hidden player, decoder and rend
 context is destroyed. No subprocess player, CPU frame-copy loop or video polling.
 
 Playback defaults to unpaused, muted, looping; controls support pause/mute/loop,
-absolute seek, five-second arrow seeks and Home restart. Space/double click toggles
-pause on the focused surface. Global Alt navigation retains precedence. The
+absolute seek, five-second Shift+Left/Right seeks and Home restart. Space/double
+click toggles pause on the focused surface. Plain arrows navigate previews/pages. The
 normal card fit action becomes pause/play; compact keeps playback options in ⋯.
 Finite source-save generators can publish videos through the existing watcher.
 
