@@ -14,6 +14,7 @@
 #include <QJsonDocument>
 #include <QLabel>
 #include <QLocalSocket>
+#include <QLocale>
 #include <QMimeData>
 #include <QMenu>
 #include <QResizeEvent>
@@ -68,31 +69,61 @@ public:
         // Small native overlays share the container's stacking context with the
         // embedded OpenGL window. A full-window overlay would intercept orbiting.
         header->setAttribute(Qt::WA_NativeWindow);
-        header->setStyleSheet("QFrame#viewOverlay {background:#20262e;border:1px solid #414b57;border-radius:4px;}"
+        const QString style="QFrame#viewOverlay {background:#20262e;border:1px solid #414b57;border-radius:4px;}"
             "QFrame#viewOverlay QLabel {color:#e8edf3;background:transparent;border:none;}"
             "QToolButton {color:#e8edf3;background:transparent;border:1px solid transparent;border-radius:3px;padding:2px;}"
             "QToolButton:hover {background:#394453;} QToolButton:pressed {background:#485566;}"
-            "QToolButton:focus {border-color:#82d9c8;}");
-        auto* row=new QHBoxLayout(header); row->setContentsMargins(7,1,3,1); row->setSpacing(3);
+            "QToolButton:focus {border-color:#82d9c8;}";
+        header->setStyleSheet(style);
+        auto* row=new QHBoxLayout(header); row->setContentsMargins(7,1,7,1); row->setSpacing(0);
         name=new QLabel(title,header); name->setTextFormat(Qt::PlainText); name->setToolTip(title+"\n"+path);
         name->setSizePolicy(QSizePolicy::Ignored,QSizePolicy::Preferred);
         auto font=name->font(); font.setBold(true); name->setFont(font); row->addWidget(name,1);
-        fit=new QToolButton(header); fit->setText("Fit"); fit->setToolTip("Fit camera / image (also double click)");
-        options=new QToolButton(header); options->setText("⋯"); options->setToolTip("Preview options");
-        remove=new QToolButton(header); remove->setText("×"); remove->setToolTip("Remove this preview");
-        for (auto* button:{fit,options,remove}) { button->setFixedSize(32,28); button->setFocusPolicy(Qt::StrongFocus); row->addWidget(button); }
+        controls=new QFrame(this); controls->setObjectName("viewOverlay"); controls->setAttribute(Qt::WA_NativeWindow);
+        controls->setStyleSheet(style);
+        auto* buttons=new QHBoxLayout(controls); buttons->setContentsMargins(3,1,3,1); buttons->setSpacing(3);
+        fit=new QToolButton(controls); fit->setText("Fit"); fit->setToolTip("Fit camera / image (also double click)");
+        options=new QToolButton(controls); options->setText("⋯"); options->setToolTip("Preview options");
+        options->setAccessibleName("Preview options");
+        remove=new QToolButton(controls); remove->setText("×"); remove->setToolTip("Remove this preview");
+        for (auto* button:{fit,options,remove}) { button->setFixedSize(32,28); button->setFocusPolicy(Qt::StrongFocus); buttons->addWidget(button); }
         footer=new QLabel(this); footer->setTextFormat(Qt::PlainText); footer->setAttribute(Qt::WA_NativeWindow);
         footer->setTextInteractionFlags(Qt::TextSelectableByMouse);
         footer->setStyleSheet("color:#e8edf3;background:#20262e;border:1px solid #414b57;border-radius:3px;padding:2px 5px;");
+        triangles=new QLabel(this); triangles->setTextFormat(Qt::PlainText); triangles->setAttribute(Qt::WA_NativeWindow);
+        triangles->setStyleSheet(footer->styleSheet()); triangles->setAccessibleName("Triangle count"); triangles->hide();
     }
     void setSurface(QWidget* surface) { content->addWidget(surface); }
     void setCompact(bool value) {
-        compact=value; fit->setVisible(!value); remove->setVisible(!value);
+        compact=value;
         updateStatus(); place();
     }
-    void updateStatus() { footer->setVisible(!compact || !footer->text().startsWith("Live")); place(); }
+    void setStatus(const QString& text,const QString& tooltip) {
+        statusText=text; footer->setToolTip(tooltip); updateStatus();
+    }
+    void updateStatus() { footer->setVisible(!compact || !statusText.startsWith("Live")); place(); }
+    void updateTriangles(const QJsonObject& config,const QJsonObject& metrics) {
+        const auto kind=config["kind"].toString();
+        const bool visible=(kind=="model" || kind=="material") && metrics["engine"].toBool() &&
+            config["settings"].toObject()["triangles"].toBool(true);
+        const auto count=metrics["triangles"];
+        triangleText=count.isDouble()?QString("%1 tris").arg(QLocale().toString(count.toInteger())):QString("Tris —");
+        triangles->setToolTip(count.isDouble()?"Loaded geometry · source triangles (including instances)":
+            "Triangle count is available for GLB, glTF, OBJ and material samples.");
+        triangles->setVisible(visible); place();
+    }
+    QJsonObject overlays(QWidget* window) const {
+        QJsonObject result;
+        for (const auto& item: {std::pair{"name",static_cast<QWidget*>(header)}, {"controls",static_cast<QWidget*>(controls)},
+                               {"status",static_cast<QWidget*>(footer)}, {"triangles",static_cast<QWidget*>(triangles)}}) {
+            const auto p=item.second->mapTo(window,QPoint());
+            result[item.first]=QJsonObject{{"x",p.x()},{"y",p.y()},{"width",item.second->width()},{"height",item.second->height()},
+                {"visible",item.second->isVisible()}};
+        }
+        return result;
+    }
     void compose(QPainter& painter, QWidget* window) {
-        for (auto* widget: {static_cast<QWidget*>(header),static_cast<QWidget*>(footer)})
+        for (auto* widget: {static_cast<QWidget*>(header),static_cast<QWidget*>(controls),static_cast<QWidget*>(footer),static_cast<QWidget*>(triangles)})
             if (widget->isVisible()) painter.drawPixmap(widget->mapTo(window,QPoint()),widget->grab());
     }
     QToolButton *fit, *options, *remove;
@@ -104,16 +135,31 @@ protected:
     }
 private:
     void place() {
+        name->ensurePolished(); footer->ensurePolished(); triangles->ensurePolished(); controls->ensurePolished();
         const int inset=compact?4:6;
-        header->setGeometry(inset,inset,std::max(1,width()-2*inset),compact?30:34);
+        const bool dense=compact || width()<240;
+        fit->setVisible(!dense); remove->setVisible(!dense);
+        const int headerHeight=compact?30:34;
+        const int controlWidth=controls->sizeHint().width();
+        controls->setGeometry(width()-inset-controlWidth,inset,controlWidth,headerHeight);
+        controls->layout()->activate();
+        const int available=std::max(1,width()-2*inset-controlWidth-4);
+        const int nameWidth=std::min(available,name->fontMetrics().horizontalAdvance(fullTitle)+16);
+        header->setGeometry(inset,inset,nameWidth,headerHeight);
         header->layout()->activate();
-        name->setText(name->fontMetrics().elidedText(fullTitle,Qt::ElideRight,std::max(0,name->width())));
-        footer->setGeometry(inset,std::max(inset,height()-inset-24),std::max(1,width()-2*inset),24);
-        header->raise(); footer->raise();
+        const int textWidth=std::max(0,nameWidth-16);
+        name->setText(name->fontMetrics().horizontalAdvance(fullTitle)<=textWidth ? fullTitle :
+            name->fontMetrics().elidedText(fullTitle,Qt::ElideRight,textWidth));
+        const int badgeWidth=std::max(1,width()-2*inset);
+        footer->setText(footer->fontMetrics().elidedText(statusText,Qt::ElideRight,std::max(0,badgeWidth-12)));
+        footer->setGeometry(inset,inset+headerHeight+4,std::min(badgeWidth,footer->sizeHint().width()),24);
+        triangles->setText(triangles->fontMetrics().elidedText(triangleText,Qt::ElideRight,std::max(0,badgeWidth-12)));
+        triangles->setGeometry(inset,std::max(inset,height()-inset-24),std::min(badgeWidth,triangles->sizeHint().width()),24);
+        header->raise(); controls->raise(); footer->raise(); triangles->raise();
     }
-    QString fullTitle;
-    QFrame* header;
-    QLabel* name;
+    QString fullTitle, statusText, triangleText;
+    QFrame *header, *controls;
+    QLabel *name, *triangles;
     QVBoxLayout* content;
     bool compact=false;
 };
@@ -221,7 +267,7 @@ QString Service::validate(QJsonObject& c, bool restore) {
     if (c.contains("maps") && !c.value("maps").isObject()) return "maps must be an object";
     if (c.contains("settings") && !c.value("settings").isObject()) return "settings must be an object";
     auto settings=c.value("settings").toObject();
-    const QSet<QString> known{"grid","axes","edges","orthographic","nearest","light","background","shape","roughness","metallic","materials","textures","lock_horizon","up_axis","lighting","paused","muted","loop"};
+    const QSet<QString> known{"grid","axes","edges","orthographic","nearest","light","background","shape","roughness","metallic","materials","textures","lock_horizon","up_axis","lighting","paused","muted","loop","triangles"};
     for (auto i=settings.begin();i!=settings.end();++i) {
         if (!known.contains(i.key())) return "Unknown setting: " + i.key();
         if (i.key()=="background") { if (!QSet<QString>{"dark","light","checker"}.contains(i.value().toString())) return "Invalid background"; }
@@ -275,6 +321,7 @@ QJsonObject Service::describe(const Entry& e) const {
         const auto p=e.optionsButton->mapTo(window.get(),QPoint());
         result["controls"]=QJsonObject{{"options",QJsonObject{{"x",p.x()},{"y",p.y()},{"width",e.optionsButton->width()},{"height",e.optionsButton->height()}}}};
         result["status_visible"]=e.statusLabel->isVisible();
+        result["overlays"]=static_cast<PreviewCard*>(e.card)->overlays(window.get());
     }
     return result;
 }
@@ -354,7 +401,7 @@ QJsonObject Service::request(const QJsonObject& r) {
             const auto old=e->config; e->config=config;
             try { save(); } catch (...) { e->config=old; throw; }
             if (e->view) e->view->settings(config);
-            if (e->config["kind"].toString()=="video") status(*e,e->status);
+            if (e->card) status(*e,e->status);
             return success();
         }
         return failure("Unknown method");
@@ -362,9 +409,10 @@ QJsonObject Service::request(const QJsonObject& r) {
 }
 void Service::status(Entry& e, const QString& text) {
     e.status=text;
-    if (e.statusLabel) { e.statusLabel->setText(text.left(140)); e.statusLabel->setToolTip(text + (e.log.isEmpty()?"":"\n\n"+e.log)); }
     if (e.card) {
-        auto* card=static_cast<PreviewCard*>(e.card); card->updateStatus();
+        auto* card=static_cast<PreviewCard*>(e.card);
+        card->setStatus(text,text + (e.log.isEmpty()?"":"\n\n"+e.log));
+        card->updateTriangles(e.config,e.view?e.view->metrics():QJsonObject{});
         if (e.config["kind"].toString()=="video") {
             const bool paused=e.config["settings"].toObject()["paused"].toBool();
             card->fit->setText(paused?"▶":"Ⅱ"); card->fit->setToolTip(paused?"Play video · Space":"Pause video · Space");
@@ -710,7 +758,7 @@ void PreviewWindow::createCard(Entry& e) {
                     });
                 }
             }
-            if (e->process && e->process->state()!=QProcess::NotRunning) return;
+            if (e->process && e->process->state()!=QProcess::NotRunning) { service->status(*e,e->status); return; }
             service->status(*e,ok?(video?"Live · video ready":"Live · model ready"):"Waiting · "+error);
         };
         try {
@@ -721,7 +769,7 @@ void PreviewWindow::createCard(Entry& e) {
         } catch (const std::exception& error) {
             e.status=QString(video?"Video backend unavailable · ":"3D backend unavailable · ")+QString::fromUtf8(error.what());
             qWarning("%s",qPrintable(e.status));
-            e.statusLabel->setText(e.status); e.statusLabel->setToolTip(e.status);
+            service->status(e,e.status);
             auto* message=new QLabel("Build the preview backends with tools/build.sh, then reopen this preview.",e.card);
             message->setWordWrap(true); message->setAlignment(Qt::AlignCenter); widget=message;
         }
@@ -775,6 +823,7 @@ void PreviewWindow::options(const QString& id) {
         });
     }
     else {
+        toggle("Show triangle &count","triangles",true);
         toggle("Show &materials","materials",true);
         toggle("Show &textures","textures",true)->setEnabled(settings["materials"].toBool(true));
         toggle("Lock &horizon","lock_horizon",true);

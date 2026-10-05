@@ -1,6 +1,6 @@
 # Preview lifecycle and rendering
 
-Source ownership: `src/viewer.{h,cpp}`, `src/model_view.{h,cpp}`, `src/video_view.{h,cpp}`, preview/card/window paths in `src/service.cpp`,
+Source ownership: `src/viewer.{h,cpp}`, `src/model_view.{h,cpp}`, `src/triangle_counts.h`, `src/video_view.{h,cpp}`, preview/card/window paths in `src/service.cpp`,
 `examples/generate_cube.py`, `tests/integration.py`, `tools/ui_scenes.py`. Renderer decisions and dependency
 provenance are in [vendored/rendering.md](../vendored/rendering.md).
 
@@ -18,10 +18,13 @@ Hidden/minimized/closed windows activate none. Unchanged visible entries are ret
 when unrelated registrations change. Navigation destroys prior off-page views; camera
 state persists during reload, but not across unloading.
 
-Cards allocate the full surface to content, with native sibling overlays for
-title/fit/options/remove and status. The single global toolbar owns navigation,
-grid size and compact mode. Compact reduces margins/gaps, puts fit/remove in the
-options menu and hides steady Live status; waiting/errors/building stay visible.
+Cards allocate the full surface to content, with separate native overlays:
+text-width title at top left, fit/options/remove at top right, text-width status
+below the title, and a triangle count at bottom left for loaded 3D views. The
+single global toolbar owns navigation, grid size and compact mode. Compact reduces
+margins/gaps, puts fit/remove in the options menu and hides steady Live status;
+waiting/errors/building and enabled triangle counts stay visible. Narrow cards
+also move fit/remove into the menu. Long title/status text elides within the card.
 Elided titles retain full title/path tooltips. Only overlays intercept pointer
 input; central content remains available for orbit/pan. Captures composite their
 small native overlays after model GPU readback, with no recurring copy loop.
@@ -56,6 +59,18 @@ overrides mutate imported actor properties, so mode changes create a replacement
 engine and reload the scene to restore authored shading, preserving the camera
 and last-good behavior. Authored vertex-color neutralization is not verified.
 
+Triangle counts default visible and can be toggled per model/material via options
+or the boolean `triangles` setting without reloading geometry. Counts derive from
+GLB/glTF primitive metadata in the selected scene (including mesh instances),
+streamed OBJ face sizes after triangulation, or the generated material sample.
+This runs only after successful loads, preserves last-good counts on rejected
+replacements and does not decode a second geometry copy or poll while idle.
+GLB/glTF JSON is capped at 16 MiB; OBJ lines at 1 MiB. Other formats/unavailable
+metadata display `Tris —` with an explanatory tooltip. Counts describe source
+primitives, including degenerate strip/fan triangles, rather than GPU frame work.
+Models expose nullable `metrics.triangles`; entry `overlays` reports ephemeral
+name/control/status/count geometry and visibility for isolated UI checks.
+
 Static and paused views repaint only after file changes, input, settings, exposure
 or resize. Playing videos additionally repaint on libmpv frame notifications.
 No idle render timer or file polling. QFileSystemWatcher observes
@@ -82,6 +97,9 @@ records actual verification and remaining limits.
 Camera tests measure horizon roll through native input and pole limits, reload
 retention and Z-up. Native overlay clicks open/toggle the real popup. Functional
 checks verify grid paging, compact busy/error visibility and restart persistence.
+`tools/test.sh metadata` checks bounded triangle metadata parsing without OpenGL;
+the hardware count test checks save refresh, last-good counts, overlay placement
+and toggling without reloading or moving the camera.
 
 README component screenshots use isolated Gamescope hardware sessions with KDE
 Breeze Dark chrome and dark preview backgrounds, preserving the compact 2×2

@@ -38,7 +38,7 @@ arbitrary plugin loading or command inference is implemented. Common video
 extensions are detected automatically; explicit `video` accepts other local formats.
 
 Boolean settings: `grid`, `axes`, `edges`, `orthographic`, `nearest`, `materials`,
-`textures`, `lock_horizon`, `paused`, `muted`, `loop`. Materials/textures/horizon,
+`textures`, `lock_horizon`, `triangles`, `paused`, `muted`, `loop`. Materials/textures/horizon/triangles,
 muted and loop default to true; paused defaults to false. Numeric settings:
 `light` in 0–5, `roughness` / `metallic` in 0–1. `background` is `dark`, `light` or
 `checker`; checker applies to images. Material `shape` is `sphere`, `cube` or `plane`.
@@ -62,8 +62,13 @@ Image metrics include decoded bytes and original/decoded dimensions; model metri
 include `engine`, actual OpenGL `renderer`, lighting mode, scene light count and
 `camera` position/focal/up vectors. VTK orthogonalizes the reported view-up vector;
 it is not necessarily equal to the world-up vector even with the horizon locked.
+`metrics.triangles` counts source triangles for GLB/glTF scenes, triangulated OBJ
+faces and material samples; it is null for unavailable formats/metadata. Mesh
+instances and degenerate primitives are included. The `triangles` option controls
+the per-view badge without reloading and defaults to true, including compact mode.
 Active entry diagnostics expose `viewport`, `controls.options` geometry and
-`status_visible`; top-level `options_open` reports an active popup. These support
+`status_visible`, plus `overlays` name/controls/status/triangles geometry/visibility;
+top-level `options_open` reports an active popup. These support
 isolated input checks and are not persisted. These are diagnostic counters,
 not a guarantee of GPU-memory reclamation or perceptual quality.
 Video metrics add `backend=libmpv`, `loading`, width/height, duration/position

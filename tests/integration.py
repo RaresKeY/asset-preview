@@ -390,6 +390,53 @@ class PreviewIntegration(unittest.TestCase):
             input.press("Left"); eventually(lambda:client.rpc({"method":"list"})["selected"]=="orbit")
         finally: input.close()
 
+    @unittest.skipUnless(GPU,"Hardware model triangle counts and overlays")
+    def test_21_triangle_counts_overlay_layout_and_refresh(self):
+        obj=self.root/"counted-cube.obj"
+        subprocess.run([sys.executable,str(ROOT/"examples/generate_cube.py"),str(obj)],check=True,capture_output=True)
+        client.rpc({"method":"add","entry":{"id":"counts","path":str(obj),"label":"Counted cube"}})
+        self.show()
+        eventually(lambda:row("counts").get("metrics",{}).get("engine"))
+        state=row("counts"); self.assertEqual(state["metrics"]["triangles"],12)
+        renderer=state["metrics"]["renderer"]
+        self.assertFalse(any(s in renderer.lower() for s in ("llvmpipe","softpipe","software","unknown")),renderer)
+        viewport=state["viewport"]; overlays=state["overlays"]
+        self.assertLess(overlays["name"]["width"],viewport["width"]//2)
+        self.assertLess(overlays["status"]["width"],viewport["width"]//2)
+        self.assertLess(overlays["name"]["x"]+overlays["name"]["width"],overlays["controls"]["x"])
+        self.assertGreater(overlays["status"]["y"],overlays["name"]["y"])
+        self.assertTrue(overlays["triangles"]["visible"])
+        loads=state["metrics"]["loads"]
+        for value in (False,True):
+            client.rpc({"method":"settings","id":"counts","settings":{"triangles":value}})
+            self.assertEqual(row("counts")["overlays"]["triangles"]["visible"],value)
+            self.assertEqual(row("counts")["metrics"]["loads"],loads)
+            self.assertEqual(row("counts")["metrics"]["camera"],state["metrics"]["camera"])
+        client.rpc({"method":"layout","compact":True})
+        self.assertFalse(row("counts")["status_visible"])
+        self.assertTrue(row("counts")["overlays"]["triangles"]["visible"])
+        # Atomic source edits update the count with the loaded model; a missing
+        # replacement retains last-good geometry and its count.
+        candidate=obj.with_suffix(".candidate")
+        candidate.write_text("v 0 0 0\nv 1 0 0\nv 0 1 0\nf 1 2 3\n"); candidate.replace(obj)
+        eventually(lambda:row("counts")["metrics"]["triangles"]==1)
+        obj.unlink(); eventually(lambda:row("counts")["status"].startswith("Waiting"))
+        self.assertEqual(row("counts")["metrics"]["triangles"],1)
+        self.assertTrue(row("counts")["status_visible"])
+        self.assertTrue(row("counts")["overlays"]["triangles"]["visible"])
+        albedo=self.root/"counted-material.png"; png(albedo)
+        client.rpc({"method":"add","entry":{"id":"sample","kind":"material","path":str(albedo),"settings":{"shape":"cube"}}})
+        client.rpc({"method":"select","id":"sample"})
+        eventually(lambda:row("sample").get("metrics",{}).get("engine"))
+        self.assertEqual(row("sample")["metrics"]["triangles"],12)
+        client.rpc({"method":"settings","id":"sample","settings":{"shape":"plane"}})
+        self.assertEqual(row("sample")["metrics"]["triangles"],2)
+        with self.assertRaisesRegex(RuntimeError,"Boolean setting required"):
+            client.rpc({"method":"settings","id":"sample","settings":{"triangles":"yes"}})
+        client.rpc({"method":"hide"}); self.assertNotIn("metrics",row("sample"))
+        self.show(); eventually(lambda:row("sample").get("metrics",{}).get("engine"))
+        self.assertEqual(row("sample")["metrics"]["triangles"],2)
+
     def test_13_corrupt_state_is_preserved(self):
         runtime,state=client.locations(); bad_runtime=self.root/"bad-runtime"; bad_state=self.root/"bad-state"
         client.private_directory(bad_state); corrupt=bad_state/"previews.json"; content=b"{unfinished"; corrupt.write_bytes(content)

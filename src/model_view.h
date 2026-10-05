@@ -2,6 +2,7 @@
 #include "viewer.h"
 #include <QOpenGLWindow>
 #include <f3d/engine.h>
+#include <optional>
 
 class ModelView final : public QOpenGLWindow, public PreviewView {
 public:
@@ -33,4 +34,5 @@ private:
     QPointF last;
     bool initialized = false;
     int loads = 0, renders = 0;
+    std::optional<qint64> triangles;
 };

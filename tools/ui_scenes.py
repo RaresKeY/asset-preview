@@ -47,6 +47,7 @@ def main():
             if args.phase=="after":
                 client.rpc({"method":"layout","layout":"grid","grid_size":3,"compact":True}); capture("compact-3x3",1000,720)
                 client.rpc({"method":"layout","layout":"grid","grid_size":4}); capture("compact-4x4",1600,1000)
+                capture("small-4x4",700,500)
                 client.rpc({"method":"layout","layout":"single","compact":False}); capture("studio",1000,720)
                 client.rpc({"method":"settings","id":"model","settings":{"textures":False}}); capture("no-textures")
                 client.rpc({"method":"settings","id":"model","settings":{"materials":False}}); capture("clay")

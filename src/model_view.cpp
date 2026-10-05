@@ -1,4 +1,5 @@
 #include "model_view.h"
+#include "triangle_counts.h"
 #include <QFileInfo>
 #include <QImageReader>
 #include <QJsonArray>
@@ -143,22 +144,27 @@ bool ModelView::load(QString& error) {
         auto next = std::make_unique<f3d::engine>(f3d::engine::createExternal(
             [this](const char* name) { return context()->getProcAddress(name); }));
         applyOptions(*next);
+        std::optional<qint64> nextTriangles;
         if (config["kind"].toString() == "material") {
             for (const auto& key : {"normal", "orm"}) {
                 const QString path = config["maps"].toObject()[key].toString();
                 if (!path.isEmpty() && !QFileInfo::exists(path)) { error = "Waiting for " + path; return false; }
             }
-            next->getScene().add(primitive(config["settings"].toObject()["shape"].toString("sphere")));
+            const auto mesh=primitive(config["settings"].toObject()["shape"].toString("sphere"));
+            next->getScene().add(mesh);
+            nextTriangles=qint64(mesh.face_sides.size());
         } else {
             const std::filesystem::path path(config["path"].toString().toStdString());
             if (!next->getScene().supports(path)) { error = "Unsupported model format"; return false; }
             next->getScene().add(path);
+            nextTriangles=preview::sourceTriangles(config["path"].toString());
         }
         auto& window = next->getWindow();
         window.setSize(std::max(1, int(width()*devicePixelRatioF())), std::max(1, int(height()*devicePixelRatioF())));
         if (engine) window.getCamera().setState(engine->getWindow().getCamera().getState());
         else { window.getCamera().azimuth(30).elevation(20).resetToBounds(); }
         engine = std::move(next);
+        triangles=nextTriangles;
         if (config["settings"].toObject()["lock_horizon"].toBool(true)) orbit(0,0);
         ++loads;
         return true;
@@ -175,6 +181,9 @@ void ModelView::settings(const QJsonObject& cfg) {
         next["materials"].toBool(true) != old["materials"].toBool(true) ||
         next["textures"].toBool(true) != old["textures"].toBool(true);
     config = cfg;
+    auto oldRendering=old, nextRendering=next;
+    oldRendering.remove("triangles"); nextRendering.remove("triangles");
+    if (oldRendering==nextRendering) return; // Overlay-only preference; keep the renderer untouched.
     if (engine) {
         makeCurrent();
         if (reloadScene) { QString error; const bool ok = load(error); if (loaded) loaded(ok, error); }
@@ -188,6 +197,7 @@ void ModelView::fit() {
 }
 QJsonObject ModelView::metrics() const {
     QJsonObject result{{"loads", loads}, {"renders", renders}, {"engine", bool(engine)}, {"renderer", renderer}};
+    result["triangles"]=engine && triangles ? QJsonValue(*triangles) : QJsonValue(QJsonValue::Null);
     if (engine) {
         const auto c=engine->getWindow().getCamera().getState();
         result["camera"]=QJsonObject{{"position",QJsonArray{c.position[0],c.position[1],c.position[2]}},
