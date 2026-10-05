@@ -23,7 +23,8 @@ RUN bash /build-dependencies.sh mpv
 RUN bash /build-dependencies.sh vtk
 COPY packaging/build-assimp.sh /build-assimp.sh
 RUN bash /build-assimp.sh
-RUN bash /build-dependencies.sh f3d
+COPY packaging/build-f3d.sh /build-f3d.sh
+RUN bash /build-f3d.sh
 COPY . /src
 ARG SOURCE_COMMIT=unknown
 RUN cmake -S /src -B /src/build -G Ninja -DCMAKE_BUILD_TYPE=Release \
@@ -31,7 +32,7 @@ RUN cmake -S /src -B /src/build -G Ninja -DCMAKE_BUILD_TYPE=Release \
  && cmake --build /src/build --parallel 2
 RUN python3 /src/packaging/bundle.py /out/asset-preview \
  && python3 /src/packaging/sources.py /out/asset-preview /out/sources \
- && cp /src/packaging/Containerfile /src/packaging/build-dependencies.sh /src/packaging/build-assimp.sh /out/sources/ \
+ && cp /src/packaging/Containerfile /src/packaging/build-dependencies.sh /src/packaging/build-assimp.sh /src/packaging/build-f3d.sh /out/sources/ \
  && cp /src/packaging/bundle.py /src/packaging/sources.py /out/sources/
 RUN python3 /src/packaging/make-release.py /out
 
