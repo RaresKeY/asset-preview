@@ -1,0 +1,104 @@
+{
+  "version": "0.0.1",
+  "source_commit": "6a1ca605c8f12018649d51193a3b1a1c3803aa7d",
+  "release": "https://github.com/RaresKeY/asset-preview/releases/tag/0.0.1",
+  "workflow": "https://github.com/RaresKeY/asset-preview/actions/runs/37354990158",
+  "container": {
+    "image": "ghcr.io/rareskey/asset-preview",
+    "tags": [
+      "0.0.1",
+      "latest"
+    ],
+    "digest": "sha256:959f83a32b66bcddf5ba557d65fd94825f7828d4a6ed57ad7d99267c91b7efdb",
+    "visibility": "private"
+  },
+  "downloads": [
+    {
+      "name": "asset-preview-0.0.1-corresponding-sources.tar.xz",
+      "size": 1128972252,
+      "digest": "sha256:b8823d00851427967265c433605c9b494ea484fae2a888420e8f09535c16c808"
+    },
+    {
+      "name": "asset-preview-0.0.1-linux-x86_64.run",
+      "size": 110532348,
+      "digest": "sha256:1cf12197bf5ff5173d67f2df415cc6d62243e9963485a11b3f9c559f319abcae"
+    },
+    {
+      "name": "SHA256SUMS",
+      "size": 218,
+      "digest": "sha256:14289d69d9e7f741834e505d5100ed4c8e46ec28114b7ca01796b54ec31c4889"
+    }
+  ],
+  "standalone": {
+    "model_refresh": true,
+    "generator_environment_restored": true,
+    "renderers": [
+      "NVIDIA GeForce RTX 2080 Ti/PCIe/SSE2"
+    ],
+    "platform": "xcb",
+    "previews": [
+      {
+        "id": "image",
+        "kind": "image",
+        "loaded": 2
+      },
+      {
+        "id": "model",
+        "kind": "model",
+        "loaded": 1
+      },
+      {
+        "id": "material",
+        "kind": "material",
+        "loaded": 1
+      },
+      {
+        "id": "video",
+        "kind": "video",
+        "loaded": 1
+      }
+    ]
+  },
+  "container_validation": {
+    "model_refresh": true,
+    "generator_environment_restored": true,
+    "renderers": [
+      "NVIDIA GeForce RTX 2080 Ti/PCIe/SSE2"
+    ],
+    "platform": "xcb",
+    "previews": [
+      {
+        "id": "image",
+        "kind": "image",
+        "loaded": 2
+      },
+      {
+        "id": "model",
+        "kind": "model",
+        "loaded": 1
+      },
+      {
+        "id": "material",
+        "kind": "material",
+        "loaded": 1
+      },
+      {
+        "id": "video",
+        "kind": "video",
+        "loaded": 1
+      }
+    ]
+  },
+  "privacy_review": {
+    "application_snapshot_common_token_private_key_and_workstation_path_patterns_absent": true,
+    "compiled_application_workstation_paths_absent": true,
+    "commit_emails_use_github_noreply": true
+  },
+  "requirements": {
+    "platform": "Linux x86_64",
+    "glibc_minimum": "2.39",
+    "display": "X11/XWayland",
+    "graphics": "Host OpenGL/EGL drivers"
+  },
+  "verification_scope": "Hardware preview proof on NVIDIA RTX 2080 Ti; GitHub runner checks service startup only. Other GPU vendors and Linux distributions were not validated."
+}

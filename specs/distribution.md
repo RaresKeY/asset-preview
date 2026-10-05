@@ -37,3 +37,13 @@ release outputs are removed after remote upload verification.
 The release omits Qt’s optional TIFF plugin because Ubuntu’s TIFF library links
 GPL JBIG code. Convert TIFF image previews to PNG; this restriction does not
 change the separately built VTK model readers. Minimal libmpv omits scripting.
+
+Release 0.0.1 is published privately on GitHub, with GHCR tags `0.0.1` and
+`latest` pointing to the same image. The application snapshot is commit
+`6a1ca605c8f12018649d51193a3b1a1c3803aa7d`; later CI-only fixes prepare the
+GitHub runner's host graphics loaders. `evidence/releases/0.0.1/validation.json`
+records remote digests and isolated native/container hardware preview checks.
+Proof covers NVIDIA RTX 2080 Ti with X11/XWayland, not every Linux/GPU combination.
+The container supplies OpenGL loaders and font configuration; host GPU drivers
+are supplied at launch. `docs/distribution-options.md` compares conventional
+Linux formats and recommends MIT without applying an application license.

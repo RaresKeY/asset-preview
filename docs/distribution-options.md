@@ -45,6 +45,9 @@ Choose **GPL-3.0-or-later** if distributed modified versions should remain open
 source under copyleft. That is a different policy choice rather than an install
 requirement. [GPL-3.0 text](https://www.gnu.org/licenses/gpl-3.0.html).
 
+MIT recipients may redistribute the app, including publicly; a private GitHub
+repository controls access rather than imposing confidentiality.
+
 This is a recommendation; no application license has been applied. Keep dependency
 notices and corresponding-source obligations separate. An MIT application license
 does not relicense Qt or the LGPL media libraries, remove codec patent concerns,
