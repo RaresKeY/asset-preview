@@ -38,8 +38,8 @@ The release omits Qt’s optional TIFF plugin because Ubuntu’s TIFF library li
 GPL JBIG code. Convert TIFF image previews to PNG; this restriction does not
 change the separately built VTK model readers. Minimal libmpv omits scripting.
 
-Release 0.0.1 is published privately on GitHub, with GHCR tags `0.0.1` and
-`latest` pointing to the same image. The application snapshot is commit
+Historical release 0.0.1 remains private on GitHub with GHCR tag `0.0.1`.
+Its application snapshot is commit
 `6a1ca605c8f12018649d51193a3b1a1c3803aa7d`; later CI-only fixes prepare the
 GitHub runner's host graphics loaders. `evidence/releases/0.0.1/validation.json`
 records remote digests and isolated native/container hardware preview checks.
@@ -69,3 +69,16 @@ host execution; no strict sandbox claim. Its host CLI bridge is a separate small
 release archive requiring host Python 3. The `.flatpak` bundle and bridge are
 GitHub Release downloads; no public Flathub submission or remote update channel.
 `docs/install-linux.md` owns install/remove/update commands and platform limits.
+
+Release 0.0.2 is published privately from frozen tag snapshot
+`4bb0516f7825ca3234848470f8a8fb11cdd85db7`, with all desktop formats, the host
+Flatpak bridge, verified PKGBUILD, dependency sources and checksums in GitHub
+Releases. GHCR `0.0.2` and `latest` share digest
+`sha256:45968df011d338526ccf61c923bfc699b1b32659470fd8b38dfc7164bd935bee`.
+`evidence/releases/0.0.2/validation.json` records remote hashes, native installs,
+AppImage/Flatpak/container NVIDIA GPU previews and Flatpak host child-group
+cleanup on hide, shutdown, timeout and normal completion. Source on `main` may
+include later UI work beyond the frozen release. Runtime libraries and graphics
+drivers remain external as described above; native packages are unsigned.
+The temporary OCI transport archive is removed from Releases after private GHCR
+publication; generated local candidates are removed after remote verification.

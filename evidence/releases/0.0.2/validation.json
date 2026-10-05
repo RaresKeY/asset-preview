@@ -1,0 +1,184 @@
+{
+  "release": "0.0.2",
+  "source_commit": "4bb0516f7825ca3234848470f8a8fb11cdd85db7",
+  "repository_visibility": "private",
+  "release_url": "https://github.com/RaresKeY/asset-preview/releases/tag/0.0.2",
+  "assets": [
+    {
+      "name": "asset-preview-0.0.2-1-x86_64.pkg.tar.zst",
+      "size": 101264324,
+      "digest": "sha256:82310aae26127c222d88e502da7794cc045c6677b03c9a1ba6504adefb12fbb3"
+    },
+    {
+      "name": "asset-preview-0.0.2-1.x86_64.rpm",
+      "size": 109801868,
+      "digest": "sha256:447071d5bc989e8b59a0bbeedfefcc82b536dffbc29c463bec905195440dc0fa"
+    },
+    {
+      "name": "asset-preview-0.0.2-corresponding-sources.tar.xz",
+      "size": 1140361980,
+      "digest": "sha256:d9859b1b7bbe8e5d51f4f50c0e4322068366746581f4edc160d2a94f4e36dbb3"
+    },
+    {
+      "name": "asset-preview-0.0.2-flatpak-client.tar.gz",
+      "size": 7940,
+      "digest": "sha256:b2844b23315aee7fb0ed9ff6a18e61e9384efd77649c95498105ee8893379884"
+    },
+    {
+      "name": "asset-preview-0.0.2-linux-x86_64.AppImage",
+      "size": 100461048,
+      "digest": "sha256:7f6e319621c0f7685e9db8b76be4453b9c4e43cefc4c40200374ec486d977c09"
+    },
+    {
+      "name": "asset-preview-0.0.2-linux-x86_64.flatpak",
+      "size": 77135184,
+      "digest": "sha256:949ca67ff33559869dd3298ef9ce04c882996482439646dcf922c5fa4931b71e"
+    },
+    {
+      "name": "asset-preview-0.0.2-linux-x86_64.run",
+      "size": 110560481,
+      "digest": "sha256:0d50b01a384f5040e24ada6f60f11650575662376082432e2470e76ca5d298ef"
+    },
+    {
+      "name": "asset-preview-0.0.2-linux-x86_64.tar.gz",
+      "size": 110559922,
+      "digest": "sha256:e62974303d15d7773897295b414f870194eb85a02dd61b2680fe34d8ac8a1422"
+    },
+    {
+      "name": "asset-preview_0.0.2_amd64.deb",
+      "size": 83636500,
+      "digest": "sha256:993f8336b6a5ac012108ad4d34ff6214629de727f1ee3922118d924e87dada30"
+    },
+    {
+      "name": "PKGBUILD",
+      "size": 1655,
+      "digest": "sha256:82c64b17e6a250d2f6ebf151e22615ececc43c4e2325af80e9c40d217bda15ce"
+    },
+    {
+      "name": "SHA256SUMS",
+      "size": 1024,
+      "digest": "sha256:9dc56513236261cec4e51d3306fbae66a19614bec0f413c0b3611cb11efb20ff"
+    }
+  ],
+  "container": {
+    "image": "ghcr.io/rareskey/asset-preview",
+    "tags": [
+      "0.0.2",
+      "latest"
+    ],
+    "digest": "sha256:45968df011d338526ccf61c923bfc699b1b32659470fd8b38dfc7164bd935bee",
+    "visibility": "private",
+    "workflow_run": 37386130627
+  },
+  "hardware_previews": {
+    "appimage": {
+      "model_refresh": true,
+      "generator_environment_restored": true,
+      "renderers": [
+        "NVIDIA GeForce RTX 2080 Ti/PCIe/SSE2"
+      ],
+      "platform": "xcb",
+      "previews": [
+        {
+          "id": "image",
+          "kind": "image",
+          "loaded": 2
+        },
+        {
+          "id": "model",
+          "kind": "model",
+          "loaded": 1
+        },
+        {
+          "id": "material",
+          "kind": "material",
+          "loaded": 1
+        },
+        {
+          "id": "video",
+          "kind": "video",
+          "loaded": 1
+        }
+      ]
+    },
+    "flatpak": {
+      "model_refresh": true,
+      "generator_environment_restored": true,
+      "renderers": [
+        "NVIDIA GeForce RTX 2080 Ti/PCIe/SSE2"
+      ],
+      "platform": "xcb",
+      "previews": [
+        {
+          "id": "image",
+          "kind": "image",
+          "loaded": 2
+        },
+        {
+          "id": "model",
+          "kind": "model",
+          "loaded": 1
+        },
+        {
+          "id": "material",
+          "kind": "material",
+          "loaded": 1
+        },
+        {
+          "id": "video",
+          "kind": "video",
+          "loaded": 1
+        }
+      ]
+    },
+    "container": {
+      "model_refresh": true,
+      "generator_environment_restored": true,
+      "renderers": [
+        "NVIDIA GeForce RTX 2080 Ti/PCIe/SSE2"
+      ],
+      "platform": "xcb",
+      "previews": [
+        {
+          "id": "image",
+          "kind": "image",
+          "loaded": 2
+        },
+        {
+          "id": "model",
+          "kind": "model",
+          "loaded": 1
+        },
+        {
+          "id": "material",
+          "kind": "material",
+          "loaded": 1
+        },
+        {
+          "id": "video",
+          "kind": "video",
+          "loaded": 1
+        }
+      ]
+    }
+  },
+  "native_installation_checks": {
+    "Ubuntu 24.04": "install, loader resolution, version, start/status/stop, desktop metadata",
+    "Fedora 43": "install, loader resolution, version, start/status/stop, desktop metadata",
+    "Arch Linux": "install, loader resolution, version, start/status/stop, desktop metadata; no GPU render claim"
+  },
+  "flatpak_host_generator_lifecycle": {
+    "host_generator_group_retired": {
+      "hide": true,
+      "shutdown": true,
+      "timeout": true,
+      "normal_exit": true
+    }
+  },
+  "portable_and_flatpak_payload_digest": "af217646fd55c1087bc516f84d9829edc2e82be58f0983691b74f8202568ed7b",
+  "appimage_fuse_mount_and_extraction_fallback": true,
+  "self_extracting_run_version_check": true,
+  "remote_asset_digests_verified": true,
+  "temporary_container_release_asset_removed": true,
+  "scope": "GPU proof: NVIDIA RTX 2080 Ti, X11/XWayland; native package checks do not prove every distribution/GPU combination."
+}

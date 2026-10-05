@@ -2,8 +2,16 @@
 
 Downloads: [release 0.0.2](https://github.com/RaresKeY/asset-preview/releases/tag/0.0.2).
 The repository, release and GHCR package are private; download while signed in
-with access, or use `gh release download 0.0.2 -R RaresKeY/asset-preview`.
-Verify downloads with `sha256sum -c SHA256SUMS` in the download directory.
+with access. Download one format plus checksums, for example:
+
+```sh
+gh release download 0.0.2 -R RaresKeY/asset-preview \
+  -p asset-preview-0.0.2-linux-x86_64.AppImage -p SHA256SUMS
+sha256sum --ignore-missing -c SHA256SUMS
+```
+
+Use your chosen asset name with `-p`; missing formats are skipped during checksum
+verification. The corresponding-source archive is a separate optional download.
 
 All formats are Linux x86_64. AppImage, portable and native packages require
 glibc 2.39+, X11/XWayland and installed OpenGL/EGL drivers and the Vulkan loader (`libvulkan.so.1`). They include private
