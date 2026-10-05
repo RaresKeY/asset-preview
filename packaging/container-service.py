@@ -3,7 +3,7 @@
 import os, runpy, signal, subprocess, time
 from pathlib import Path
 root=Path(__file__).resolve().parent
-client=runpy.run_path(str(root/'bin/asset-preview'),run_name='preview_client')
+client=runpy.run_path(str(root/'bin/client.py'),run_name='preview_client')
 runtime,state=client['locations']()
 client['private_directory'](runtime);client['private_directory'](state)
 child=subprocess.Popen([str(root/'build/asset-preview-server'),'--socket',str(runtime/'preview.sock'),'--state',str(state)])

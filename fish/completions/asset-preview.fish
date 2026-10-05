@@ -1,4 +1,4 @@
-complete -c asset-preview -n '__fish_use_subcommand' -a 'gui start stop hide list status paths add material remove select reload layout settings seek capture' -d 'Live asset preview'
+complete -c asset-preview -n '__fish_use_subcommand' -a 'gui start stop hide list status paths licenses add material remove select reload layout settings seek capture' -d 'Live asset preview'
 complete -c asset-preview -n '__fish_seen_subcommand_from remove select reload settings seek' -a '(asset-preview --complete-ids)' -f
 complete -c asset-preview -n '__fish_seen_subcommand_from layout' -a 'single grid' -f
 complete -c asset-preview -n '__fish_seen_subcommand_from layout' -l size -r -f -a '2 3 4' -d 'Grid rows/columns'
@@ -16,3 +16,5 @@ complete -c asset-preview -n '__fish_seen_subcommand_from material' -l orm -r -F
 complete -c asset-preview -n '__fish_seen_subcommand_from material' -l shape -r -f -a 'sphere cube plane' -d 'Material sample shape'
 complete -c asset-preview -n '__fish_seen_subcommand_from status list' -l json -d 'Machine-readable state'
 complete -c asset-preview -l help -s h -d 'Show help'
+
+complete -c asset-preview -l version -d 'Show release version'

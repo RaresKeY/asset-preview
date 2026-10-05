@@ -15,6 +15,10 @@ shutil.copy2(src/'packaging/container-service.py', out/'container-service.py')
 for name in ('README.md', 'THIRD_PARTY_NOTICES.md', 'icon.svg'):
     shutil.copy2(src/name, out/name)
 shutil.copytree(src/'docs', out/'docs')
+# Preserve the documented bin/asset-preview entrypoint without host Python.
+(out/'bin/asset-preview').rename(out/'bin/client.py')
+(out/'bin/asset-preview').write_text('#!/bin/sh\nset -eu\npreview_root=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)\nexec "$preview_root/asset-preview" "$@"\n')
+(out/'bin/asset-preview').chmod(0o755)
 (out/'tools').mkdir(); shutil.copy2(src/'tools/install.py', out/'tools/install.py')
 (out/'build').mkdir(); (out/'lib').mkdir()
 roots = []
@@ -26,11 +30,10 @@ stdlib=Path('/usr/lib')/pyver
 shutil.copytree(stdlib,out/'python/lib'/pyver,
     ignore=shutil.ignore_patterns('__pycache__','*.pyc','test','tests','ensurepip','tkinter','idlelib','dist-packages','lib-dynload'))
 shutil.copy2(Path(sys.executable).resolve(),out/'python/python3'); roots.append(Path(sys.executable).resolve())
-extensions=['_socket','_posixsubprocess','select','fcntl','array','math','_struct','_json','_heapq','_bisect',
- '_datetime','_random','_sha2','_sha256','_sha512','_sha1','_md5','_blake2','_opcode','_typing','unicodedata','_csv','zlib','binascii','resource','grp']
+excluded_extensions={'_gdbm','_dbm','readline','_tkinter'}
 extdir=out/'python/lib'/pyver/'lib-dynload';extdir.mkdir()
 for p in (stdlib/'lib-dynload').glob('*.so'):
-    if p.name.split('.')[0] in extensions: shutil.copy2(p,extdir/p.name);roots.append(p)
+    if p.name.split('.')[0] not in excluded_extensions and not p.name.startswith('_test'): shutil.copy2(p,extdir/p.name);roots.append(p)
 plugins=Path('/usr/lib/x86_64-linux-gnu/qt6/plugins')
 for group in ('platforms','imageformats','xcbglintegrations','iconengines'):
     dst=out/'qt/plugins'/group;dst.mkdir(parents=True)
@@ -78,7 +81,7 @@ if [ "${1:-}" = "--foreground" ]; then
  shift
  exec "$preview_root/python/python3" "$preview_root/container-service.py" "$@"
 fi
-exec "$preview_root/python/python3" "$preview_root/bin/asset-preview" "$@"
+exec "$preview_root/python/python3" "$preview_root/bin/client.py" "$@"
 ''')
 (out/'asset-preview').chmod(0o755)
 # Dynamic linkage permits replacement of LGPL libraries. No static Qt/mpv link.

@@ -1,6 +1,8 @@
 #!/usr/bin/env python3
 import hashlib, subprocess, sys
 from pathlib import Path
+def digest(path):
+ with path.open('rb') as f:return hashlib.file_digest(f,'sha256').hexdigest()
 out=Path(sys.argv[1]); name='asset-preview-0.0.1-linux-x86_64.run'
 archive=out/'bundle.tar.gz'
 subprocess.run(['tar','-czf',str(archive),'-C',str(out),'asset-preview'],check=True)
@@ -19,7 +21,7 @@ if [ ! -x "$preview_cache/asset-preview/asset-preview" ]; then
 fi
 exec "$preview_cache/asset-preview/asset-preview" "$@"
 '''
-header=header.replace('BUNDLE_HASH',hashlib.sha256(archive.read_bytes()).hexdigest()[:16])
+header=header.replace('BUNDLE_HASH',digest(archive)[:16])
 header=header.replace('HEADER_LINES',str(len(header.splitlines())+1))
 p=out/name
 with p.open('wb') as f:
@@ -28,5 +30,5 @@ with p.open('wb') as f:
   import shutil;shutil.copyfileobj(a,f)
 p.chmod(0o755);archive.unlink()
 source=out/'asset-preview-0.0.1-corresponding-sources.tar.xz'
-subprocess.run(['tar','-cJf',str(source),'-C',str(out),'sources'],check=True)
-(out/'SHA256SUMS').write_text(''.join(f'{hashlib.sha256(p.read_bytes()).hexdigest()}  {p.name}\n' for p in (out/name,source)))
+subprocess.run(['tar','-I','xz -T2 -0','-cf',str(source),'-C',str(out),'sources'],check=True)
+(out/'SHA256SUMS').write_text(''.join(f'{digest(p)}  {p.name}\n' for p in (out/name,source)))
