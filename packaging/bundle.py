@@ -59,10 +59,21 @@ while pending:
 (out/'asset-preview').write_text('''#!/bin/sh
 set -eu
 preview_root=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
+if [ "${ASSET_PREVIEW_BUNDLE_ROOT:-}" != "$preview_root" ]; then
+ export ASSET_PREVIEW_ORIGINAL_LD_LIBRARY_PATH="${LD_LIBRARY_PATH-}"
+ export ASSET_PREVIEW_ORIGINAL_QT_PLUGIN_PATH="${QT_PLUGIN_PATH-}"
+ export ASSET_PREVIEW_ORIGINAL_PYTHONHOME="${PYTHONHOME-}"
+ export ASSET_PREVIEW_ORIGINAL_PYTHONNOUSERSITE="${PYTHONNOUSERSITE-}"
+fi
+export ASSET_PREVIEW_BUNDLE_ROOT="$preview_root"
 export LD_LIBRARY_PATH="$preview_root/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
 export QT_PLUGIN_PATH="$preview_root/qt/plugins"
 export PYTHONHOME="$preview_root/python"
 export PYTHONNOUSERSITE=1
+if [ "${1:-}" = "--python" ]; then
+ shift
+ exec "$preview_root/python/python3" "$@"
+fi
 if [ "${1:-}" = "--foreground" ]; then
  shift
  exec "$preview_root/python/python3" "$preview_root/container-service.py" "$@"

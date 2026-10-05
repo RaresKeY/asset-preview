@@ -30,7 +30,9 @@ Finite explicit generator argument arrays run through QProcess in their declared
 cwd and separate sessions/process groups. They never pass through a shell implicitly.
 Source saves coalesce into at most one follow-up run; timeout, hide, remove and exit
 stop the owned group. Generator logs retain only the latest 16 KiB. Project runtime,
-container, lock and exporter policy remain caller-owned.
+container, lock and exporter policy remain caller-owned. Packaged launchers preserve
+the caller's library/Qt/Python path settings; generator children restore those
+settings instead of inheriting the viewer bundle's paths.
 
 Installation preflights both fish symlinks, the owned Codex skill symlink and the
 managed desktop entry, refuses unrelated destinations, validates the entry when a validator is installed and

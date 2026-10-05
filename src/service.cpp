@@ -1,4 +1,5 @@
 #include "service.h"
+#include <QProcessEnvironment>
 #include <QApplication>
 #include <QCheckBox>
 #include <QCloseEvent>
@@ -491,6 +492,20 @@ void Service::build(const QString& id) {
     e->process=std::make_unique<QProcess>(); e->deadline=std::make_unique<QTimer>();
     e->deadline->setSingleShot(true); e->log.clear(); ++e->builds;
     auto* p=e->process.get();
+    // Bundled Qt/Python/library paths belong to the viewer, not its generators.
+    // Restore the caller's environment for project wrappers and host runtimes.
+    auto generatorEnv=QProcessEnvironment::systemEnvironment();
+    if (generatorEnv.contains("ASSET_PREVIEW_BUNDLE_ROOT")) {
+        for (const auto* key:{"LD_LIBRARY_PATH","QT_PLUGIN_PATH","PYTHONHOME","PYTHONNOUSERSITE"}) {
+            const QString original=QStringLiteral("ASSET_PREVIEW_ORIGINAL_")+QString::fromLatin1(key);
+            const QString value=generatorEnv.value(original);
+            if (value.isEmpty()) generatorEnv.remove(QString::fromLatin1(key));
+            else generatorEnv.insert(QString::fromLatin1(key),value);
+            generatorEnv.remove(original);
+        }
+        generatorEnv.remove("ASSET_PREVIEW_BUNDLE_ROOT");
+        p->setProcessEnvironment(generatorEnv);
+    }
     p->setWorkingDirectory(e->config["cwd"].toString()); p->setProcessChannelMode(QProcess::MergedChannels);
     p->setChildProcessModifier([] { if (::setsid()<0) _exit(126); });
     QStringList arguments; for (int i=1;i<args.size();++i) arguments.append(args[i].toString());
