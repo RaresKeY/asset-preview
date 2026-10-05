@@ -50,7 +50,12 @@ GPU for a loaded 3D preview. File registration alone is not evidence of a succes
 export or correct material appearance. Remove only the registrations you own when
 finished; removal does not delete source or asset files.
 
+The [`$asset-preview` skill](../skills/asset-preview/SKILL.md) is installed by
+`python tools/install.py` as an owned symlink in Codex's skills directory. Its
+instructions apply during visual asset authoring and live inspection. Asset
+Workshop's `AGENTS.md` requires that connection throughout visual iteration;
+its manifest helper uses stable `workshop-<asset>-<view>` IDs.
+
 The newline JSON socket is available when another tool needs a direct connection;
 the CLI implements startup serialization and validation, so prefer it for ordinary
-agent work. See [protocol.md](protocol.md). This is the maintained contract for a
-future agent skill; no new global skill is installed yet.
+agent work. See [protocol.md](protocol.md). The skill follows this maintained contract.

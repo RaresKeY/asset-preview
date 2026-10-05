@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Install owned desktop/fish entrypoints without changing global shortcuts or PATH."""
+"""Install owned desktop/fish/skill entrypoints without changing shortcuts or PATH."""
 from pathlib import Path
 import os
 import shutil
@@ -17,6 +17,8 @@ def main() -> None:
     data = Path(os.environ.get("XDG_DATA_HOME", Path.home() / ".local/share"))
     desktop = data / "applications/asset-preview.desktop"
     links = [(ROOT / f"fish/{kind}/asset-preview.fish", config / f"fish/{kind}/asset-preview.fish") for kind in ("functions", "completions")]
+    codex = Path(os.environ.get("CODEX_HOME", Path.home() / ".codex"))
+    links.append((ROOT / "skills/asset-preview", codex / "skills/asset-preview"))
     # Preflight every destination before changing any of them.
     for source, target in links:
         if (target.exists() or target.is_symlink()) and not (target.is_symlink() and target.resolve() == source):

@@ -68,5 +68,5 @@ F3D previews exported assets and baked maps. Godot shaders and Material Maker gr
 require their owning exporter/baker or a finite PNG capture command. The inspected
 material appearance is not evidence of an exact Godot shader match. Imported scenes
 can block the GUI during loading and have no guaranteed resident-memory ceiling.
-The future agent skill remains deferred; the maintained connection contract is in
+The agent skill is now versioned in `skills/asset-preview/`; the maintained connection contract is in
 [agent-flow.md](../docs/agent-flow.md) and [protocol.md](../docs/protocol.md).

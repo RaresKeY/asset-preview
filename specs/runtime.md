@@ -1,7 +1,7 @@
 # Runtime and connections
 
 Source ownership: `src/main.cpp`, `src/service.{h,cpp}`, `bin/asset-preview`,
-`fish/`, `tools/install.py`, `play.sh`, `icon.svg`. See [protocol](../docs/protocol.md)
+`fish/`, `skills/asset-preview/`, `tools/install.py`, `play.sh`, `icon.svg`. See [protocol](../docs/protocol.md)
 for concrete request/configuration fields and limits.
 
 A Qt service and optional single GUI window share one native process. A standard
@@ -28,11 +28,14 @@ Source saves coalesce into at most one follow-up run; timeout, hide, remove and 
 stop the owned group. Generator logs retain only the latest 16 KiB. Project runtime,
 container, lock and exporter policy remain caller-owned.
 
-Installation preflights both fish symlinks and the managed desktop entry, refuses
-unrelated destinations, validates the entry when a validator is installed and
+Installation preflights both fish symlinks, the owned Codex skill symlink and the
+managed desktop entry, refuses unrelated destinations, validates the entry when a validator is installed and
 refreshes KDE's application database. No PATH/global hotkey change. Completion is
 read-only and Qt-free; it reads the running server or the persisted registry without
 starting a server. `play.sh` delegates to the same GUI entrypoint for Playpad discovery.
+The skill's canonical source/UI metadata is versioned in `skills/asset-preview/`;
+installation links it into `${CODEX_HOME:-~/.codex}/skills/asset-preview` without
+changing unrelated skills or invocation policy. Automatic skill selection is enabled.
 
 Verification: `tools/test.sh functional` exercises the real daemon, concurrent
 startup, permissions, schema failures, save replacement/recovery, bounded lifetime,

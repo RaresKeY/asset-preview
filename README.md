@@ -137,9 +137,9 @@ Wayland. Hardware rendering and embedded views are verified on that path. Native
 Wayland embedding currently fails the 3D check and is unsupported. An explicitly
 set `QT_QPA_PLATFORM` is respected; the launcher does not change your shell settings.
 
-The installer uses owned fish symlinks and a validated desktop entry; it refuses
-to overwrite unrelated files and does not change global hotkeys or PATH. After
-moving the checkout, remove the two old owned fish symlinks, set
+The installer uses owned fish and Codex skill symlinks plus a validated desktop
+entry; it refuses to overwrite unrelated files and does not change global hotkeys or PATH. After
+moving the checkout, remove the old owned fish/skill symlinks, set
 `ASSET_PREVIEW_PROJECT` for fish and reinstall desktop integration. Use
 `bin/asset-preview` directly from other shells.
 
@@ -153,5 +153,6 @@ tails are bounded to 16 KiB per preview.
 
 See [agent connection examples](docs/agent-flow.md), [the socket protocol](docs/protocol.md),
 [renderer decisions](vendored/rendering.md), [specs](specs/_readme.md) and
-[verification evidence](evidence/verification.md). The agent skill is intentionally
-deferred until this command interface has settled.
+[verification evidence](evidence/verification.md). The installed
+[`$asset-preview` skill](skills/asset-preview/SKILL.md) connects agent work through
+this interface; its canonical source and UI metadata are maintained in this repo.

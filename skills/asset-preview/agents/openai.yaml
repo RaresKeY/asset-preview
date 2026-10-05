@@ -1,0 +1,4 @@
+interface:
+  display_name: "Asset Preview"
+  short_description: "Connect live previews while authoring assets"
+  default_prompt: "Use $asset-preview to connect this asset and its source saves to our live preview window."
