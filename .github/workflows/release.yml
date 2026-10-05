@@ -1,6 +1,11 @@
 name: Build release
 on:
   workflow_dispatch:
+    inputs:
+      staged:
+        description: Publish locally validated assets from draft release 0.0.1
+        type: boolean
+        default: false
 permissions:
   contents: write
   packages: write
@@ -11,9 +16,20 @@ jobs:
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
       - name: Build runtime and standalone artifacts
+        if: ${{ !inputs.staged }}
         run: |
           docker build -f packaging/Containerfile --target runtime -t ghcr.io/rareskey/asset-preview:0.0.1 .
           docker build -f packaging/Containerfile --target artifacts --output type=local,dest=release .
+      - name: Load locally validated container
+        if: ${{ inputs.staged }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          mkdir release
+          gh release download 0.0.1 --dir release
+          cd release && sha256sum -c SHA256SUMS
+          gzip -dc asset-preview-0.0.1-container.tar.gz | docker load
+          docker tag localhost/asset-preview:0.0.1 ghcr.io/rareskey/asset-preview:0.0.1
       - name: Check standalone service
         run: |
           chmod +x release/asset-preview-0.0.1-linux-x86_64.run
@@ -30,7 +46,14 @@ jobs:
           docker push ghcr.io/rareskey/asset-preview:0.0.1
           docker logout ghcr.io
       - name: Upload draft release for hardware validation
+        if: ${{ !inputs.staged }}
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           gh release create 0.0.1 --draft --target "$GITHUB_SHA" --title 'Asset Preview 0.0.1' --notes-file packaging/release-notes.md release/*
+      - name: Verify package visibility
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh api users/rareskey/packages/container/asset-preview --jq '{name, visibility}'
+          test "$(gh api users/rareskey/packages/container/asset-preview --jq .visibility)" = private

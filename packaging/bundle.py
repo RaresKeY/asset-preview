@@ -11,6 +11,7 @@ out = Path(sys.argv[1]); out.mkdir(parents=True, exist_ok=True)
 src = Path('/src'); deps = Path('/opt/dependencies')
 for name in ('bin', 'skills', 'fish', 'examples'):
     shutil.copytree(src/name, out/name, ignore=shutil.ignore_patterns('__pycache__', '*.pyc'))
+shutil.copy2(src/'packaging/container-service.py', out/'container-service.py')
 for name in ('README.md', 'THIRD_PARTY_NOTICES.md', 'icon.svg'):
     shutil.copy2(src/name, out/name)
 shutil.copytree(src/'docs', out/'docs')
@@ -62,6 +63,10 @@ export LD_LIBRARY_PATH="$preview_root/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
 export QT_PLUGIN_PATH="$preview_root/qt/plugins"
 export PYTHONHOME="$preview_root/python"
 export PYTHONNOUSERSITE=1
+if [ "${1:-}" = "--foreground" ]; then
+ shift
+ exec "$preview_root/python/python3" "$preview_root/container-service.py" "$@"
+fi
 exec "$preview_root/python/python3" "$preview_root/bin/asset-preview" "$@"
 ''')
 (out/'asset-preview').chmod(0o755)
