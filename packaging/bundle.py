@@ -8,6 +8,7 @@ import subprocess
 import sys
 from pathlib import Path
 
+os.environ['LD_LIBRARY_PATH'] = '/opt/dependencies/lib'
 out = Path(sys.argv[1]); out.mkdir(parents=True, exist_ok=True)
 src = Path('/src'); deps = Path('/opt/dependencies')
 for name in ('bin', 'skills', 'fish', 'examples'):
