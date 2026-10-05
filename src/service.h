@@ -48,6 +48,7 @@ protected:
     void dropEvent(QDropEvent*) override;
 private:
     void options(const QString& id);
+    void reportError(const QString& error);
     Service* service;
     QWidget* canvas;
     QGridLayout* grid;
@@ -67,7 +68,7 @@ public:
     bool start(QString& error);
     QJsonObject request(const QJsonObject&);
     void reconcile();
-    void navigate(int delta);
+    QJsonObject navigate(int delta);
     void save();
     int pageSize() const { return layout=="grid" ? gridSize*gridSize : 1; }
     QStringList order;

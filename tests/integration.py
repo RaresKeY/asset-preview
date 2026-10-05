@@ -527,6 +527,16 @@ class PreviewIntegration(unittest.TestCase):
             self.assertNotIn("metrics",row("clip"))
             input.press("Left"); eventually(lambda:client.rpc({"method":"list"})["selected"]=="clip")
             eventually(lambda:row("clip").get("metrics",{}).get("loads",0)==1,timeout=20)
+            # Navigation into a video leaves its keyboard controls usable,
+            # including after an arrow at the first-preview boundary.
+            input.press("Left")
+            input.key("Shift_L",1); input.press("Right"); input.key("Shift_L",0); input.x.XFlush(input.display)
+            eventually(lambda:abs(row("clip")["metrics"]["position"]-5)<.2)
+            input.press("space"); eventually(lambda:row("clip")["metrics"]["paused"] is False)
+            input.press("space"); eventually(lambda:row("clip")["metrics"]["paused"] is True)
+            input.press("Home"); eventually(lambda:row("clip")["metrics"]["position"]<.2)
+            input.press("m"); eventually(lambda:row("clip")["metrics"]["muted"] is False)
+            input.press("m"); eventually(lambda:row("clip")["metrics"]["muted"] is True)
         finally: input.close()
         # Same watched filename, atomically replaced with a visibly different clip.
         initial=row("clip")["metrics"]["loads"]; video(asset,"color=c=red:size=320x180:rate=12")
@@ -578,14 +588,14 @@ class PreviewIntegration(unittest.TestCase):
 
     @unittest.skipUnless(GPU and os.environ.get("QT_QPA_PLATFORM")!="wayland","Hardware Gamescope X11 input lane")
     def test_19_plain_arrows_navigate_grid_pages_and_clamp_at_edges(self):
-        for i in range(5): self.add(f"page-{i}")
+        for i in range(6): self.add(f"page-{i}")
         client.rpc({"method":"layout","layout":"grid","grid_size":2,"compact":True})
         self.show()
         input=XInput()
         try:
             input.press("Right")
             eventually(lambda:client.rpc({"method":"list"})["selected"]=="page-4")
-            self.assertEqual(client.rpc({"method":"list"})["active"],1)
+            self.assertEqual(client.rpc({"method":"list"})["active"],2)
             input.press("Right"); time.sleep(.1)
             self.assertEqual(client.rpc({"method":"list"})["selected"],"page-4")
             input.press("Left")
@@ -593,6 +603,40 @@ class PreviewIntegration(unittest.TestCase):
             self.assertEqual(client.rpc({"method":"list"})["active"],4)
             input.press("Left"); time.sleep(.1)
             self.assertEqual(client.rpc({"method":"list"})["selected"],"page-0")
+            # A boundary arrow must preserve selections inside that page too.
+            for selected,key in (("page-1","Left"),("page-5","Right")):
+                client.rpc({"method":"select","id":selected})
+                input.press(key); time.sleep(.1)
+                self.assertEqual(client.rpc({"method":"list"})["selected"],selected)
         finally: input.close()
+
+    def test_20_navigation_save_failure_preserves_selection(self):
+        self.add("before-failure"); self.add("after-failure")
+        client.rpc({"method":"layout","compact":True}); self.show()
+        eventually(lambda:row("before-failure")["viewport"]["height"]>100)
+        height=row("before-failure")["viewport"]["height"]
+        registry=self.root/"state/previews.json"; backup=registry.with_suffix(".backup")
+        registry.rename(backup); registry.mkdir()
+        try:
+            with self.assertRaises(RuntimeError): client.rpc({"method":"select","id":"after-failure"})
+            state=client.rpc({"method":"list"})
+            self.assertEqual(state["selected"],"before-failure")
+            self.assertEqual({e["id"] for e in state["entries"] if e["active"]},{"before-failure"})
+            if GPU and os.environ.get("QT_QPA_PLATFORM")!="wayland":
+                input=XInput()
+                try:
+                    input.press("Right"); time.sleep(.2)
+                    self.assertEqual(client.rpc({"method":"list"})["selected"],"before-failure")
+                    # Save errors remain visible in compact mode too.
+                    eventually(lambda:row("before-failure")["viewport"]["height"]<height)
+                finally: input.close()
+        finally:
+            registry.rmdir(); backup.replace(registry)
+        if GPU and os.environ.get("QT_QPA_PLATFORM")!="wayland":
+            input=XInput()
+            try:
+                input.press("Right")
+                eventually(lambda:client.rpc({"method":"list"})["selected"]=="after-failure")
+            finally: input.close()
 
 if __name__ == "__main__": unittest.main(verbosity=2)

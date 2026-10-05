@@ -25,6 +25,11 @@ void flag(mpv_handle* player, const char* name, bool value) {
 void string(mpv_handle* player, const char* name, const char* value) {
     checked(mpv_set_property_async(player,0,name,MPV_FORMAT_STRING,&value));
 }
+bool playbackKey(const QKeyEvent* e) {
+    if (e->modifiers()==Qt::ShiftModifier) return e->key()==Qt::Key_Left || e->key()==Qt::Key_Right;
+    return e->modifiers()==Qt::NoModifier &&
+        (e->key()==Qt::Key_Space || e->key()==Qt::Key_M || e->key()==Qt::Key_Home);
+}
 }
 
 struct VideoView::Player {
@@ -206,23 +211,30 @@ QImage VideoView::snapshot() {
 }
 void VideoView::mousePressEvent(QMouseEvent* e) { if (focusSurface) focusSurface(); requestActivate(); e->accept(); }
 void VideoView::mouseDoubleClickEvent(QMouseEvent* e) { change({{"paused",!config["settings"].toObject()["paused"].toBool()}}); e->accept(); }
+bool VideoView::eventFilter(QObject* watched, QEvent* e) {
+    // After programmatic focus, Qt can send keys to the widget container
+    // instead of the native child. Forward only this video's playback keys.
+    if (e->type()==QEvent::KeyPress && playbackKey(static_cast<QKeyEvent*>(e))) {
+        keyPressEvent(static_cast<QKeyEvent*>(e)); return true;
+    }
+    return QOpenGLWindow::eventFilter(watched,e);
+}
 void VideoView::keyPressEvent(QKeyEvent* e) {
-    const bool seekArrow=e->modifiers()==Qt::ShiftModifier &&
-        (e->key()==Qt::Key_Left || e->key()==Qt::Key_Right);
-    if (e->modifiers()!=Qt::NoModifier && !seekArrow) { QOpenGLWindow::keyPressEvent(e); return; }
+    if (!playbackKey(e)) { QOpenGLWindow::keyPressEvent(e); return; }
     const auto s=config["settings"].toObject();
     if (e->key()==Qt::Key_Space) change({{"paused",!s["paused"].toBool()}});
     else if (e->key()==Qt::Key_M) change({{"muted",!s["muted"].toBool(true)}});
-    else if (seekArrow || e->key()==Qt::Key_Home) {
+    else {
         QString error; const double at=current?current->properties["time-pos"].toDouble():0;
         seek(e->key()==Qt::Key_Home?0:std::max(0.0,at+(e->key()==Qt::Key_Left?-5:5)),error);
-    } else { QOpenGLWindow::keyPressEvent(e); return; }
+    }
     e->accept();
 }
 
 extern "C" Q_DECL_EXPORT ModelHandle asset_preview_create_video(QJsonObject config,QWidget* parent,LoadedCallback loaded,SettingsCallback changed) {
     auto* video=new VideoView(std::move(config),std::move(loaded),std::move(changed));
     auto* surface=QWidget::createWindowContainer(video,parent); surface->setFocusPolicy(Qt::StrongFocus);
+    surface->installEventFilter(video);
     video->focusSurface=[surface] { surface->setFocus(Qt::MouseFocusReason); };
     return {surface,video};
 }

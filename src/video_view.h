@@ -18,6 +18,7 @@ public:
 protected:
     void initializeGL() override;
     void paintGL() override;
+    bool eventFilter(QObject*, QEvent*) override;
     void keyPressEvent(QKeyEvent*) override;
     void mousePressEvent(QMouseEvent*) override;
     void mouseDoubleClickEvent(QMouseEvent*) override;

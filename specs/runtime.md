@@ -21,6 +21,9 @@ replacement is explicit, files may not exist yet. Window creation is deliberate
 through `gui` / `show`. Closing hides the window and releases every visible entry;
 `stop` / `quit` exits the server. Private version-1 state uses QSaveFile and retains
 invalid/corrupt state with an error. Session diagnostics are separate from specs.
+Failed selection saves retain the previous selection and active views; toolbar
+and keyboard navigation report the failure without terminating the service.
+Transient save/settings errors show the status bar even in compact mode.
 Grid size (2/3/4) and compact mode are optional version-1 fields with backward
 compatible defaults; partial layout requests merge and validate before saving.
 Filesystem changes after registration (for example a removed generator cwd) do

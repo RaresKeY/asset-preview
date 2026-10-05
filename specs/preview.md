@@ -8,7 +8,11 @@ Single view activates exactly one entry; grids have 2, 3 or 4 columns/rows,
 activating at most 4 (default), 9 or 16 entries on the selected page.
 Left/Right and Alt+Left/Right use the toolbar's navigation path: one preview in
 single mode or one page in grid mode, clamped at either end. These shortcuts
-also work while a native 3D or video surface has focus.
+also work while a native 3D or video surface has focus. Boundary arrows leave
+selection and focus unchanged, matching disabled toolbar buttons. Successful
+navigation focuses the selected surface so video controls work without a click.
+The video container forwards playback keys when Qt retains widget focus instead
+of handing it to the native video window.
 Only those entries own decoded content, GPU engines and running generators.
 Hidden/minimized/closed windows activate none. Unchanged visible entries are retained
 when unrelated registrations change. Navigation destroys prior off-page views; camera

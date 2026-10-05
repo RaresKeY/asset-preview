@@ -333,7 +333,11 @@ QJsonObject Service::request(const QJsonObject& r) {
             if (selected==id) selected=order.value(0);
             save(); reconcile(); return success();
         }
-        if (method=="select") { selected=id; save(); reconcile(); return success(); }
+        if (method=="select") {
+            const auto previous=selected; selected=id;
+            try { save(); } catch (...) { selected=previous; throw; }
+            reconcile(); return success();
+        }
         if (method=="reload") { if (e->active) { if (!e->config["command"].toArray().isEmpty()) build(id); else reload(id); } return success(); }
         if (method=="seek") {
             if (e->config["kind"].toString()!="video" || !e->view) return failure("Seek requires a visible video");
@@ -578,12 +582,20 @@ void Service::reconcile() {
     if (wasActive && visible.isEmpty()) ::malloc_trim(0);
 #endif
 }
-void Service::navigate(int delta) {
-    if (order.isEmpty()) return;
+QJsonObject Service::navigate(int delta) {
+    if (order.isEmpty()) return success();
     int index=std::max(0,int(order.indexOf(selected)));
-    if (layout=="grid") index=std::clamp((index/pageSize()+delta)*pageSize(),0,int(order.size())-1);
-    else index=std::clamp(index+delta,0,int(order.size())-1);
-    selected=order[index]; save(); reconcile();
+    if (layout=="grid") {
+        const int page=index/pageSize();
+        const int target=std::clamp(page+delta,0,int(order.size()-1)/pageSize());
+        if (target==page) return success();
+        index=target*pageSize();
+    } else {
+        const int target=std::clamp(index+delta,0,int(order.size())-1);
+        if (target==index) return success();
+        index=target;
+    }
+    return request({{"method","select"},{"id",order[index]}});
 }
 
 PreviewWindow::PreviewWindow(Service* s) : service(s) {
@@ -607,6 +619,9 @@ PreviewWindow::PreviewWindow(Service* s) : service(s) {
     grid=new QGridLayout(canvas); grid->setContentsMargins(0,0,0,0); grid->setSpacing(6);
     vertical->addWidget(canvas,1); setCentralWidget(central);
     statusBar()->showMessage("Drag files to add · Left / Right to switch · close to suspend");
+    connect(statusBar(),&QStatusBar::messageChanged,this,[this](const QString& message) {
+        if (message.isEmpty()) statusBar()->setVisible(!service->compact);
+    });
     connect(addButton,&QPushButton::clicked,this,[this] {
         for (const auto& path:QFileDialog::getOpenFileNames(this,"Add asset previews",QDir::homePath(),"Assets (*.png *.jpg *.jpeg *.webp *.bmp *.svg *.glb *.gltf *.obj *.stl *.ply *.fbx *.mp4 *.m4v *.mov *.mkv *.webm *.avi *.ogv *.mpg *.mpeg *.wmv *.gif);;All files (*)"))
             service->request({{"method","add"},{"entry",QJsonObject{{"path",path}}}});
@@ -618,10 +633,15 @@ PreviewWindow::PreviewWindow(Service* s) : service(s) {
     });
     connect(compactButton,&QCheckBox::toggled,this,[this](bool value) { service->request({{"method","layout"},{"compact",value}}); });
     auto navigate=[this](int delta) {
+        if (!(delta<0?previous:next)->isEnabled()) return;
         // Move focus before destroying a native view so the next key still
         // reaches this window after the focused OpenGL child is unloaded.
-        canvas->setFocus(Qt::OtherFocusReason); service->navigate(delta);
+        canvas->setFocus(Qt::OtherFocusReason);
+        const auto result=service->navigate(delta);
         activateWindow();
+        const auto entry=service->entries.value(service->selected);
+        if (entry && entry->surface) entry->surface->setFocus(Qt::OtherFocusReason);
+        if (!result["ok"].toBool()) reportError(result["error"].toString());
     };
     connect(previous,&QPushButton::clicked,this,[navigate] { navigate(-1); });
     connect(next,&QPushButton::clicked,this,[navigate] { navigate(1); });
@@ -701,7 +721,7 @@ void PreviewWindow::createCard(Entry& e) {
     }
     e.surface=widget;
     card->setSurface(widget);
-    widget->setToolTip(e.config["kind"].toString()=="video"?"Space / double click to pause · Left / Right seek · Home restart · M mute":
+    widget->setToolTip(e.config["kind"].toString()=="video"?"Space / double click to pause · Shift+Left / Right seek · Home restart · M mute":
         e.config["kind"].toString()=="image"?"Scroll to zoom · drag to pan · double click to fit":"Drag to orbit · right / middle drag to pan · scroll to zoom · double click to fit");
     connect(card->fit,&QToolButton::clicked,this,[this,id] {
         const auto e=service->entries.value(id); if (!e || !e->view) return;
@@ -712,6 +732,10 @@ void PreviewWindow::createCard(Entry& e) {
     connect(card->remove,&QToolButton::clicked,this,[this,id] { service->request({{"method","remove"},{"id",id}}); });
 }
 void PreviewWindow::removeCard(Entry& e) { if (e.card) { grid->removeWidget(e.card); delete e.card; } }
+void PreviewWindow::reportError(const QString& error) {
+    statusBar()->setVisible(true);
+    statusBar()->showMessage(error,5000);
+}
 void PreviewWindow::options(const QString& id) {
     auto e=service->entries.value(id); if (!e) return;
     QMenu menu(this); const auto settings=e->config["settings"].toObject();
@@ -721,7 +745,7 @@ void PreviewWindow::options(const QString& id) {
     menu.addSeparator();
     auto patch=[this,id](QJsonObject fields) {
         auto result=service->request({{"method","settings"},{"id",id},{"settings",fields}});
-        if (!result["ok"].toBool()) statusBar()->showMessage(result["error"].toString(),5000);
+        if (!result["ok"].toBool()) reportError(result["error"].toString());
     };
     auto toggle=[&](const QString& label,const QString& key,bool defaultValue=false) {
         auto* action=menu.addAction(label); action->setCheckable(true); action->setChecked(settings[key].toBool(defaultValue));
