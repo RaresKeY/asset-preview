@@ -1,6 +1,8 @@
 #!/usr/bin/env python3
 """Ship exact Ubuntu source packages and notices for bundled runtime libraries."""
-import json, shutil, subprocess, sys
+import hashlib, json, shutil, subprocess, sys
+from urllib.parse import urlencode, urlparse
+from urllib.request import urlopen
 from pathlib import Path
 bundle=Path(sys.argv[1]);out=Path(sys.argv[2]);out.mkdir(parents=True,exist_ok=True)
 licenses=bundle/'licenses';licenses.mkdir()
@@ -40,7 +42,28 @@ for p in Path('/dependency-sources/assimp/contrib').rglob('*'):
         dest=licenses/'assimp-third-party'/p.relative_to('/dependency-sources/assimp/contrib');dest.parent.mkdir(parents=True,exist_ok=True);shutil.copy2(p,dest)
 subprocess.run(['apt-get','update'],check=True)
 ubuntu=out/'ubuntu';ubuntu.mkdir()
-for item in sorted(sources):subprocess.run(['apt-get','source','--download-only',item],cwd=ubuntu,check=True)
+for item in sorted(sources):
+    result=subprocess.run(['apt-get','source','--download-only',item],cwd=ubuntu)
+    if result.returncode:
+        # Superseded base-image packages remain available in Ubuntu's source archive.
+        name, version=item.split('=',1)
+        query=urlencode({'ws.op':'getPublishedSources','source_name':name,'version':version,'exact_match':'true'})
+        with urlopen('https://api.launchpad.net/1.0/ubuntu/+archive/primary?'+query) as response:
+            entries=json.load(response)['entries']
+        if not entries:raise RuntimeError('Exact Ubuntu source unavailable: '+item)
+        with urlopen(entries[0]['self_link']+'?ws.op=sourceFileUrls') as response:urls=json.load(response)
+        for url in urls:
+            target=ubuntu/Path(urlparse(url).path).name
+            subprocess.run(['curl','--fail','--location','--retry','3',url,'--output',str(target)],check=True)
+        dsc=next(ubuntu/Path(urlparse(url).path).name for url in urls if url.endswith('.dsc'))
+        checking=False
+        for line in dsc.read_text().splitlines():
+            if line=='Checksums-Sha256:':checking=True;continue
+            if checking and not line.startswith(' '):checking=False
+            if checking:
+                digest,size,filename=line.split()
+                with (ubuntu/filename).open('rb') as stream:actual=hashlib.file_digest(stream,'sha256').hexdigest()
+                if actual!=digest:raise RuntimeError('Ubuntu source checksum mismatch: '+filename)
 (bundle/'ubuntu-packages.txt').write_text('\n'.join(sorted(packages))+'\n')
 (out/'ubuntu-sources.txt').write_text('\n'.join(sorted(sources))+'\n')
 # Include this application's exact source and packaging instructions, without
