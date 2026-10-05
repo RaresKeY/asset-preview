@@ -76,3 +76,34 @@ Primary references, checked October 5, 2026:
 - [VTK LightKit](https://vtk.org/doc/nightly/html/classvtkLightKit.html)
 - [Qt runtime asset loader](https://doc.qt.io/qt-6/qml-qtquick3d-assetutils-runtimeloader.html)
 - [Qt embedded window ownership](https://doc.qt.io/qt-6/qwidget.html#createWindowContainer)
+
+## Video playback
+
+Installed libmpv 0.41.0 (client API pkg-config version 2.5.0) supplies the video
+backend. It lives in a separate lazy module, with one core per visible video;
+no external mpv process or Qt Multimedia stack is added. Qt Multimedia is installed
+and viable, but libmpv's existing public render API fits the native OpenGL-window
+adapter and provides decoder identity, bounded local demux buffering and explicit
+configuration without inheriting global player scripts.
+
+The OpenGL render API is preferred by mpv over embedding an externally owned
+`wid`. Hardware decoding uses `hwdec=auto-safe`, the Qt GL context and the native
+X11 display for interop. Software fallback is permitted. Frame requests and core
+events are queued/coalesced separately so time-position events do not repaint
+paused/static views or add frames to active playback. Writes/commands are async;
+no core API is called from a callback. Advanced control is left disabled to avoid
+promising the stronger threading contract on the GUI thread. Requested captures
+render the current frame before reading the native back buffer.
+
+Muted previews disable the audio track as well as muting it; unmuting selects the
+audio track again. This avoids decoding audio merely to discard it in the common
+muted-preview case. Candidate reloads are always silent until accepted. Demux
+queues have an 8 MiB forward limit and no backward queue; decoder/GPU surfaces
+have separate costs. Hidden/off-page views free their complete players.
+
+Primary references checked October 5, 2026:
+
+- [mpv public render API and threading/lifecycle contracts](https://github.com/mpv-player/mpv/blob/v0.41.0/include/mpv/render.h)
+- [mpv OpenGL integration and hardware interop](https://github.com/mpv-player/mpv/blob/v0.41.0/include/mpv/render_gl.h)
+- [mpv client API and async commands/properties](https://github.com/mpv-player/mpv/blob/v0.41.0/include/mpv/client.h)
+- [mpv hardware decoding and options](https://mpv.io/manual/stable/)

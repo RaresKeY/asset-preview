@@ -1,5 +1,5 @@
-complete -c asset-preview -n '__fish_use_subcommand' -a 'gui start stop hide list status paths add material remove select reload layout settings capture' -d 'Live asset preview'
-complete -c asset-preview -n '__fish_seen_subcommand_from remove select reload settings' -a '(asset-preview --complete-ids)' -f
+complete -c asset-preview -n '__fish_use_subcommand' -a 'gui start stop hide list status paths add material remove select reload layout settings seek capture' -d 'Live asset preview'
+complete -c asset-preview -n '__fish_seen_subcommand_from remove select reload settings seek' -a '(asset-preview --complete-ids)' -f
 complete -c asset-preview -n '__fish_seen_subcommand_from layout' -a 'single grid' -f
 complete -c asset-preview -n '__fish_seen_subcommand_from layout' -l size -r -f -a '2 3 4' -d 'Grid rows/columns'
 complete -c asset-preview -n '__fish_seen_subcommand_from layout' -l compact -d 'Compact spacing and overlays'
@@ -10,7 +10,7 @@ complete -c asset-preview -n '__fish_seen_subcommand_from add material' -l watch
 complete -c asset-preview -n '__fish_seen_subcommand_from add material' -l cwd -r -a '(__fish_complete_directories)' -d 'Generator working directory'
 complete -c asset-preview -n '__fish_seen_subcommand_from add material' -l exec -r -d 'Explicit generator program and arguments; last option'
 complete -c asset-preview -n '__fish_seen_subcommand_from add material' -l timeout -r -d 'Generator timeout in seconds'
-complete -c asset-preview -n '__fish_seen_subcommand_from add' -l kind -r -f -a 'auto image model' -d 'Preview type'
+complete -c asset-preview -n '__fish_seen_subcommand_from add' -l kind -r -f -a 'auto image model video' -d 'Preview type'
 complete -c asset-preview -n '__fish_seen_subcommand_from material' -l normal -r -F -d 'Tangent-space normal map'
 complete -c asset-preview -n '__fish_seen_subcommand_from material' -l orm -r -F -d 'Occlusion / roughness / metallic map'
 complete -c asset-preview -n '__fish_seen_subcommand_from material' -l shape -r -f -a 'sphere cube plane' -d 'Material sample shape'

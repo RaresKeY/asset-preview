@@ -29,13 +29,13 @@ def main() -> None:
 Type=Application
 Name=Asset Preview
 GenericName=Live Asset Viewer
-Comment=Watch images, 3D assets and baked materials update as they are saved
+Comment=Watch images, videos, 3D assets and baked materials update as they are saved
 Exec={desktop_quote(str(ROOT / "bin/asset-preview"))} gui
 Icon={ROOT / "icon.svg"}
 Terminal=false
 StartupNotify=false
 Categories=Graphics;3DGraphics;
-Keywords=Asset;Preview;Live;3D;Model;Material;PNG;GLB;
+Keywords=Asset;Preview;Live;3D;Model;Material;PNG;GLB;Video;MP4;
 {MARKER}
 '''
     desktop.parent.mkdir(parents=True, exist_ok=True)

@@ -80,3 +80,12 @@ ModelHandle createModel(QJsonObject config, QWidget* parent, LoadedCallback load
     if (!factory) throw std::runtime_error(library.errorString().toStdString());
     return factory(std::move(config),parent,std::move(loaded));
 }
+
+ModelHandle createVideo(QJsonObject config, QWidget* parent, LoadedCallback loaded, SettingsCallback changed) {
+    static QLibrary library(QCoreApplication::applicationDirPath()+"/asset-preview-mpv.so");
+    library.setLoadHints(QLibrary::PreventUnloadHint);
+    using Factory = ModelHandle (*)(QJsonObject, QWidget*, LoadedCallback, SettingsCallback);
+    auto factory=reinterpret_cast<Factory>(library.resolve("asset_preview_create_video"));
+    if (!factory) throw std::runtime_error(library.errorString().toStdString());
+    return factory(std::move(config),parent,std::move(loaded),std::move(changed));
+}

@@ -1,6 +1,6 @@
 # Preview lifecycle and rendering
 
-Source ownership: `src/viewer.{h,cpp}`, `src/model_view.{h,cpp}`, preview/card/window paths in `src/service.cpp`,
+Source ownership: `src/viewer.{h,cpp}`, `src/model_view.{h,cpp}`, `src/video_view.{h,cpp}`, preview/card/window paths in `src/service.cpp`,
 `examples/generate_cube.py`, `tests/integration.py`, `tools/ui_scenes.py`. Renderer decisions and dependency
 provenance are in [vendored/rendering.md](../vendored/rendering.md).
 
@@ -49,8 +49,9 @@ overrides mutate imported actor properties, so mode changes create a replacement
 engine and reload the scene to restore authored shading, preserving the camera
 and last-good behavior. Authored vertex-color neutralization is not verified.
 
-Views repaint only after file changes, input, settings, exposure or resize. No
-continuous animation, idle render timer or file polling. QFileSystemWatcher observes
+Static and paused views repaint only after file changes, input, settings, exposure
+or resize. Playing videos additionally repaint on libmpv frame notifications.
+No idle render timer or file polling. QFileSystemWatcher observes
 visible files and nearest existing parent directories, supporting file replacement
 and later-created directories. Nanosecond mtime/size/inode fingerprints filter unrelated
 directory notifications. A 220 ms single-shot debounce coalesces saves. Failed loads
@@ -61,7 +62,8 @@ the status remains Building until the generator exits.
 The watcher derives glTF/GLB external resource URIs and ordinary OBJ/MTL texture
 dependencies, plus explicit input paths/material maps. Complex MTL files can require
 caller-supplied dependency paths. New files are discovered without recursive scans.
-Registration/output files have a 256 MiB cap; only current-page views can be active,
+Image/model/material files have a 256 MiB cap; streaming videos are exempt.
+Only current-page views can be active,
 with the explicitly selected grid limit no greater than sixteen. Model
 metrics report actual renderer and per-view load/paint counts; images report dimensions
 and decoded residency. These counters are diagnostic, not a perceptual acceptance gate.
@@ -73,3 +75,41 @@ records actual verification and remaining limits.
 Camera tests measure horizon roll through native input and pole limits, reload
 retention and Z-up. Native overlay clicks open/toggle the real popup. Functional
 checks verify grid paging, compact busy/error visibility and restart persistence.
+
+## Video backend
+
+`asset-preview-mpv.so` is a lazy module linked to installed libmpv and Qt OpenGL.
+Image/background-only sessions do not map libmpv. Visible videos own independent
+mpv cores and native embedded QOpenGLWindows, with fitted aspect ratio. The module
+remains resident after use, while every off-page/hidden player, decoder and render
+context is destroyed. No subprocess player, CPU frame-copy loop or video polling.
+
+Playback defaults to unpaused, muted, looping; controls support pause/mute/loop,
+absolute seek, five-second arrow seeks and Home restart. Space/double click toggles
+pause on the focused surface. Global Alt navigation retains precedence. The
+normal card fit action becomes pause/play; compact keeps playback options in ⋯.
+Finite source-save generators can publish videos through the existing watcher.
+
+The render API uses the owning Qt OpenGL context, supplies the X11 display for
+interop, requests `hwdec=auto-safe` and permits codec/driver software fallback.
+GPU renderer and decoder identity are reported separately. Frame/event callbacks
+coalesce onto the GUI thread without calling mpv APIs inside callbacks. Core
+commands/property writes use asynchronous APIs; event handling observes properties
+without synchronous core reads. Advanced render control is disabled, and target
+time blocking is disabled to avoid sleeping on the GUI thread. Static/paused views
+have no continuing frame activity; active videos necessarily consume decode/render
+resources. Decoder memory is not bounded by the demux queue limit.
+
+Reload opens a silent candidate asynchronously, preserving the current player
+until a decoded video frame can replace it. Successful swaps restart at time zero
+and retain pause/loop/mute preferences. Unsupported/corrupt outputs retain the last
+good player, with bounded retries. A 15-second candidate deadline prevents an
+indefinite load. Load/revision counts advance only after successful publication.
+Candidates and current render contexts are freed before their corresponding cores,
+with the original OpenGL context current. Timers/callbacks are scoped to the view.
+
+Local demux buffering is capped at 8 MiB with no backward queue/cache. Muted
+playback disables the audio track; unmuting selects it again. mpv user
+configs/scripts, online URL helpers, external media references, automatic audio
+sidecars and subtitles are disabled. Common video extensions and animated GIF
+route automatically; explicit `kind=video` handles other installed-codec formats.

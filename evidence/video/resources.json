@@ -1,0 +1,23 @@
+{
+  "before_video": {
+    "Rss_kib": 49384,
+    "Pss_kib": 14469
+  },
+  "playing": {
+    "Rss_kib": 348260,
+    "Pss_kib": 225974
+  },
+  "paused": {
+    "Rss_kib": 348260,
+    "Pss_kib": 225983,
+    "extra_paints": 0,
+    "cpu_ticks": 0,
+    "idle_seconds": 0.9
+  },
+  "hidden": {
+    "Rss_kib": 310276,
+    "Pss_kib": 183936,
+    "cpu_ticks": 0,
+    "idle_seconds": 0.8
+  }
+}

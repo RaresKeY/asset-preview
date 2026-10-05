@@ -4,8 +4,8 @@ Release build on the owning CachyOS workstation, Qt 6.11.2 and F3D 3.5.0.
 Automated visuals stayed inside Gamescope's headless backend. The loaded view
 reported **NVIDIA GeForce RTX 2080 Ti/PCIe/SSE2**, using Qt `xcb` through XWayland.
 
-Functional lane: 16 tests, 13 passed and 3 hardware-only skips.
-Hardware lane: all 16 passed. Coverage includes concurrent startup, private
+Functional lane: 18 tests, 14 passed and 4 hardware-only skips.
+Hardware lane: all 18 passed. Coverage includes concurrent startup, private
 socket, inert registration, visible-only paging, atomic replacement, missing files
 and directories, failed-save recovery, generator coalescing and descendant
 cancellation, timeouts, persistence, read-only completion, corrupt-state preservation,
@@ -15,13 +15,16 @@ New checks include larger-grid paging/persistence, compact status visibility,
 zero horizon roll and pitch limits through native mouse input, Z-up, native
 overlay menu clicks, and texture/clay appearance restoration without moving the
 camera. The [UI review](ui/review.md) records matched captures and exact commands.
+The [video verification](video/verification.md) covers libmpv playback/decoding,
+pause/seek, file refresh/recovery, concurrent grid videos and off-page release.
 
 The fish function/completions and managed desktop entry are installed. Normal fish
 autoload resolves `asset-preview`; layout completion returns `single` and `grid`.
 The desktop entry passes `desktop-file-validate` and KDE's application cache was
 refreshed. The updated real desktop service reports `platform=xcb`. Its already
-open empty window was gracefully closed to save geometry, then reopened with the
-new build; registrations/selection/layout were retained. Automated scenes stayed offscreen.
+open window was gracefully closed to save geometry, then reopened with the
+video-capable build; eight registrations, selection and layout were retained.
+Automated scenes stayed offscreen.
 
 ## Measured resources
 

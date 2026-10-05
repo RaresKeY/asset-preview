@@ -51,6 +51,10 @@ bool imagePath(const QString& path) {
     static const QSet<QString> formats{"png","jpg","jpeg","webp","bmp","tif","tiff","svg","exr","hdr"};
     return formats.contains(QFileInfo(path).suffix().toLower());
 }
+bool videoPath(const QString& path) {
+    static const QSet<QString> formats{"mp4","m4v","mov","mkv","webm","avi","ogv","mpg","mpeg","wmv","gif"};
+    return formats.contains(QFileInfo(path).suffix().toLower());
+}
 QString absolute(const QString& path) { return QDir::cleanPath(QFileInfo(path).absoluteFilePath()); }
 QByteArray readSmall(const QString& path) { QFile f(path); return f.open(QIODevice::ReadOnly) ? f.read(4*1024*1024) : QByteArray{}; }
 
@@ -183,11 +187,11 @@ QString Service::validate(QJsonObject& c, bool restore) {
     QString path=c["path"].toString();
     if (path.isEmpty() || !QFileInfo(path).isAbsolute()) return "An absolute output file path is required";
     if (!restore && QFileInfo(path).isDir()) return "Output must be a file";
-    if (!restore && QFileInfo(path).size() > 256*1024*1024) return "Preview file exceeds 256 MiB";
     c["path"]=absolute(path);
     QString kind=c["kind"].toString("auto");
-    if (kind == "auto") kind=imagePath(path)?"image":"model";
-    if (kind != "image" && kind != "model" && kind != "material") return "Kind must be image, model or material";
+    if (kind == "auto") kind=videoPath(path)?"video":imagePath(path)?"image":"model";
+    if (kind != "image" && kind != "model" && kind != "material" && kind != "video") return "Kind must be image, model, material or video";
+    if (!restore && kind!="video" && QFileInfo(path).size() > 256*1024*1024) return "Preview file exceeds 256 MiB";
     c["kind"]=kind;
     QString id=c["id"].toString();
     if (id.isEmpty()) id=QUuid::createUuid().toString(QUuid::Id128).left(12);
@@ -216,7 +220,7 @@ QString Service::validate(QJsonObject& c, bool restore) {
     if (c.contains("maps") && !c.value("maps").isObject()) return "maps must be an object";
     if (c.contains("settings") && !c.value("settings").isObject()) return "settings must be an object";
     auto settings=c.value("settings").toObject();
-    const QSet<QString> known{"grid","axes","edges","orthographic","nearest","light","background","shape","roughness","metallic","materials","textures","lock_horizon","up_axis","lighting"};
+    const QSet<QString> known{"grid","axes","edges","orthographic","nearest","light","background","shape","roughness","metallic","materials","textures","lock_horizon","up_axis","lighting","paused","muted","loop"};
     for (auto i=settings.begin();i!=settings.end();++i) {
         if (!known.contains(i.key())) return "Unknown setting: " + i.key();
         if (i.key()=="background") { if (!QSet<QString>{"dark","light","checker"}.contains(i.value().toString())) return "Invalid background"; }
@@ -330,6 +334,11 @@ QJsonObject Service::request(const QJsonObject& r) {
         }
         if (method=="select") { selected=id; save(); reconcile(); return success(); }
         if (method=="reload") { if (e->active) { if (!e->config["command"].toArray().isEmpty()) build(id); else reload(id); } return success(); }
+        if (method=="seek") {
+            if (e->config["kind"].toString()!="video" || !e->view) return failure("Seek requires a visible video");
+            if (!r["seconds"].isDouble() || r["seconds"].toDouble()<0) return failure("Seek requires nonnegative seconds");
+            QString error; return e->view->seek(r["seconds"].toDouble(),error)?success():failure(error);
+        }
         if (method=="settings") {
             auto config=e->config, settings=config["settings"].toObject();
             const auto patch=r["settings"].toObject();
@@ -340,6 +349,7 @@ QJsonObject Service::request(const QJsonObject& r) {
             const auto old=e->config; e->config=config;
             try { save(); } catch (...) { e->config=old; throw; }
             if (e->view) e->view->settings(config);
+            if (e->config["kind"].toString()=="video") status(*e,e->status);
             return success();
         }
         return failure("Unknown method");
@@ -348,7 +358,13 @@ QJsonObject Service::request(const QJsonObject& r) {
 void Service::status(Entry& e, const QString& text) {
     e.status=text;
     if (e.statusLabel) { e.statusLabel->setText(text.left(140)); e.statusLabel->setToolTip(text + (e.log.isEmpty()?"":"\n\n"+e.log)); }
-    if (e.card) static_cast<PreviewCard*>(e.card)->updateStatus();
+    if (e.card) {
+        auto* card=static_cast<PreviewCard*>(e.card); card->updateStatus();
+        if (e.config["kind"].toString()=="video") {
+            const bool paused=e.config["settings"].toObject()["paused"].toBool();
+            card->fit->setText(paused?"▶":"Ⅱ"); card->fit->setToolTip(paused?"Play video · Space":"Pause video · Space");
+        }
+    }
 }
 QStringList Service::dependencies(const Entry& e) const {
     QStringList paths{e.config["path"].toString()};
@@ -435,9 +451,10 @@ void Service::changed() {
 void Service::reload(const QString& id) {
     auto e=entries.value(id); if (!e || !e->active || !e->view) return;
     QString error;
-    if (QFileInfo(e->config["path"].toString()).size()>256*1024*1024) { status(*e,"File exceeds 256 MiB"); return; }
+    if (e->config["kind"].toString()!="video" && QFileInfo(e->config["path"].toString()).size()>256*1024*1024) { status(*e,"File exceeds 256 MiB"); return; }
     const bool building=e->process && e->process->state()!=QProcess::NotRunning;
     if (e->view->reload(e->config,error)) {
+        if (e->view->loading()) { status(*e,building?"Building · loading video":"Loading · video"); return; }
         ++e->revisions; e->retries=0;
         status(*e,(building?"Building · preview updated ":"Live · refreshed ") + QTime::currentTime().toString("HH:mm:ss"));
     }
@@ -555,7 +572,7 @@ void Service::navigate(int delta) {
 }
 
 PreviewWindow::PreviewWindow(Service* s) : service(s) {
-    setWindowTitle("Asset Preview"); setWindowIcon(QIcon(QStringLiteral(ASSET_PREVIEW_ROOT "/icon.svg")));
+    setWindowTitle("Asset Preview"); setWindowIcon(QIcon(QStringLiteral(":/icon.svg")));
     setMinimumSize(540,380); resize(1000,720); setAcceptDrops(true);
     auto* central=new QWidget; auto* vertical=new QVBoxLayout(central); vertical->setContentsMargins(8,6,8,6); vertical->setSpacing(6);
     auto* addButton=new QPushButton("Add files"); addButton->setMinimumHeight(32);
@@ -575,7 +592,7 @@ PreviewWindow::PreviewWindow(Service* s) : service(s) {
     vertical->addWidget(canvas,1); setCentralWidget(central);
     statusBar()->showMessage("Drag files to add · Alt+Left / Right to switch · close to suspend");
     connect(addButton,&QPushButton::clicked,this,[this] {
-        for (const auto& path:QFileDialog::getOpenFileNames(this,"Add asset previews",QDir::homePath(),"Assets (*.png *.jpg *.jpeg *.webp *.bmp *.svg *.glb *.gltf *.obj *.stl *.ply *.fbx);;All files (*)"))
+        for (const auto& path:QFileDialog::getOpenFileNames(this,"Add asset previews",QDir::homePath(),"Assets (*.png *.jpg *.jpeg *.webp *.bmp *.svg *.glb *.gltf *.obj *.stl *.ply *.fbx *.mp4 *.m4v *.mov *.mkv *.webm *.avi *.ogv *.mpg *.mpeg *.wmv *.gif);;All files (*)"))
             service->request({{"method","add"},{"entry",QJsonObject{{"path",path}}}});
     });
     connect(density,&QComboBox::activated,this,[this](int index) {
@@ -613,7 +630,7 @@ void PreviewWindow::arrange(const QStringList& ids) {
     centralWidget()->layout()->setSpacing(service->compact?4:6);
     grid->setSpacing(service->compact?2:6); statusBar()->setVisible(!service->compact);
     if (ids.isEmpty()) {
-        auto* empty=new QLabel("Watch your work take shape\n\nAdd or drop an image, model, or exported material.\nPreviews refresh when the files are saved.");
+        auto* empty=new QLabel("Watch your work take shape\n\nAdd or drop an image, video, model, or exported material.\nPreviews refresh when the files are saved.");
         empty->setProperty("empty",true); empty->setAlignment(Qt::AlignCenter); empty->setWordWrap(true);
         grid->addWidget(empty,0,0); grid->setRowStretch(0,1); grid->setColumnStretch(0,1);
     } else {
@@ -630,26 +647,43 @@ void PreviewWindow::createCard(Entry& e) {
     QWidget* widget=nullptr;
     if (e.config["kind"].toString()=="image") { auto* image=new ImageView(e.card); e.view=image; widget=image; }
     else {
-        auto loaded=[this,id](bool ok,QString error) {
+        const bool video=e.config["kind"].toString()=="video";
+        auto loaded=[this,id,video](bool ok,QString error) {
             const auto e=service->entries.value(id); if (!e || !e->active) return;
+            if (video) {
+                if (ok) { ++e->revisions; e->retries=0; }
+                else if (++e->retries<=3) {
+                    const auto token=e->token;
+                    QTimer::singleShot(200*(1<<e->retries),service,[this,id,token] {
+                        const auto e=service->entries.value(id); if (e && e->active && e->token==token) service->reload(id);
+                    });
+                }
+            }
             if (e->process && e->process->state()!=QProcess::NotRunning) return;
-            service->status(*e,ok?"Live · model ready":"Waiting · "+error);
+            service->status(*e,ok?(video?"Live · video ready":"Live · model ready"):"Waiting · "+error);
         };
         try {
-            const auto handle=createModel(e.config,e.card,std::move(loaded));
+            const auto handle=video?createVideo(e.config,e.card,std::move(loaded),[this,id](QJsonObject patch) {
+                service->request({{"method","settings"},{"id",id},{"settings",patch}});
+            }):createModel(e.config,e.card,std::move(loaded));
             e.view=handle.view; widget=handle.surface;
         } catch (const std::exception& error) {
-            e.status="3D backend unavailable · " + QString::fromUtf8(error.what());
+            e.status=QString(video?"Video backend unavailable · ":"3D backend unavailable · ")+QString::fromUtf8(error.what());
             qWarning("%s",qPrintable(e.status));
             e.statusLabel->setText(e.status); e.statusLabel->setToolTip(e.status);
-            auto* message=new QLabel("Build the 3D backend with tools/build.sh, then reopen this preview.",e.card);
+            auto* message=new QLabel("Build the preview backends with tools/build.sh, then reopen this preview.",e.card);
             message->setWordWrap(true); message->setAlignment(Qt::AlignCenter); widget=message;
         }
     }
     e.surface=widget;
     card->setSurface(widget);
-    widget->setToolTip(e.config["kind"].toString()=="image"?"Scroll to zoom · drag to pan · double click to fit":"Drag to orbit · right / middle drag to pan · scroll to zoom · double click to fit");
-    connect(card->fit,&QToolButton::clicked,this,[this,id] { const auto e=service->entries.value(id); if (e && e->view) e->view->fit(); });
+    widget->setToolTip(e.config["kind"].toString()=="video"?"Space / double click to pause · Left / Right seek · Home restart · M mute":
+        e.config["kind"].toString()=="image"?"Scroll to zoom · drag to pan · double click to fit":"Drag to orbit · right / middle drag to pan · scroll to zoom · double click to fit");
+    connect(card->fit,&QToolButton::clicked,this,[this,id] {
+        const auto e=service->entries.value(id); if (!e || !e->view) return;
+        if (e->config["kind"].toString()=="video") service->request({{"method","settings"},{"id",id},{"settings",QJsonObject{{"paused",!e->config["settings"].toObject()["paused"].toBool()}}}});
+        else e->view->fit();
+    });
     connect(card->options,&QToolButton::clicked,this,[this,id] { options(id); });
     connect(card->remove,&QToolButton::clicked,this,[this,id] { service->request({{"method","remove"},{"id",id}}); });
 }
@@ -658,7 +692,7 @@ void PreviewWindow::options(const QString& id) {
     auto e=service->entries.value(id); if (!e) return;
     QMenu menu(this); const auto settings=e->config["settings"].toObject();
     menu.addAction(e->config["label"].toString())->setEnabled(false);
-    connect(menu.addAction("Fit view"),&QAction::triggered,this,[e] { if (e->view) e->view->fit(); });
+    if (e->config["kind"].toString()!="video") connect(menu.addAction("Fit view"),&QAction::triggered,this,[e] { if (e->view) e->view->fit(); });
     connect(menu.addAction("Reload / rebuild"),&QAction::triggered,this,[this,id] { service->request({{"method","reload"},{"id",id}}); });
     menu.addSeparator();
     auto patch=[this,id](QJsonObject fields) {
@@ -677,6 +711,14 @@ void PreviewWindow::options(const QString& id) {
         }
     };
     if (e->config["kind"].toString()=="image") toggle("Pixel filtering","nearest");
+    else if (e->config["kind"].toString()=="video") {
+        toggle("&Paused · Space","paused"); toggle("&Muted · M","muted",true); toggle("&Loop","loop",true);
+        connect(menu.addAction("Restart · Home"),&QAction::triggered,this,[this,id] { service->request({{"method","seek"},{"id",id},{"seconds",0}}); });
+        for (int delta:{-5,5}) connect(menu.addAction(delta<0?"Back 5 seconds":"Forward 5 seconds"),&QAction::triggered,this,[this,id,delta] {
+            const auto e=service->entries.value(id); if (!e || !e->view) return;
+            service->request({{"method","seek"},{"id",id},{"seconds",std::max(0.0,e->view->metrics()["position"].toDouble()+delta)}});
+        });
+    }
     else {
         toggle("Show &materials","materials",true);
         toggle("Show &textures","textures",true)->setEnabled(settings["materials"].toBool(true));

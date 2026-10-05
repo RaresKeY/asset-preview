@@ -13,6 +13,8 @@ public:
     virtual void settings(const QJsonObject& config) = 0;
     virtual QJsonObject metrics() const = 0;
     virtual QImage snapshot() { return {}; }
+    virtual bool loading() const { return false; }
+    virtual bool seek(double, QString& error) { error="Seeking is supported for videos only"; return false; }
 };
 
 class ImageView final : public QWidget, public PreviewView {
@@ -41,3 +43,5 @@ private:
 struct ModelHandle { QWidget* surface; PreviewView* view; };
 using LoadedCallback = std::function<void(bool, QString)>;
 ModelHandle createModel(QJsonObject config, QWidget* parent, LoadedCallback loaded);
+using SettingsCallback = std::function<void(QJsonObject)>;
+ModelHandle createVideo(QJsonObject config, QWidget* parent, LoadedCallback loaded, SettingsCallback changed);

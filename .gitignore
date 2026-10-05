@@ -2,3 +2,4 @@
 /__pycache__/
 *.pyc
 /evidence/gpu/server.log
+/evidence/video/server.log

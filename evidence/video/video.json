@@ -1,0 +1,26 @@
+{
+  "kind": "video",
+  "status": "Live \u00b7 video ready",
+  "settings": {
+    "loop": false,
+    "muted": true,
+    "paused": true
+  },
+  "metrics": {
+    "backend": "libmpv",
+    "codec": "H.264 / AVC / MPEG-4 AVC / MPEG-4 part 10",
+    "duration": 4,
+    "engine": true,
+    "eof": true,
+    "height": 180,
+    "hwdec": "nvdec",
+    "loading": false,
+    "loads": 3,
+    "muted": true,
+    "paused": true,
+    "position": 3.9166666666666665,
+    "renderer": "NVIDIA GeForce RTX 2080 Ti/PCIe/SSE2",
+    "renders": 29,
+    "width": 320
+  }
+}

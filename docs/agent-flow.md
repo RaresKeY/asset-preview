@@ -43,6 +43,14 @@ materials, prefer a self-contained GLB. For Godot-only materials, use a finite
 offscreen capture command and connect its PNG; an ordinary game `play.sh` is an
 interactive process and is unsuitable as this generator.
 
+For rendered turntables or animation captures, connect the local video output:
+`add /absolute/project/preview/turntable.mp4 --id project-turntable`. It uses the
+same finite-generator/source-save flow; publish finished encodes atomically.
+Playback defaults to muted looping. Preserve the user's paused/muted/loop choices;
+`settings ID '{"paused":true}'` and `seek ID 2.5` support inspection. Loading is
+asynchronous; wait for Live and `metrics.loads`, and read `metrics.hwdec` separately
+from renderer identity when reporting hardware decoding.
+
 Inspect `status --json` after connecting: `active` distinguishes a visible entry
 from a suspended one, `building` distinguishes an in-flight command, `status`
 reports waiting/failed/live state, and `metrics.renderer` identifies the actual

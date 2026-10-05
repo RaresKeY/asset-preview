@@ -113,7 +113,7 @@ def path(value: str) -> str:
     return os.path.abspath(os.path.expanduser(value))
 
 def parser() -> argparse.ArgumentParser:
-    p = argparse.ArgumentParser(description="One live window for images, models and baked materials.")
+    p = argparse.ArgumentParser(description="One live window for images, videos, models and baked materials.")
     sub = p.add_subparsers(dest="action")
     for action, text in [("gui", "Open the preview window"), ("start", "Start the background server"),
                          ("stop", "Stop the server and its generators"), ("hide", "Suspend all previews"),
@@ -121,11 +121,11 @@ def parser() -> argparse.ArgumentParser:
                          ("paths", "Print local socket and state paths")]:
         q = sub.add_parser(action, help=text)
         if action in {"list", "status"}: q.add_argument("--json", action="store_true")
-    add = sub.add_parser("add", help="Watch an image or model output; optionally run a generator on source saves")
+    add = sub.add_parser("add", help="Watch an image, video or model output; optionally run a generator on source saves")
     add.add_argument("file")
     add.add_argument("--id", help="Stable ID; reusing it updates that registration")
     add.add_argument("--label")
-    add.add_argument("--kind", choices=["auto", "image", "model"], default="auto")
+    add.add_argument("--kind", choices=["auto", "image", "model", "video"], default="auto")
     add.add_argument("--watch", action="append", default=[], metavar="SOURCE", help="Additional input/dependency file (repeatable)")
     add.add_argument("--cwd", default=os.getcwd(), help="Working directory for explicit generator")
     add.add_argument("--timeout", type=int, default=120)
@@ -145,6 +145,8 @@ def parser() -> argparse.ArgumentParser:
     layout.add_argument("--compact", action=argparse.BooleanOptionalAction, default=None, help="Tight spacing and in-view controls")
     settings = sub.add_parser("settings", help="Update per-preview options with a JSON object")
     settings.add_argument("id"); settings.add_argument("value", help='For example: {"grid":false,"light":1.2}')
+    seek = sub.add_parser("seek", help="Seek a visible video to seconds from the start")
+    seek.add_argument("id"); seek.add_argument("seconds", type=float)
     sub.add_parser("capture", help="Save the current visible window to a new PNG").add_argument("file")
     return p
 
@@ -188,7 +190,8 @@ def main() -> int:
             entry["maps"] = {key: path(getattr(args, key)) for key in ("normal", "orm") if getattr(args, key)}
             entry["settings"] = {"shape": args.shape}
         request = {"method": "add", "entry": entry}
-    if action in {"select", "remove", "reload", "settings"}: request["id"] = args.id
+    if action in {"select", "remove", "reload", "settings", "seek"}: request["id"] = args.id
+    if action == "seek": request["seconds"] = args.seconds
     if action == "settings": request["settings"] = json.loads(args.value)
     if action == "layout":
         request["layout"] = args.mode

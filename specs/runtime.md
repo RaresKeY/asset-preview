@@ -3,6 +3,8 @@
 Source ownership: `src/main.cpp`, `src/service.{h,cpp}`, `bin/asset-preview`,
 `fish/`, `skills/asset-preview/`, `tools/install.py`, `play.sh`, `icon.svg`. See [protocol](../docs/protocol.md)
 for concrete request/configuration fields and limits.
+The CLI accepts video registrations and absolute seek for active videos; playback
+preferences are boolean paused/muted/loop settings in the existing registry.
 
 A Qt service and optional single GUI window share one native process. A standard
 library client starts it once under a private startup flock, waits for socket

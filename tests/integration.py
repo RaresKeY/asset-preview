@@ -32,6 +32,14 @@ def png(path: Path, color=(220, 70, 80, 255), size=64) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     candidate = path.with_suffix(".candidate"); candidate.write_bytes(data); candidate.replace(path)
 
+def video(path: Path, source="testsrc2=size=320x180:rate=12", duration=4):
+    candidate=path.with_name(path.stem+".candidate.mp4")
+    subprocess.run(["ffmpeg","-nostdin","-loglevel","error","-y","-f","lavfi","-i",source,
+                    "-f","lavfi","-i","sine=frequency=440:sample_rate=48000","-t",str(duration),
+                    "-c:v","libx264","-preset","ultrafast","-pix_fmt","yuv420p","-c:a","aac",
+                    "-threads","2","-shortest",str(candidate)],check=True,capture_output=True)
+    candidate.replace(path)
+
 def eventually(fn, timeout=8):
     deadline = time.monotonic() + timeout
     last = None
@@ -48,6 +56,10 @@ def ticks(pid):
     # Linux stat field 14+15, after safely skipping the parenthesized comm.
     words = Path(f"/proc/{pid}/stat").read_text().rsplit(")", 1)[1].split()
     return int(words[11]) + int(words[12])
+
+def memory(pid):
+    fields=Path(f"/proc/{pid}/smaps_rollup").read_text().splitlines()
+    return {line.split(":")[0]+"_kib":int(line.split()[1]) for line in fields if line.startswith(("Rss:","Pss:"))}
 
 def horizon_roll(camera, vertical=1):
     # VTK stores an orthogonalized view-up vector. The camera's right vector
@@ -179,6 +191,7 @@ class PreviewIntegration(unittest.TestCase):
     def show(self): client.rpc({"method":"show"})
 
     def test_01_private_socket_inert_connect_and_hidden_unload(self):
+        self.assertNotIn("libmpv.so",Path(f"/proc/{self.pid}/maps").read_text())
         self.add(); state=client.rpc({"method":"list"})
         self.assertEqual(state["active"],0); self.assertEqual(state["watched_files"],0)
         socket_path=client.locations()[0]/"preview.sock"
@@ -451,5 +464,106 @@ class PreviewIntegration(unittest.TestCase):
         self.assertEqual(row("modes")["metrics"]["lighting"],"lightkit")
         time.sleep(.5); renders=row("modes")["metrics"]["renders"]; time.sleep(.7)
         self.assertEqual(row("modes")["metrics"]["renders"],renders)
+
+    def test_17_video_registration_types_streaming_limit_and_validation(self):
+        for suffix in ("mp4","mov","webm","mkv","gif"):
+            client.rpc({"method":"add","entry":{"id":suffix,"path":str(self.root/f"missing.{suffix}")}})
+            self.assertEqual(row(suffix)["kind"],"video")
+            self.assertFalse(row(suffix)["active"])
+        large=self.root/"large.mp4"
+        with large.open("wb") as f: f.truncate(300*1024*1024)
+        client.rpc({"method":"add","entry":{"id":"large","path":str(large)}})
+        self.assertEqual(row("large")["kind"],"video")
+        with self.assertRaises(RuntimeError): client.rpc({"method":"seek","id":"large","seconds":0})
+        with self.assertRaises(RuntimeError): client.rpc({"method":"settings","id":"large","settings":{"paused":1}})
+        with self.assertRaises(RuntimeError): client.rpc({"method":"add","entry":{"id":"model-large","path":str(large),"kind":"model"}})
+        self.assertEqual(client.rpc({"method":"list"})["active"],0)
+
+    @unittest.skipUnless(GPU,"Hardware Gamescope video lane")
+    def test_18_video_playback_pause_seek_reload_failure_and_unload(self):
+        samples={"before_video":memory(self.pid)}
+        asset=self.root/"clip.mp4"; video(asset)
+        client.rpc({"method":"add","entry":{"id":"clip","path":str(asset)}})
+        self.add("image-after-video"); self.show()
+        eventually(lambda:row("clip").get("metrics",{}).get("loads",0)==1,timeout=30)
+        eventually(lambda:row("clip")["metrics"].get("muted") is True)
+        renderer=row("clip")["metrics"]["renderer"]
+        self.assertFalse(any(s in renderer.lower() for s in ("llvmpipe","softpipe","software","unknown")),renderer)
+        self.assertEqual((row("clip")["metrics"]["width"],row("clip")["metrics"]["height"]),(320,180))
+        renders=row("clip")["metrics"]["renders"]
+        eventually(lambda:row("clip")["metrics"]["renders"]>renders+3)
+        samples["playing"]=memory(self.pid)
+        client.rpc({"method":"settings","id":"clip","settings":{"paused":True}})
+        eventually(lambda:row("clip")["metrics"]["paused"] is True)
+        time.sleep(.6); state=row("clip"); paints=state["metrics"]["renders"]; cpu=ticks(self.pid)
+        time.sleep(.9)
+        self.assertEqual(row("clip")["metrics"]["renders"],paints)
+        self.assertLessEqual(ticks(self.pid)-cpu,3)
+        samples["paused"]={**memory(self.pid),"extra_paints":row("clip")["metrics"]["renders"]-paints,"cpu_ticks":ticks(self.pid)-cpu,"idle_seconds":.9}
+        client.rpc({"method":"seek","id":"clip","seconds":2})
+        eventually(lambda:abs(row("clip")["metrics"].get("position",0)-2)<.2)
+        with self.assertRaises(RuntimeError): client.rpc({"method":"seek","id":"clip","seconds":-1})
+        # Controls work on the actual native child and retain global navigation.
+        input=XInput()
+        try:
+            view=row("clip")["viewport"]; input.click(view["x"]+view["width"]//2,view["y"]+view["height"]//2)
+            time.sleep(.15)
+            input.key("space",1); input.key("space",0); input.x.XFlush(input.display)
+            eventually(lambda:row("clip")["metrics"]["paused"] is False)
+            client.rpc({"method":"settings","id":"clip","settings":{"paused":True}})
+            input.key("Home",1); input.key("Home",0); input.x.XFlush(input.display)
+            eventually(lambda:row("clip")["metrics"]["position"]<.2)
+            input.shortcut("Right"); eventually(lambda:client.rpc({"method":"list"})["selected"]=="image-after-video")
+            self.assertNotIn("metrics",row("clip"))
+            client.rpc({"method":"select","id":"clip"})
+            eventually(lambda:row("clip").get("metrics",{}).get("loads",0)==1,timeout=20)
+        finally: input.close()
+        # Same watched filename, atomically replaced with a visibly different clip.
+        initial=row("clip")["metrics"]["loads"]; video(asset,"color=c=red:size=320x180:rate=12")
+        eventually(lambda:row("clip")["metrics"]["loads"]>initial,timeout=20)
+        eventually(lambda:row("clip")["status"].startswith("Live"))
+        snapshot=self.root/"video-frame.png"; client.rpc({"method":"capture","path":str(snapshot)})
+        if os.environ.get("ASSET_PREVIEW_EVIDENCE_DIR"):
+            target=Path(os.environ["ASSET_PREVIEW_EVIDENCE_DIR"]).resolve(); target.mkdir(parents=True,exist_ok=True)
+            (target/"video-red.png").write_bytes(snapshot.read_bytes())
+            state=row("clip")
+            (target/"video-red.json").write_text(json.dumps({k:state[k] for k in ("kind","status","settings","metrics")},indent=2))
+        view=row("clip")["viewport"]; color=png_pixel(snapshot,view["x"]+view["width"]//2,view["y"]+view["height"]//2)
+        self.assertGreater(color[0],180); self.assertLess(max(color[1:]),60)
+        good=row("clip")["metrics"]["loads"]
+        asset.write_bytes(b"unfinished video save")
+        eventually(lambda:row("clip")["status"].startswith("Waiting"),timeout=20)
+        self.assertEqual(row("clip")["metrics"]["loads"],good)
+        self.assertTrue(row("clip")["metrics"]["engine"])
+        video(asset,"color=c=blue:size=320x180:rate=12")
+        eventually(lambda:row("clip")["metrics"]["loads"]>good,timeout=20)
+        client.rpc({"method":"add","entry":{"id":"clip-grid","path":str(asset)}})
+        client.rpc({"method":"layout","layout":"grid","compact":True})
+        eventually(lambda:row("clip-grid").get("metrics",{}).get("loads",0)==1)
+        second=row("clip-grid")["metrics"]["renders"]
+        eventually(lambda:row("clip-grid")["metrics"]["renders"]>second+2)
+        self.assertEqual(client.rpc({"method":"list"})["active"],3)
+        # Test mute, loop-off EOF and seek without producing audible automation.
+        client.rpc({"method":"settings","id":"clip","settings":{"muted":False,"paused":True}})
+        eventually(lambda:row("clip")["metrics"]["muted"] is False)
+        client.rpc({"method":"settings","id":"clip","settings":{"muted":True,"loop":False,"paused":False}})
+        client.rpc({"method":"seek","id":"clip","seconds":3.6})
+        eventually(lambda:row("clip")["metrics"].get("eof") is True)
+        eventually(lambda:row("clip")["settings"].get("paused") is True)
+        evidence=os.environ.get("ASSET_PREVIEW_EVIDENCE_DIR")
+        if evidence:
+            target=Path(evidence).resolve(); target.mkdir(parents=True,exist_ok=True)
+            output=target/"video.png"; output.unlink(missing_ok=True)
+            client.rpc({"method":"capture","path":str(output)})
+            state=row("clip")
+            (target/"video.json").write_text(json.dumps({k:state[k] for k in ("kind","status","settings","metrics")},indent=2))
+        for i in range(4): self.add(f"video-offpage-{i}")
+        client.rpc({"method":"select","id":"video-offpage-3"})
+        self.assertNotIn("metrics",row("clip")); self.assertNotIn("metrics",row("clip-grid"))
+        client.rpc({"method":"hide"}); self.assertNotIn("metrics",row("clip"))
+        self.assertEqual(client.rpc({"method":"list"})["active"],0)
+        cpu=ticks(self.pid); time.sleep(.8); self.assertLessEqual(ticks(self.pid)-cpu,2)
+        samples["hidden"]={**memory(self.pid),"cpu_ticks":ticks(self.pid)-cpu,"idle_seconds":.8}
+        if evidence: (target/"resources.json").write_text(json.dumps(samples,indent=2))
 
 if __name__ == "__main__": unittest.main(verbosity=2)

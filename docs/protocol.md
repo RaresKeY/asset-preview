@@ -17,6 +17,7 @@ registrations, 8 KiB per configuration, 128 extra input paths and 128 command ar
 | `layout` | optional `layout`: `single` / `grid`, `grid_size`: integer 2 / 3 / 4, `compact`: boolean | Merge/persist layout options; default grid 2×2, maximum 16 active entries |
 | `settings` | `id`, `settings` object | Validate, merge and persist options |
 | `reload` | `id` | Reload or rebuild only if currently visible |
+| `seek` | `id`, nonnegative numeric `seconds` | Seek a loaded visible video to absolute seconds |
 | `show` | — | Open/raise the single app window |
 | `hide` | — | Suspend all entries and hide the window |
 | `quit` | — | Stop owned generators, close socket and exit |
@@ -29,14 +30,16 @@ Example registration:
 ```
 
 Entry fields: `id` (optional, otherwise allocated), `label`, absolute `path`, `kind`
-(`auto`, `image`, `model`, `material`), absolute file `watch` list, generator `cwd`,
+(`auto`, `image`, `video`, `model`, `material`), absolute file `watch` list, generator `cwd`,
 argument-array `command`, timeout seconds and `settings`. Material entries also
 have `maps` containing absolute `normal` / `orm` file paths. Files may be missing;
 generator cwd must exist at registration. No shell, URI execution, TCP listener,
-arbitrary plugin loading or command inference is implemented.
+arbitrary plugin loading or command inference is implemented. Common video
+extensions are detected automatically; explicit `video` accepts other local formats.
 
 Boolean settings: `grid`, `axes`, `edges`, `orthographic`, `nearest`, `materials`,
-`textures`, `lock_horizon`. The last three default to true. Numeric settings:
+`textures`, `lock_horizon`, `paused`, `muted`, `loop`. Materials/textures/horizon,
+muted and loop default to true; paused defaults to false. Numeric settings:
 `light` in 0–5, `roughness` / `metallic` in 0–1. `background` is `dark`, `light` or
 `checker`; checker applies to images. Material `shape` is `sphere`, `cube` or `plane`.
 Material roughness/metallic scalars apply when no ORM map is supplied.
@@ -45,6 +48,10 @@ Material roughness/metallic scalars apply when no ORM map is supplied.
 Disabling materials uses opaque neutral clay and suppresses all texture maps;
 the stored `textures` preference is retained. Display-mode changes reload the
 scene to restore authored properties, preserving camera state.
+Videos fit automatically and support pause, mute, loop and dark/light background.
+Their reload is asynchronous: Loading precedes successful `metrics.loads` and
+Live status; rejected replacements retain the previous loaded video. Reload
+restarts playback from the beginning and retains the stored playback options.
 
 Version-1 registry files missing `grid_size` and `compact` restore as 2 and false.
 CLI equivalents include `layout grid --size 4 --compact` and `--no-compact`.
@@ -59,3 +66,8 @@ Active entry diagnostics expose `viewport`, `controls.options` geometry and
 `status_visible`; top-level `options_open` reports an active popup. These support
 isolated input checks and are not persisted. These are diagnostic counters,
 not a guarantee of GPU-memory reclamation or perceptual quality.
+Video metrics add `backend=libmpv`, `loading`, width/height, duration/position
+(seconds), paused/muted/eof, codec and `hwdec`. Decoder reports may be unavailable
+until playback initializes; GPU renderer identity alone does not prove hardware
+video decoding. `revisions` increases only after successful asynchronous video
+publication, not merely when a load command is accepted.

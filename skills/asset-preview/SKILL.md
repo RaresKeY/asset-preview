@@ -1,6 +1,6 @@
 ---
 name: asset-preview
-description: Connect images, exported 3D assets, baked materials and source-save generator outputs to the workstation's live Asset Preview window during visual asset authoring or when live inspection is requested. Use for the existing viewer, not for implementing its application or for unrelated game performance profiling.
+description: Connect images, local videos, exported 3D assets, baked materials and source-save generator outputs to the workstation's live Asset Preview window during visual asset authoring or when live inspection is requested. Use for the existing viewer, not for implementing its application or for unrelated game performance profiling.
 ---
 
 # Asset Preview
@@ -65,6 +65,16 @@ occlusion/roughness/metallic in R/G/B. F3D does not execute Godot `.gd`, `.tscn`
 `.gdshader` or Material Maker `.ptex`; use the owning exporter/baker, or a finite
 Godot PNG capture for exact shader appearance. F3D lighting is an inspection
 environment, not engine-shader equivalence.
+
+For rendered turntables/animation captures, connect the local finished encode with
+`add /absolute/project/preview/turntable.mp4 --id project-turntable`; common video
+extensions are automatic, other local video formats can use `--kind video`.
+The same watched-output/finite-generator flow applies. Publish encodes atomically;
+wait for Live and `metrics.loads` because video load is asynchronous. Defaults are
+muted looping playback; preserve the user's paused/muted/loop preferences.
+`settings ID '{"paused":true}'` and `seek ID 2.5` aid inspection. Hidden/off-page
+videos release their players. `metrics.hwdec` reports the decoder separately from
+GPU renderer identity; software fallback is supported.
 
 Check `status --json`: confirm the expected path/ID; distinguish `active`,
 `building`, waiting/failure status and successful revisions/loads. A registered
