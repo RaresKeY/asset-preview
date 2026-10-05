@@ -18,8 +18,8 @@ jobs:
       - name: Build runtime and standalone artifacts
         if: ${{ !inputs.staged }}
         run: |
-          docker build -f packaging/Containerfile --target runtime -t ghcr.io/rareskey/asset-preview:0.0.1 .
-          docker build -f packaging/Containerfile --target artifacts --output type=local,dest=release .
+          docker build -f packaging/Containerfile --build-arg SOURCE_COMMIT="$GITHUB_SHA" --target runtime -t ghcr.io/rareskey/asset-preview:0.0.1 .
+          docker build -f packaging/Containerfile --build-arg SOURCE_COMMIT="$GITHUB_SHA" --target artifacts --output type=local,dest=release .
       - name: Load locally validated container
         if: ${{ inputs.staged }}
         env:

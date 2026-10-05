@@ -25,6 +25,7 @@ COPY packaging/build-assimp.sh /build-assimp.sh
 RUN bash /build-assimp.sh
 RUN bash /build-dependencies.sh f3d
 COPY . /src
+ARG SOURCE_COMMIT=unknown
 RUN cmake -S /src -B /src/build -G Ninja -DCMAKE_BUILD_TYPE=Release \
  -DCMAKE_PREFIX_PATH=/opt/dependencies -DCMAKE_BUILD_RPATH=/opt/dependencies/lib \
  && cmake --build /src/build --parallel 2
@@ -35,9 +36,11 @@ RUN python3 /src/packaging/bundle.py /out/asset-preview \
 RUN python3 /src/packaging/make-release.py /out
 
 FROM runtime-base AS runtime
+ARG SOURCE_COMMIT=unknown
 ARG DEBIAN_FRONTEND=noninteractive
 LABEL org.opencontainers.image.source="https://github.com/RaresKeY/asset-preview" \
  org.opencontainers.image.version="0.0.1" \
+ org.opencontainers.image.revision="${SOURCE_COMMIT}" \
  org.opencontainers.image.description="Live asset preview for AI agent workflows"
 COPY --from=build /out/asset-preview /opt/asset-preview
 COPY --from=build /out/asset-preview-0.0.1-corresponding-sources.tar.xz /opt/sources/

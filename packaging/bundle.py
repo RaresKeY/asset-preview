@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Create a relocatable dynamically linked Linux bundle from the build image."""
 import json
+import os
 import re
 import shutil
 import subprocess
@@ -58,6 +59,7 @@ while pending:
         dest=out/'lib'/soname
         if not dest.exists():shutil.copy2(dep.resolve(),dest)
         manifest[soname]=str(dep.resolve());pending.append(dep)
+(out/'build-info.json').write_text(json.dumps({'version':'0.0.1','source_commit':os.environ.get('SOURCE_COMMIT','unknown'),'platform':'linux-x86_64'},indent=2)+'\n')
 (out/'dependency-manifest.json').write_text(json.dumps(manifest,indent=2)+'\n')
 (out/'asset-preview').write_text('''#!/bin/sh
 set -eu
