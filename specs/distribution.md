@@ -4,7 +4,7 @@ Source ownership: `packaging/`, `.github/workflows/release.yml`, `CMakeLists.txt
 `THIRD_PARTY_NOTICES.md`. Release version: 0.0.1; platform: Linux x86_64.
 
 The Ubuntu 24.04 build image compiles FFmpeg 7.1.5 without GPL/nonfree components,
-libmpv 0.41.0 in LGPL mode, VTK 9.4.2, F3D 3.5.0 with native/Assimp readers,
+libmpv 0.41.0 in LGPL mode, VTK 9.4.2, F3D 3.5.0 with native/Assimp 6.0.5 readers,
 and the current application. Downloaded sources are SHA256-pinned. Qt and other
 system libraries come from Ubuntu's authenticated package repositories. Ubuntu
 package versions and corresponding sources accompany each artifact; subsequent

@@ -21,7 +21,7 @@ for package in sorted(packages):
     notice=Path('/usr/share/doc')/package.split(':')[0]/'copyright'
     if not notice.is_file():raise RuntimeError('Missing copyright: '+package)
     shutil.copy2(notice,licenses/(package.replace(':','_')+'.copyright'))
-for component in ('ffmpeg','mpv','f3d','vtk'):
+for component in ('ffmpeg','mpv','f3d','vtk','assimp'):
     tree=Path('/dependency-sources')/component
     dest=licenses/component;dest.mkdir()
     for p in tree.iterdir():
@@ -35,6 +35,9 @@ shutil.copy2(f3d/'resources/colormaps/licenses.md',licenses/'f3d/colormap-licens
 for p in (Path('/dependency-sources/vtk/ThirdParty')).rglob('*'):
     if p.is_file() and p.name.lower().startswith(('copyright','copying','license')):
         dest=licenses/'vtk-third-party'/p.relative_to('/dependency-sources/vtk/ThirdParty');dest.parent.mkdir(parents=True,exist_ok=True);shutil.copy2(p,dest)
+for p in Path('/dependency-sources/assimp/contrib').rglob('*'):
+    if p.is_file() and p.name.lower().startswith(('copyright','copying','license')):
+        dest=licenses/'assimp-third-party'/p.relative_to('/dependency-sources/assimp/contrib');dest.parent.mkdir(parents=True,exist_ok=True);shutil.copy2(p,dest)
 subprocess.run(['apt-get','update'],check=True)
 ubuntu=out/'ubuntu';ubuntu.mkdir()
 for item in sorted(sources):subprocess.run(['apt-get','source','--download-only',item],cwd=ubuntu,check=True)

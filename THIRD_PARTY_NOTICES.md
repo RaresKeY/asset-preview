@@ -17,7 +17,7 @@ No license is assigned to this project's own source by this file.
 ## Release 0.0.1
 
 The release uses Qt 6 from Ubuntu 24.04 under LGPL-3.0, F3D 3.5.0
-(BSD-3-Clause), VTK 9.4.2 (BSD-style), Assimp (BSD-3-Clause),
+(BSD-3-Clause), VTK 9.4.2 (BSD-style), Assimp 6.0.5 (BSD-3-Clause),
 libmpv 0.41.0 built with `-Dgpl=false` (LGPL-2.1-or-later), and
 FFmpeg 7.1.5 built with GPL/nonfree components disabled (LGPL-2.1-or-later).
 Python 3.12 uses the PSF license and its included historical notices.
