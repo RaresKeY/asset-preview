@@ -1,0 +1,482 @@
+{
+  "appearance": "Dark preview backgrounds and KDE Breeze Dark app chrome",
+  "camera": "Fitted three-quarter views with locked Y-up horizon; GPU turned to match the previous fan-facing view",
+  "captures": [
+    {
+      "file": "compact-grid-components.png",
+      "size": [
+        1400,
+        1000
+      ],
+      "layout": "2x2",
+      "compact": true,
+      "views": [
+        {
+          "id": "case",
+          "label": "PC case",
+          "source": "code-review-simulator/artifacts/previews/pc_component_materials/case_mid_tower_open_charcoal.glb",
+          "sha256": "f61dbd6f182991838a29a299c4738204b04611b35b3b8698106d7d4ea1d9d196",
+          "settings": {
+            "axes": false,
+            "background": "dark",
+            "edges": false,
+            "grid": false,
+            "light": 2,
+            "lighting": "studio",
+            "materials": true,
+            "textures": true
+          },
+          "camera": {
+            "focal": [
+              6.038776589889494e-09,
+              2.246835961727811e-08,
+              0
+            ],
+            "position": [
+              1.223181027966153,
+              0.8904029886701201,
+              2.1186116768322374
+            ],
+            "up": [
+              -0.1710100716628344,
+              0.9396926207859085,
+              -0.29619813272602397
+            ]
+          },
+          "renderer": "NVIDIA GeForce RTX 2080 Ti/PCIe/SSE2"
+        },
+        {
+          "id": "motherboard",
+          "label": "Motherboard",
+          "source": "code-review-simulator/artifacts/previews/pc_component_materials/motherboard_atx_standard.glb",
+          "sha256": "8c7abd8dcbea92184d606e76d09b3b71ed07c7f9e86f3c5c48410f15805f2b26",
+          "settings": {
+            "axes": false,
+            "background": "dark",
+            "edges": false,
+            "grid": false,
+            "light": 2,
+            "lighting": "studio",
+            "materials": true,
+            "textures": true
+          },
+          "camera": {
+            "focal": [
+              0,
+              0,
+              -1.2067498111889563e-09
+            ],
+            "position": [
+              1.051089485593219,
+              0.7651305726122125,
+              1.8205403911421416
+            ],
+            "up": [
+              -0.17101007166283438,
+              0.9396926207859083,
+              -0.29619813272602397
+            ]
+          },
+          "renderer": "NVIDIA GeForce RTX 2080 Ti/PCIe/SSE2"
+        },
+        {
+          "id": "gpu",
+          "label": "Dual fan GPU",
+          "source": "code-review-simulator/artifacts/previews/pc_component_materials/gpu_dual_fan_performance.glb",
+          "sha256": "e2ba07cc2cc2aee742dd30a8b5815ebd5e02d22c15378e43ad02b40319a6ecfd",
+          "settings": {
+            "axes": false,
+            "background": "dark",
+            "edges": false,
+            "grid": false,
+            "light": 2,
+            "lighting": "studio",
+            "materials": true,
+            "textures": true
+          },
+          "camera": {
+            "focal": [
+              1.8018942782305203e-08,
+              -3.2037497099679513e-09,
+              1.284365502840501e-09
+            ],
+            "position": [
+              1.1050661472673904,
+              0.8044223526806565,
+              1.9140306828661529
+            ],
+            "up": [
+              -0.17101007166283438,
+              0.9396926207859083,
+              -0.29619813272602397
+            ]
+          },
+          "renderer": "NVIDIA GeForce RTX 2080 Ti/PCIe/SSE2",
+          "presentation": "Inspection root -90° X instead of +90° X to retain the fan-facing view; original geometry/material buffer unchanged"
+        },
+        {
+          "id": "cooler",
+          "label": "Dual tower cooler",
+          "source": "code-review-simulator/artifacts/previews/pc_component_materials/cooler_dual_tower_140.glb",
+          "sha256": "6cfe3bea4b1c8dfa1aeff0dfa76ef150ee0ed8d0779d46f9badd9b452ac4f108",
+          "settings": {
+            "axes": false,
+            "background": "dark",
+            "edges": false,
+            "grid": false,
+            "light": 2,
+            "lighting": "studio",
+            "materials": true,
+            "textures": true
+          },
+          "camera": {
+            "focal": [
+              6.0162506088090595e-09,
+              0,
+              0
+            ],
+            "position": [
+              1.2452645554764636,
+              0.9064784595808614,
+              2.1568614685294567
+            ],
+            "up": [
+              -0.1710100716628343,
+              0.9396926207859083,
+              -0.2961981327260238
+            ]
+          },
+          "renderer": "NVIDIA GeForce RTX 2080 Ti/PCIe/SSE2"
+        }
+      ]
+    },
+    {
+      "file": "compact-grid-showcase.png",
+      "size": [
+        1500,
+        1050
+      ],
+      "layout": "3x3",
+      "compact": true,
+      "views": [
+        {
+          "id": "case",
+          "label": "PC case",
+          "source": "code-review-simulator/artifacts/previews/pc_component_materials/case_mid_tower_open_charcoal.glb",
+          "sha256": "f61dbd6f182991838a29a299c4738204b04611b35b3b8698106d7d4ea1d9d196",
+          "settings": {
+            "axes": false,
+            "background": "dark",
+            "edges": false,
+            "grid": false,
+            "light": 2,
+            "lighting": "studio",
+            "materials": true,
+            "textures": true
+          },
+          "camera": {
+            "focal": [
+              6.038776589889494e-09,
+              2.246835961727811e-08,
+              0
+            ],
+            "position": [
+              1.223181027966153,
+              0.8904029886701201,
+              2.1186116768322374
+            ],
+            "up": [
+              -0.1710100716628344,
+              0.9396926207859085,
+              -0.29619813272602397
+            ]
+          },
+          "renderer": "NVIDIA GeForce RTX 2080 Ti/PCIe/SSE2"
+        },
+        {
+          "id": "motherboard",
+          "label": "Motherboard",
+          "source": "code-review-simulator/artifacts/previews/pc_component_materials/motherboard_atx_standard.glb",
+          "sha256": "8c7abd8dcbea92184d606e76d09b3b71ed07c7f9e86f3c5c48410f15805f2b26",
+          "settings": {
+            "axes": false,
+            "background": "dark",
+            "edges": false,
+            "grid": false,
+            "light": 2,
+            "lighting": "studio",
+            "materials": true,
+            "textures": true
+          },
+          "camera": {
+            "focal": [
+              0,
+              0,
+              -1.2067498111889563e-09
+            ],
+            "position": [
+              1.051089485593219,
+              0.7651305726122125,
+              1.8205403911421416
+            ],
+            "up": [
+              -0.17101007166283438,
+              0.9396926207859083,
+              -0.29619813272602397
+            ]
+          },
+          "renderer": "NVIDIA GeForce RTX 2080 Ti/PCIe/SSE2"
+        },
+        {
+          "id": "gpu",
+          "label": "Dual fan GPU",
+          "source": "code-review-simulator/artifacts/previews/pc_component_materials/gpu_dual_fan_performance.glb",
+          "sha256": "e2ba07cc2cc2aee742dd30a8b5815ebd5e02d22c15378e43ad02b40319a6ecfd",
+          "settings": {
+            "axes": false,
+            "background": "dark",
+            "edges": false,
+            "grid": false,
+            "light": 2,
+            "lighting": "studio",
+            "materials": true,
+            "textures": true
+          },
+          "camera": {
+            "focal": [
+              1.8018942782305203e-08,
+              -3.2037497099679513e-09,
+              1.284365502840501e-09
+            ],
+            "position": [
+              1.1050661472673904,
+              0.8044223526806565,
+              1.9140306828661529
+            ],
+            "up": [
+              -0.17101007166283438,
+              0.9396926207859083,
+              -0.29619813272602397
+            ]
+          },
+          "renderer": "NVIDIA GeForce RTX 2080 Ti/PCIe/SSE2",
+          "presentation": "Inspection root -90° X instead of +90° X to retain the fan-facing view; original geometry/material buffer unchanged"
+        },
+        {
+          "id": "cooler",
+          "label": "Dual tower cooler",
+          "source": "code-review-simulator/artifacts/previews/pc_component_materials/cooler_dual_tower_140.glb",
+          "sha256": "6cfe3bea4b1c8dfa1aeff0dfa76ef150ee0ed8d0779d46f9badd9b452ac4f108",
+          "settings": {
+            "axes": false,
+            "background": "dark",
+            "edges": false,
+            "grid": false,
+            "light": 2,
+            "lighting": "studio",
+            "materials": true,
+            "textures": true
+          },
+          "camera": {
+            "focal": [
+              6.0162506088090595e-09,
+              0,
+              0
+            ],
+            "position": [
+              1.2452645554764636,
+              0.9064784595808614,
+              2.1568614685294567
+            ],
+            "up": [
+              -0.1710100716628343,
+              0.9396926207859083,
+              -0.2961981327260238
+            ]
+          },
+          "renderer": "NVIDIA GeForce RTX 2080 Ti/PCIe/SSE2"
+        },
+        {
+          "id": "psu",
+          "label": "Modular PSU",
+          "source": "code-review-simulator/artifacts/previews/pc_component_materials/psu_atx_modular_850w.glb",
+          "sha256": "a0f085f1d5531d4f2022e1fc5ecf80aa533096e4444e6548a4e5dab05d99753e",
+          "settings": {
+            "axes": false,
+            "background": "dark",
+            "edges": false,
+            "grid": false,
+            "light": 2,
+            "lighting": "studio",
+            "materials": true,
+            "textures": true
+          },
+          "camera": {
+            "focal": [
+              -1.4794990121913543e-08,
+              -5.633885358236057e-09,
+              0
+            ],
+            "position": [
+              1.1852338932727038,
+              0.8627797207254052,
+              2.0528853476266664
+            ],
+            "up": [
+              -0.17101007166283436,
+              0.9396926207859083,
+              -0.2961981327260239
+            ]
+          },
+          "renderer": "NVIDIA GeForce RTX 2080 Ti/PCIe/SSE2"
+        },
+        {
+          "id": "lineup",
+          "label": "PC material comparison",
+          "source": "code-review-simulator/artifacts/previews/pc_component_materials/material_lineup.glb",
+          "sha256": "89b297477e8f7ad147beeb0a21389b42c62f534b75634e845a8575461b4aa4eb",
+          "settings": {
+            "axes": false,
+            "background": "dark",
+            "edges": false,
+            "grid": false,
+            "light": 2,
+            "lighting": "studio",
+            "materials": true,
+            "textures": true
+          },
+          "camera": {
+            "focal": [
+              -0.10864341258205279,
+              0.0449483387825218,
+              0
+            ],
+            "position": [
+              3.1247328604407856,
+              2.398653777908328,
+              5.600371984863256
+            ],
+            "up": [
+              -0.1710100716628343,
+              0.9396926207859084,
+              -0.29619813272602386
+            ]
+          },
+          "renderer": "NVIDIA GeForce RTX 2080 Ti/PCIe/SSE2"
+        },
+        {
+          "id": "chef",
+          "label": "Rogue Diner chef rig",
+          "source": "RogueDinerCoop/assets/models/image_refresh/chef.glb",
+          "sha256": "f6c6827045bde589077985910199db26ca95cf5387553ed6c7701e2d246b1fde",
+          "settings": {
+            "axes": false,
+            "background": "dark",
+            "edges": false,
+            "grid": false,
+            "light": 1,
+            "lighting": "studio",
+            "materials": true,
+            "textures": true
+          },
+          "camera": {
+            "focal": [
+              0,
+              0.6449999809265137,
+              0.07750001549720764
+            ],
+            "position": [
+              1.505732714845874,
+              1.7410837588559895,
+              2.6855055802288823
+            ],
+            "up": [
+              -0.17101007166283438,
+              0.9396926207859083,
+              -0.29619813272602397
+            ]
+          },
+          "renderer": "NVIDIA GeForce RTX 2080 Ti/PCIe/SSE2"
+        },
+        {
+          "id": "patron",
+          "label": "Rogue Diner patron rig",
+          "source": "RogueDinerCoop/assets/models/image_refresh/patron.glb",
+          "sha256": "65553b572ef8f01bb0a5fd9719d4b965c469e9eab0b05ec120d4723f3c95aca1",
+          "settings": {
+            "axes": false,
+            "background": "dark",
+            "edges": false,
+            "grid": false,
+            "light": 1,
+            "lighting": "studio",
+            "materials": true,
+            "textures": true
+          },
+          "camera": {
+            "focal": [
+              0,
+              0.5024999976158142,
+              0.005599997937679291
+            ],
+            "position": [
+              1.1440683627471477,
+              1.3353136576270748,
+              1.9871845295478814
+            ],
+            "up": [
+              -0.17101007166283433,
+              0.9396926207859083,
+              -0.29619813272602397
+            ]
+          },
+          "renderer": "NVIDIA GeForce RTX 2080 Ti/PCIe/SSE2"
+        },
+        {
+          "id": "clay",
+          "label": "Chef · clay inspection",
+          "source": "RogueDinerCoop/assets/models/image_refresh/chef.glb",
+          "sha256": "f6c6827045bde589077985910199db26ca95cf5387553ed6c7701e2d246b1fde",
+          "settings": {
+            "axes": false,
+            "background": "dark",
+            "edges": false,
+            "grid": false,
+            "light": 1,
+            "lighting": "studio",
+            "materials": false,
+            "textures": true
+          },
+          "camera": {
+            "focal": [
+              0,
+              0.6449999809265137,
+              0.07750001549720764
+            ],
+            "position": [
+              1.505732714845874,
+              1.7410837588559895,
+              2.6855055802288823
+            ],
+            "up": [
+              -0.17101007166283438,
+              0.9396926207859083,
+              -0.29619813272602397
+            ]
+          },
+          "renderer": "NVIDIA GeForce RTX 2080 Ti/PCIe/SSE2"
+        }
+      ]
+    }
+  ],
+  "captured_at_utc": "2026-10-05T22:15:04.301286+00:00",
+  "theme": {
+    "QT_QPA_PLATFORMTHEME": "kde",
+    "QT_STYLE_OVERRIDE": "breeze",
+    "KDE ColorScheme": "BreezeDark"
+  },
+  "capture_input": {
+    "QT_XCB_NO_XI2": "1",
+    "GPU framing": "One wheel step out after fitting; recorded camera state preserves the viewing angle"
+  }
+}

@@ -11,13 +11,13 @@ Single view: assembled PC from a three-quarter angle, showing components and cab
 
 ![Assembled PC in the live asset preview](docs/screenshots/assembled-pc.png)
 
-Compact 3×3: PC components, character models and clay inspection.
+Compact 3×3 in dark mode: latest PC components, chef and customer rigs, and clay inspection.
 
-![Compact 3×3 asset grid](docs/screenshots/compact-grid-showcase.png)
+![Latest PC components and character rigs in a dark compact 3×3 grid](docs/screenshots/compact-grid-showcase.png)
 
-Compact 2×2: component inspection.
+Compact 2×2 in dark mode: current PC case, motherboard, dual-fan GPU and tower cooler.
 
-![Compact 2×2 component grid](docs/screenshots/compact-grid-components.png)
+![Current PC components in a dark compact 2×2 grid](docs/screenshots/compact-grid-components.png)
 
 ## Downloads
 

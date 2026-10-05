@@ -83,6 +83,14 @@ Camera tests measure horizon roll through native input and pole limits, reload
 retention and Z-up. Native overlay clicks open/toggle the real popup. Functional
 checks verify grid paging, compact busy/error visibility and restart persistence.
 
+README component screenshots use isolated Gamescope hardware sessions with KDE
+Breeze Dark chrome and dark preview backgrounds, preserving the compact 2×2
+and 3×3 layouts. `docs/screenshots/capture-settings.json` records their current
+source hashes, renderer, display settings and fitted camera states. The GPU's
+inspection root is turned to retain the prior fan-facing presentation, leaving
+its exported geometry and material buffer unchanged. Other current PC exports
+and the authoritative chef/patron GLBs are loaded directly.
+
 ## Video backend
 
 `asset-preview-mpv.so` is a lazy module linked to installed libmpv and Qt OpenGL.
