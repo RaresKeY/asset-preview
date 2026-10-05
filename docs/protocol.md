@@ -10,12 +10,13 @@ registrations, 8 KiB per configuration, 128 extra input paths and 128 command ar
 | Request | Fields | Behavior |
 |---|---|---|
 | `ping` | — | Protocol version, PID and actual Qt platform |
-| `list` | — | Entries, live metrics, selection, layout, grid_size, compact, active count, watches, Qt platform |
+| `list` | — | Entries, live metrics, selection, layout, grid_size, compact, preferences, active count, watches, Qt platform |
 | `add` | `entry` object | Add or replace stable ID; no focus/selection change |
 | `remove` | `id` | Stop/unload and unregister; preserve files |
+| `close_all` | — | Close/unregister all previews and stop their generators; retain files, window, layout and preferences |
 | `select` | `id` | Change visible preview/page without raising window |
 | `layout` | optional `layout`: `single` / `grid`, `grid_size`: integer 2 / 3 / 4, `compact`: boolean | Merge/persist layout options; default grid 2×2, maximum 16 active entries |
-| `settings` | `id`, `settings` object | Validate, merge and persist options |
+| `settings` | `id`, `settings` object | Validate, merge and persist entry options and remembered defaults |
 | `reload` | `id` | Reload or rebuild only if currently visible |
 | `seek` | `id`, nonnegative numeric `seconds` | Seek a loaded visible video to absolute seconds |
 | `show` | — | Open/raise the single app window |
@@ -55,6 +56,15 @@ restarts playback from the beginning and retains the stored playback options.
 
 Version-1 registry files missing `grid_size` and `compact` restore as 2 and false.
 CLI equivalents include `layout grid --size 4 --compact` and `--no-compact`.
+All changed settings are remembered for future previews, grouped as `image`,
+`video` and `3d` (models/materials); `list.preferences` exposes these defaults.
+Explicit `add.entry.settings` overrides them without changing remembered defaults.
+Same-kind ID replacements retain their existing settings unless explicitly overridden.
+New material CLI registrations inherit the last sample shape unless `--shape` is set.
+Preferences and layout survive Close all and app restarts; registered entries
+keep their own saved settings across restarts. Legacy version-1 files without `preferences`
+remain valid. Failed settings/Close all saves retain the prior registry and live views.
+`asset-preview close-all` leaves a stopped service stopped.
 
 `metrics.loads` counts successful loads during this view's lifetime;
 `metrics.renders` counts paint calls. They reset on unloading/re-creating a view.

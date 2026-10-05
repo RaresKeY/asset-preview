@@ -26,6 +26,20 @@ and keyboard navigation report the failure without terminating the service.
 Transient save/settings errors show the status bar even in compact mode.
 Grid size (2/3/4) and compact mode are optional version-1 fields with backward
 compatible defaults; partial layout requests merge and validate before saving.
+Every display/playback setting change also updates remembered defaults, persisted
+in the optional version-1 `preferences` object. Image, video and shared model/material
+(`3d`) groups retain all setting keys independently. New registrations inherit the
+appropriate group's last values; explicit registration options override them without
+changing defaults. Same-kind reconnections retain their existing inspection settings
+before applying explicit overrides. Restored entries retain their saved configuration;
+legacy registries without preferences start with no remembered defaults. Material CLI
+registration supplies a shape only when `--shape` is explicitly passed.
+
+The toolbar's Close all button and CLI `close-all` (`close_all` request) persist an
+empty registry before unloading all views/stopping their owned generator groups.
+The window and service remain available; files, layout and preferences are retained.
+Failed saves restore selection/order/settings/defaults and leave live views intact.
+Close all is disabled for an empty registry; the CLI does not start a stopped service.
 Filesystem changes after registration (for example a removed generator cwd) do
 not prevent restoring other registrations; the affected preview reports its own
 load/generator failure when selected.

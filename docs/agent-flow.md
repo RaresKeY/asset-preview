@@ -15,7 +15,10 @@ before generation starts. Missing files are valid registrations:
 
 The user's current selection stays in place. `select project-chair` changes it
 without moving or raising the window; use it when the user wants to follow that
-asset. Later registration with the same ID updates its paths and command.
+asset. Later registration with the same ID updates its paths and command. Same-kind
+reconnections retain inspection settings; explicit settings override them. New previews
+inherit the app's remembered image/video/3D preferences. A `settings` request also
+updates those defaults, so preserve the user's inspection choices when changing them.
 
 When the agent already runs a generator, use file watching alone. The exported
 output will refresh at each successful save. When saving source should trigger a

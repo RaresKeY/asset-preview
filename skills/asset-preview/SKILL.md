@@ -27,9 +27,11 @@ preview="${ASSET_PREVIEW_PROJECT:-$HOME/workspace/asset-preview}/bin/asset-previ
 ```
 
 Register once and let output saves refresh the view. Re-registering an ID replaces
-its entire configuration and recreates the view; when changing a connection,
-retain its explicit generator/watch configuration and reapply the user's settings
-from `status --json`. Use `settings ID JSON` for partial option changes.
+its connection configuration and recreates the view, retaining inspection settings
+for the same kind unless explicitly overridden. Retain its generator/watch configuration
+when reconnecting. New previews inherit remembered image/video/3D preferences;
+`settings ID JSON` also remembers changed defaults. Preserve the user's choices
+from `status --json` when changing inspection options.
 
 Registration starts the service if needed without raising the window or changing
 selection. `start` starts it in the background; `gui` opens/raises it for a
@@ -107,5 +109,5 @@ runtime and verify its actual renderer. Capture the preview with `capture NEW.pn
 when visual evidence is needed; it requires a visible window and refuses overwrite.
 
 Keep useful live connections during iteration. `remove <id>` unregisters only
-that preview and preserves files. Avoid global `hide`/`stop` during task cleanup
-because they affect other connected work.
+that preview and preserves files. Avoid global `hide`/`stop`/`close-all` during task
+cleanup because they affect other connected work.

@@ -58,6 +58,7 @@ private:
     QPushButton* next;
     QComboBox* density;
     QCheckBox* compactButton;
+    QPushButton* closeAllButton;
 };
 
 class Service final : public QObject {
@@ -91,6 +92,7 @@ private:
     void stopBuilder(Entry&);
     void status(Entry&, const QString&);
     QJsonObject describe(const Entry&) const;
+    QJsonObject preferences;
     QLocalServer server;
     QFileSystemWatcher watcher;
     QTimer debounce;

@@ -60,11 +60,15 @@ asset-preview layout grid --size 3 --compact        # sizes: 2, 3, 4
 asset-preview select chair
 asset-preview status --json
 asset-preview remove chair                         # preserves the file
+asset-preview close-all                            # closes previews; keeps files/settings
 ```
 
 Reusing an ID updates its registration. Files can be registered before they exist.
 `start` starts the service without raising the window; `hide` suspends all views;
-`stop` exits the service. Registrations and layout persist across restarts.
+`stop` exits the service. Registrations, layout and all display/playback preferences
+persist across restarts. New previews inherit the last-used image/video/3D settings;
+existing previews retain their own choices. **Close all** clears the previews while
+keeping the window, files and remembered settings.
 
 ## Controls
 

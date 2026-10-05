@@ -133,13 +133,14 @@ def parser() -> argparse.ArgumentParser:
     add.add_argument("--exec", nargs=argparse.REMAINDER, dest="command", help="Generator program and arguments; put this option last")
     mat = sub.add_parser("material", help="Watch baked albedo/normal/ORM maps on a sample shape")
     mat.add_argument("albedo"); mat.add_argument("--normal"); mat.add_argument("--orm")
-    mat.add_argument("--shape", choices=["sphere", "cube", "plane"], default="sphere")
+    mat.add_argument("--shape", choices=["sphere", "cube", "plane"], help="Override the remembered material shape")
     mat.add_argument("--id"); mat.add_argument("--label")
     mat.add_argument("--watch", action="append", default=[])
     mat.add_argument("--cwd", default=os.getcwd()); mat.add_argument("--timeout", type=int, default=120)
     mat.add_argument("--exec", nargs=argparse.REMAINDER, dest="command")
     for action in ["remove", "select", "reload"]:
         sub.add_parser(action).add_argument("id")
+    sub.add_parser("close-all", help="Close every preview; keep files and remembered settings")
     layout = sub.add_parser("layout")
     layout.add_argument("mode", choices=["single", "grid"])
     layout.add_argument("--size", type=int, choices=[2, 3, 4], help="Grid rows/columns: 4, 9 or 16 previews per page")
@@ -174,14 +175,14 @@ def main() -> int:
         runtime, state = locations()
         print(json.dumps({"socket": str(runtime / "preview.sock"), "state": str(state)}, indent=2))
         return 0
-    if action in {"stop", "hide", "status", "list"} and not running(timeout=15):
+    if action in {"stop", "hide", "status", "list", "close-all"} and not running(timeout=15):
         if action == "status": print('{"running": false}' if args.json else "Server stopped")
         elif action == "list" and args.json: print("[]")
         return 0
     if action == "start":
         created = start(); print("Server started" if created else "Server already running"); return 0
     if action in {"gui", "add", "material"}: start()
-    request = {"method": {"gui": "show", "stop": "quit", "status": "list"}.get(action, action)}
+    request = {"method": {"gui": "show", "stop": "quit", "status": "list", "close-all": "close_all"}.get(action, action)}
     if action in {"add", "material"}:
         entry = {"path": path(args.albedo if action == "material" else args.file),
                  "kind": "material" if action == "material" else args.kind,
@@ -192,7 +193,7 @@ def main() -> int:
         if args.command == []: raise RuntimeError("--exec requires a generator program")
         if action == "material":
             entry["maps"] = {key: path(getattr(args, key)) for key in ("normal", "orm") if getattr(args, key)}
-            entry["settings"] = {"shape": args.shape}
+            if args.shape is not None: entry["settings"] = {"shape": args.shape}
         request = {"method": "add", "entry": entry}
     if action in {"select", "remove", "reload", "settings", "seek"}: request["id"] = args.id
     if action == "seek": request["seconds"] = args.seconds

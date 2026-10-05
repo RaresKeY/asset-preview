@@ -60,6 +60,7 @@ bool videoPath(const QString& path) {
 }
 QString absolute(const QString& path) { return QDir::cleanPath(QFileInfo(path).absoluteFilePath()); }
 QByteArray readSmall(const QString& path) { QFile f(path); return f.open(QIODevice::ReadOnly) ? f.read(4*1024*1024) : QByteArray{}; }
+QString preferenceGroup(const QString& kind) { return kind=="model" || kind=="material" ? "3d" : kind; }
 
 class PreviewCard final : public QFrame {
 public:
@@ -204,6 +205,14 @@ bool Service::start(QString& error) {
         if (parse.error != QJsonParseError::NoError || !doc.isObject() || doc.object()["version"].toInt() != 1 || !doc.object()["entries"].isArray()) {
             error="Invalid preview state; preserved at " + state.fileName(); return false;
         }
+        if (doc.object().contains("preferences") && !doc.object()["preferences"].isObject()) { error="Invalid saved preferences"; return false; }
+        preferences=doc.object()["preferences"].toObject();
+        for (auto i=preferences.begin();i!=preferences.end();++i) {
+            if (!QSet<QString>{"3d","image","video"}.contains(i.key()) || !i.value().isObject()) { error="Invalid saved preference group"; return false; }
+            QJsonObject config{{"path",statePath+"/preference-validation"},{"kind",i.key()=="3d"?"model":i.key()},{"settings",i.value()}};
+            const auto invalid=validate(config,true);
+            if (!invalid.isEmpty()) { error="Invalid saved preferences: "+invalid; return false; }
+        }
         for (const auto& row : doc.object()["entries"].toArray()) {
             auto result=add(row.toObject(), true);
             if (!result["ok"].toBool()) { error="Invalid saved preview: " + result["error"].toString(); return false; }
@@ -227,7 +236,7 @@ void Service::save() {
     QSaveFile file(statePath + "/previews.json");
     if (!file.open(QIODevice::WriteOnly)) throw std::runtime_error(file.errorString().toStdString());
     file.setPermissions(QFileDevice::ReadOwner|QFileDevice::WriteOwner);
-    auto data=QJsonDocument(QJsonObject{{"version",1},{"entries",rows},{"selected",selected},{"layout",layout},{"grid_size",gridSize},{"compact",compact}}).toJson();
+    auto data=QJsonDocument(QJsonObject{{"version",1},{"entries",rows},{"selected",selected},{"layout",layout},{"grid_size",gridSize},{"compact",compact},{"preferences",preferences}}).toJson();
     if (file.write(data) != data.size() || !file.commit()) throw std::runtime_error("Cannot save preview registry");
 }
 QString Service::validate(QJsonObject& c, bool restore) {
@@ -292,6 +301,20 @@ QJsonObject Service::add(QJsonObject config, bool restore) {
     auto prior=entries.value(id);
     const bool existing=bool(prior);
     QJsonObject old=prior?prior->config:QJsonObject{};
+    if (!restore) {
+        auto settings=preferences.value(preferenceGroup(config["kind"].toString())).toObject();
+        // Reconnecting the same asset keeps its inspection choices. Explicit
+        // registration options still win over remembered preferences.
+        if (existing && old["kind"]==config["kind"]) {
+            const auto previous=old["settings"].toObject();
+            for (auto i=previous.begin();i!=previous.end();++i) settings[i.key()]=i.value();
+        }
+        const auto explicitSettings=config["settings"].toObject();
+        for (auto i=explicitSettings.begin();i!=explicitSettings.end();++i) settings[i.key()]=i.value();
+        config["settings"]=settings;
+        const auto invalid=validate(config);
+        if (!invalid.isEmpty()) return failure(invalid);
+    }
     if (!prior) { prior=std::make_shared<Entry>(); entries[id]=prior; order.append(id); }
     prior->config=config;
     if (selected.isEmpty()) selected=id;
@@ -336,9 +359,17 @@ QJsonObject Service::request(const QJsonObject& r) {
             return success({{"entries",rows},{"selected",selected},{"layout",layout},{"active",active},{"grid_size",gridSize},{"compact",compact},
                 {"window_visible",bool(window && window->isVisible())},{"watched_files",watcher.files().size()},
                 {"watched_directories",watcher.directories().size()},{"pid",qint64(QCoreApplication::applicationPid())},
-                {"platform",QGuiApplication::platformName()},{"options_open",bool(QApplication::activePopupWidget())}});
+                {"platform",QGuiApplication::platformName()},{"options_open",bool(QApplication::activePopupWidget())},{"preferences",preferences}});
         }
         if (method=="add") return add(r["entry"].toObject());
+        if (method=="close_all") {
+            const auto previousOrder=order; const auto previousSelected=selected;
+            order.clear(); selected.clear();
+            try { save(); } catch (...) { order=previousOrder; selected=previousSelected; throw; }
+            // Persist first so failed saves leave running previews intact.
+            for (const auto& id:previousOrder) deactivate(id);
+            entries.clear(); reconcile(); return success();
+        }
         if (method=="show") {
             if (!window) window=std::make_unique<PreviewWindow>(this);
             window->showNormal(); window->raise(); window->activateWindow(); reconcile(); return success();
@@ -400,7 +431,12 @@ QJsonObject Service::request(const QJsonObject& r) {
             config["settings"]=settings; QString error=validate(config);
             if (!error.isEmpty()) return failure(error);
             const auto old=e->config; e->config=config;
-            try { save(); } catch (...) { e->config=old; throw; }
+            const auto previousPreferences=preferences;
+            const auto group=preferenceGroup(config["kind"].toString());
+            auto remembered=preferences[group].toObject();
+            for (auto i=patch.begin();i!=patch.end();++i) remembered[i.key()]=i.value();
+            preferences[group]=remembered;
+            try { save(); } catch (...) { e->config=old; preferences=previousPreferences; throw; }
             if (e->view) e->view->settings(config);
             if (e->card) status(*e,e->status);
             return success();
@@ -663,6 +699,8 @@ PreviewWindow::PreviewWindow(Service* s) : service(s) {
     setMinimumSize(540,380); resize(1000,720); setAcceptDrops(true);
     auto* central=new QWidget; auto* vertical=new QVBoxLayout(central); vertical->setContentsMargins(8,6,8,6); vertical->setSpacing(6);
     auto* addButton=new QPushButton("Add files"); addButton->setMinimumHeight(32);
+    closeAllButton=new QPushButton("Close all"); closeAllButton->setMinimumHeight(32);
+    closeAllButton->setObjectName("closeAll"); closeAllButton->setToolTip("Close all previews and stop their generators; keep files and remembered settings");
     auto* controls=new QHBoxLayout;
     previous=new QPushButton("←"); next=new QPushButton("→"); previous->setFixedSize(32,32); next->setFixedSize(32,32);
     previous->setToolTip("Previous preview / page (Left)"); next->setToolTip("Next preview / page (Right)");
@@ -673,7 +711,7 @@ PreviewWindow::PreviewWindow(Service* s) : service(s) {
     compactButton=new QCheckBox("Compact"); compactButton->setToolTip("Tight spacing; keep names and options inside views; show only busy/error status");
     position=new QLabel; position->setMinimumWidth(65); position->setAlignment(Qt::AlignRight|Qt::AlignVCenter);
     controls->addWidget(previous); controls->addWidget(selection,1); controls->addWidget(next); controls->addWidget(position);
-    controls->addWidget(density); controls->addWidget(compactButton); controls->addWidget(addButton);
+    controls->addWidget(density); controls->addWidget(compactButton); controls->addWidget(addButton); controls->addWidget(closeAllButton);
     vertical->addLayout(controls);
     canvas=new QWidget; canvas->setFocusPolicy(Qt::StrongFocus);
     grid=new QGridLayout(canvas); grid->setContentsMargins(0,0,0,0); grid->setSpacing(6);
@@ -685,6 +723,10 @@ PreviewWindow::PreviewWindow(Service* s) : service(s) {
     connect(addButton,&QPushButton::clicked,this,[this] {
         for (const auto& path:QFileDialog::getOpenFileNames(this,"Add asset previews",QDir::homePath(),"Assets (*.png *.jpg *.jpeg *.webp *.bmp *.svg *.glb *.gltf *.obj *.stl *.ply *.fbx *.mp4 *.m4v *.mov *.mkv *.webm *.avi *.ogv *.mpg *.mpeg *.wmv *.gif);;All files (*)"))
             service->request({{"method","add"},{"entry",QJsonObject{{"path",path}}}});
+    });
+    connect(closeAllButton,&QPushButton::clicked,this,[this] {
+        const auto result=service->request({{"method","close_all"}});
+        if (!result["ok"].toBool()) reportError(result["error"].toString());
     });
     connect(density,&QComboBox::activated,this,[this](int index) {
         QJsonObject request{{"method","layout"},{"layout",index==0?"single":"grid"}};
@@ -721,6 +763,7 @@ void PreviewWindow::navigation() {
     const int count=service->pageSize();
     previous->setEnabled(n>0 && i/count>0);
     next->setEnabled(n>0 && (i/count+1)*count<n);
+    closeAllButton->setEnabled(n>0);
     QSignalBlocker densityBlock(density), compactBlock(compactButton);
     density->setCurrentIndex(service->layout=="single"?0:service->gridSize-1);
     compactButton->setChecked(service->compact);

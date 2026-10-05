@@ -21,7 +21,7 @@ state persists during reload, but not across unloading.
 Cards allocate the full surface to content, with separate native overlays:
 text-width title at top left, fit/options/remove at top right, text-width status
 below the title, and a triangle count at bottom left for loaded 3D views. The
-single global toolbar owns navigation, grid size and compact mode. Compact reduces
+single global toolbar owns navigation, grid size, compact mode and Close all. Compact reduces
 margins/gaps, puts fit/remove in the options menu and hides steady Live status;
 waiting/errors/building and enabled triangle counts stay visible. Narrow cards
 also move fit/remove into the menu. Long title/status text elides within the card.

@@ -183,6 +183,13 @@ class PreviewIntegration(unittest.TestCase):
         client.rpc({"method":"hide"})
         for r in client.rpc({"method":"list"})["entries"]: client.rpc({"method":"remove","id":r["id"]})
         client.rpc({"method":"layout","layout":"single","grid_size":2,"compact":False})
+        # Remembered defaults belong to the application, so isolate each test
+        # through its own stopped fixture registry rather than a production reset API.
+        if client.rpc({"method":"list"})["preferences"]:
+            client.rpc({"method":"quit"}); eventually(lambda:not client.running())
+            registry=self.root/"state/previews.json"; state=json.loads(registry.read_text())
+            state["preferences"]={}; registry.write_text(json.dumps(state))
+            client.start(); self.pid=client.rpc({"method":"ping"})["pid"]; type(self).pid=self.pid
 
     def add(self, key="image", **extra):
         asset=self.root/f"{key}.png"; png(asset)
@@ -437,13 +444,112 @@ class PreviewIntegration(unittest.TestCase):
         self.show(); eventually(lambda:row("sample").get("metrics",{}).get("engine"))
         self.assertEqual(row("sample")["metrics"]["triangles"],2)
 
+    def test_22_preferences_inheritance_reconnect_and_close_all(self):
+        self.add("image-settings")
+        image={"nearest":True,"background":"light"}
+        client.rpc({"method":"settings","id":"image-settings","settings":image})
+        self.add("other-image"); self.assertEqual(row("other-image")["settings"],image)
+        obj=self.root/"preferences.obj"
+        model={"grid":False,"axes":True,"edges":True,"orthographic":True,
+               "light":2.5,"background":"dark","materials":False,"textures":False,
+               "lock_horizon":False,"up_axis":"z","lighting":"lightkit","triangles":False}
+        client.rpc({"method":"add","entry":{"id":"model-settings","path":str(obj)}})
+        client.rpc({"method":"settings","id":"model-settings","settings":model})
+        client.rpc({"method":"add","entry":{"id":"other-model","path":str(obj)}})
+        self.assertEqual(row("other-model")["settings"],model)
+        material={"shape":"cube","roughness":0.2,"metallic":0.6}
+        client.rpc({"method":"add","entry":{"id":"material-settings","kind":"material","path":str(self.root/"image-settings.png")}})
+        client.rpc({"method":"settings","id":"material-settings","settings":material})
+        self.assertEqual(row("material-settings")["settings"],model|material)
+        movie=self.root/"not-yet-published.mp4"
+        playback={"paused":True,"muted":False,"loop":False,"background":"light"}
+        client.rpc({"method":"add","entry":{"id":"video-settings","path":str(movie)}})
+        client.rpc({"method":"settings","id":"video-settings","settings":playback})
+        client.rpc({"method":"add","entry":{"id":"other-video","path":str(movie)}})
+        self.assertEqual(row("other-video")["settings"],playback)
+        # Explicit connection settings override defaults without changing them.
+        client.rpc({"method":"add","entry":{"id":"explicit","path":str(obj),"settings":{"triangles":True}}})
+        self.assertTrue(row("explicit")["settings"]["triangles"])
+        remembered=client.rpc({"method":"list"})["preferences"]
+        self.assertFalse(remembered["3d"]["triangles"])
+        # A same-kind reconnection keeps its last inspection choices.
+        client.rpc({"method":"add","entry":{"id":"explicit","path":str(obj),"settings":{"edges":False}}})
+        self.assertTrue(row("explicit")["settings"]["triangles"])
+        self.assertFalse(row("explicit")["settings"]["edges"])
+        # CLI material registration must not silently reset the remembered shape.
+        subprocess.run([str(ROOT/"bin/asset-preview"),"material",str(self.root/"image-settings.png"),"--id","cli-material"],check=True,capture_output=True)
+        self.assertEqual(row("cli-material")["settings"]["shape"],"cube")
+        client.rpc({"method":"layout","layout":"grid","grid_size":3,"compact":True})
+        subprocess.run([str(ROOT/"bin/asset-preview"),"close-all"],check=True,capture_output=True)
+        state=client.rpc({"method":"list"})
+        self.assertEqual(state["entries"],[]); self.assertEqual(state["preferences"],remembered)
+        self.assertTrue((self.root/"image-settings.png").exists())
+        client.rpc({"method":"quit"}); eventually(lambda:not client.running())
+        client.start(); self.pid=client.rpc({"method":"ping"})["pid"]; type(self).pid=self.pid
+        state=client.rpc({"method":"list"})
+        self.assertEqual(state["preferences"],remembered)
+        self.assertEqual((state["layout"],state["grid_size"],state["compact"]),("grid",3,True))
+        self.add("after-restart"); self.assertEqual(row("after-restart")["settings"],image)
+        client.rpc({"method":"add","entry":{"id":"after-restart-model","path":str(obj)}})
+        self.assertEqual(row("after-restart-model")["settings"],model|material)
+
+    def test_23_settings_and_close_all_failed_saves_preserve_views(self):
+        self.add("saved-a"); self.add("saved-b"); self.show()
+        eventually(lambda:row("saved-a").get("metrics",{}).get("loads"))
+        before=client.rpc({"method":"list"})
+        registry=self.root/"state/previews.json"; backup=registry.with_suffix(".backup")
+        registry.rename(backup); registry.mkdir()
+        try:
+            with self.assertRaises(RuntimeError):
+                client.rpc({"method":"settings","id":"saved-a","settings":{"nearest":True}})
+            with self.assertRaises(RuntimeError): client.rpc({"method":"close_all"})
+            after=client.rpc({"method":"list"})
+            self.assertEqual(after["preferences"],before["preferences"])
+            self.assertEqual(after["selected"],before["selected"])
+            for old,new in zip(before["entries"],after["entries"]):
+                for key in ("id","path","settings","active","status","builds","revisions"):
+                    self.assertEqual(new[key],old[key])
+                if "metrics" in old: self.assertEqual(new["metrics"]["loads"],old["metrics"]["loads"])
+        finally:
+            registry.rmdir(); backup.replace(registry)
+        client.rpc({"method":"close_all"})
+        state=client.rpc({"method":"list"})
+        self.assertEqual(state["entries"],[]); self.assertEqual(state["active"],0)
+        self.assertTrue(state["window_visible"])
+        self.assertEqual((state["watched_files"],state["watched_directories"]),(0,0))
+
+    def test_24_close_all_stops_generators_and_preserves_preferences(self):
+        asset=self.add("close-builder"); child_pid=self.root/"close-all-child.pid"
+        script=self.root/"close-all-builder.py"
+        script.write_text("import pathlib,subprocess,sys,time\np=subprocess.Popen([sys.executable,'-c','import time;time.sleep(60)']);pathlib.Path(sys.argv[1]).write_text(str(p.pid));time.sleep(60)\n")
+        client.rpc({"method":"settings","id":"close-builder","settings":{"nearest":True}})
+        client.rpc({"method":"add","entry":{"id":"close-builder","path":str(asset),"cwd":str(self.root),"command":[sys.executable,str(script),str(child_pid)]}})
+        self.show(); eventually(child_pid.exists); pid=int(child_pid.read_text())
+        client.rpc({"method":"close_all"})
+        def gone():
+            try: return Path(f"/proc/{pid}/stat").read_text().rsplit(")",1)[1].strip().startswith("Z")
+            except FileNotFoundError: return True
+        eventually(gone)
+        state=client.rpc({"method":"list"})
+        self.assertEqual(state["entries"],[]); self.assertEqual(state["active"],0)
+        self.assertEqual(state["preferences"]["image"],{"nearest":True})
+        self.assertTrue(asset.exists())
+        # A closed/stopped app remains stopped when close-all is called again.
+        client.rpc({"method":"quit"}); eventually(lambda:not client.running())
+        subprocess.run([str(ROOT/"bin/asset-preview"),"close-all"],check=True,capture_output=True)
+        self.assertFalse(client.running())
+        client.start(); self.pid=client.rpc({"method":"ping"})["pid"]; type(self).pid=self.pid
+
     def test_13_corrupt_state_is_preserved(self):
         runtime,state=client.locations(); bad_runtime=self.root/"bad-runtime"; bad_state=self.root/"bad-state"
-        client.private_directory(bad_state); corrupt=bad_state/"previews.json"; content=b"{unfinished"; corrupt.write_bytes(content)
+        client.private_directory(bad_state); corrupt=bad_state/"previews.json"
         os.environ["ASSET_PREVIEW_RUNTIME_DIR"]=str(bad_runtime); os.environ["ASSET_PREVIEW_STATE_DIR"]=str(bad_state)
         try:
-            with self.assertRaises(RuntimeError): client.start()
-            self.assertEqual(corrupt.read_bytes(),content)
+            for content in (b"{unfinished", json.dumps({"version":1,"entries":[],"preferences":{"3d":{"up_axis":"x"}}}).encode(),
+                            json.dumps({"version":1,"entries":[],"preferences":{"unknown":{}}}).encode()):
+                corrupt.write_bytes(content)
+                with self.assertRaises(RuntimeError): client.start()
+                self.assertEqual(corrupt.read_bytes(),content)
         finally:
             os.environ["ASSET_PREVIEW_RUNTIME_DIR"]=str(runtime); os.environ["ASSET_PREVIEW_STATE_DIR"]=str(state)
 
