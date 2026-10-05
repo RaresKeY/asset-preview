@@ -114,11 +114,12 @@ def path(value: str) -> str:
 
 def parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(description="One live window for images, videos, models and baked materials.")
+    p.add_argument("--version", action="version", version="Asset Preview 0.0.1")
     sub = p.add_subparsers(dest="action")
     for action, text in [("gui", "Open the preview window"), ("start", "Start the background server"),
                          ("stop", "Stop the server and its generators"), ("hide", "Suspend all previews"),
                          ("list", "List connected previews"), ("status", "Show live state and metrics"),
-                         ("paths", "Print local socket and state paths")]:
+                         ("paths", "Print local socket and state paths"), ("licenses", "Show dependency notices")]:
         q = sub.add_parser(action, help=text)
         if action in {"list", "status"}: q.add_argument("--json", action="store_true")
     add = sub.add_parser("add", help="Watch an image, video or model output; optionally run a generator on source saves")
@@ -166,6 +167,9 @@ def main() -> int:
         return 0
     args = parser().parse_args()
     action = args.action or "gui"
+    if action == "licenses":
+        print((ROOT / "THIRD_PARTY_NOTICES.md").read_text())
+        return 0
     if action == "paths":
         runtime, state = locations()
         print(json.dumps({"socket": str(runtime / "preview.sock"), "state": str(state)}, indent=2))

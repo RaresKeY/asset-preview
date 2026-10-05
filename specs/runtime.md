@@ -11,7 +11,8 @@ library client starts it once under a private startup flock, waits for socket
 readiness and then sends newline JSON. The native server holds a QLockFile before
 removing a stale socket. Unix socket permissions restrict access to the owning
 user. SIGTERM/SIGINT wake Qt through a self-pipe; no signal polling timer is used.
-The launcher defaults its child process to `QT_QPA_PLATFORM=xcb`, using XWayland
+`--version` reports release 0.0.1; `licenses` prints dependency notices without
+starting the service. The launcher defaults its child process to `QT_QPA_PLATFORM=xcb`, using XWayland
 on KDE Wayland. Explicit platform overrides are retained. Native Wayland 3D
 embedding is currently unsupported; ping/list expose the actual Qt platform.
 

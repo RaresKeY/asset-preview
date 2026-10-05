@@ -24,7 +24,9 @@ X11/XWayland/OpenGL drivers.
 
 Private container: `ghcr.io/rareskey/asset-preview:0.0.1`.
 See [distribution notes](packaging/release-notes.md) for runtime requirements,
-container mounts and dependency sources.
+container mounts and dependency sources. The release uses LGPL FFmpeg;
+[dependency notices](THIRD_PARTY_NOTICES.md) and corresponding sources accompany
+the downloads. `asset-preview licenses` prints the notices.
 
 ## Build and install
 
