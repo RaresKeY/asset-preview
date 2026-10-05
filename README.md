@@ -1,9 +1,36 @@
 # Asset Preview
 
-One native window that refreshes images, 3D models and baked materials when
-their files change. C++20, Qt 6 Widgets and libf3d; the command client and fish
-completion use Python's standard library. No browser or continuously running
-Python server.
+**Keep one preview window open while AI agents build your assets.** Agents send
+images, 3D models and baked materials to the window as their work gets done;
+connected files refresh automatically on save, so you can follow progress and
+inspect results throughout an iteration.
+
+Place the window beside your editor or agent conversation. Agents use the CLI
+or the included [Codex skill](skills/asset-preview/SKILL.md) to register outputs
+without raising the window or changing your selection. Stable IDs let them update
+the same preview as they refine an asset. See [the agent workflow](docs/agent-flow.md).
+
+## Compact grid showcase
+
+### Follow several assets at once
+
+A compact 3×3 page combines PC components, a material comparison and character
+models from ongoing agent work. The same chef appears with authored materials
+and in clay mode for geometry inspection.
+
+![Compact 3×3 live preview grid with PC components and character models](docs/screenshots/compact-grid-showcase.png)
+
+### Inspect a smaller set in detail
+
+A compact 2×2 page gives individual components more room. Each view has its own
+orbit camera and display options; saving a connected asset refreshes its preview.
+
+![Compact 2×2 preview grid showing a PC case, motherboard, GPU and cooler](docs/screenshots/compact-grid-components.png)
+
+These are direct application captures using hardware OpenGL rendering, with
+camera angles and lighting adjusted in the viewer.
+
+## Start a live preview session
 
 Open it with **Super → Asset Preview**, `asset-preview`, or `./play.sh`.
 The fish function and completion are installed by `python tools/install.py`.
@@ -143,6 +170,9 @@ python tools/install.py
 
 For measured idle memory and real-project captures, use the replay command in
 [verification evidence](evidence/verification.md).
+
+The native app uses C++20, Qt 6 Widgets and libf3d. The command client and fish
+completion use Python's standard library.
 
 Dependencies are the workstation's CMake, C++ compiler, Qt 6 Core/Gui/Widgets/
 Network/OpenGL and F3D 3.5+ library with native and Assimp readers. The build and
