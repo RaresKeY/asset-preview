@@ -30,11 +30,18 @@ jobs:
           cd release && sha256sum -c SHA256SUMS
           gzip -dc asset-preview-0.0.1-container.tar.gz | docker load
           docker tag localhost/asset-preview:0.0.1 ghcr.io/rareskey/asset-preview:0.0.1
+      - name: Install host graphics loaders
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends libgl1 libegl1 libopengl0
       - name: Check standalone service
         run: |
           chmod +x release/asset-preview-0.0.1-linux-x86_64.run
           export QT_QPA_PLATFORM=offscreen
-          release/asset-preview-0.0.1-linux-x86_64.run start
+          if ! release/asset-preview-0.0.1-linux-x86_64.run start; then
+            tail -30 "$HOME/.local/state/asset-preview/server.log"
+            exit 1
+          fi
           release/asset-preview-0.0.1-linux-x86_64.run status --json
           release/asset-preview-0.0.1-linux-x86_64.run stop
           cd release && sha256sum -c SHA256SUMS
