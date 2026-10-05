@@ -19,7 +19,7 @@ int main(int argc,char** argv) {
     QSurfaceFormat::setDefaultFormat(format);
     QApplication app(argc,argv);
     app.setApplicationName("asset-preview"); app.setApplicationDisplayName("Asset Preview");
-    app.setDesktopFileName("asset-preview"); app.setQuitOnLastWindowClosed(false);
+    app.setDesktopFileName(qEnvironmentVariable("ASSET_PREVIEW_DESKTOP_ID", "asset-preview")); app.setQuitOnLastWindowClosed(false);
     QCommandLineParser parser; parser.addHelpOption();
     parser.addOption({"socket","Private local socket path","path"});
     parser.addOption({"state","Private state directory","path"});

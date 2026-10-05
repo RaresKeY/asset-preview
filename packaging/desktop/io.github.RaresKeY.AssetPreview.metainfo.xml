@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<component type="desktop-application">
+  <id>io.github.RaresKeY.AssetPreview</id>
+  <name>Asset Preview</name>
+  <summary>Live asset previews for AI agent workflows</summary>
+  <metadata_license>MIT</metadata_license>
+  <project_license>MIT</project_license>
+  <developer id="io.github.RaresKeY"><name>RaresKeY</name></developer>
+  <description><p>Keep the viewer open while AI agents register images, videos, exported 3D models and baked materials through a local command client. Previews refresh when files change. Source-save generators run only while their previews are visible.</p></description>
+  <launchable type="desktop-id">io.github.RaresKeY.AssetPreview.desktop</launchable>
+  <url type="homepage">https://github.com/RaresKeY/asset-preview</url>
+  <url type="bugtracker">https://github.com/RaresKeY/asset-preview/issues</url>
+  <content_rating type="oars-1.1"/>
+  <releases><release version="0.0.2" date="2026-10-06"><description><p>AppImage, portable archive, native packages and Flatpak distribution with an agent command bridge.</p></description></release></releases>
+</component>

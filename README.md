@@ -21,16 +21,12 @@ Compact 2×2 in dark mode: current PC case, motherboard, dual-fan GPU and tower 
 
 ## Downloads
 
-[Release 0.0.1](https://github.com/RaresKeY/asset-preview/releases/tag/0.0.1)
-provides a standalone Linux x86_64 executable. Download the `.run` file, make it
-executable with `chmod +x`, and run it. Requires glibc 2.39+ and host
-X11/XWayland/OpenGL drivers.
-
-Private container: `ghcr.io/rareskey/asset-preview:0.0.1`.
-See [distribution notes](packaging/release-notes.md) for runtime requirements,
-container mounts and dependency sources. The release uses LGPL FFmpeg;
-[dependency notices](THIRD_PARTY_NOTICES.md) and corresponding sources accompany
-the downloads. `asset-preview licenses` prints the notices.
+[Release 0.0.2](https://github.com/RaresKeY/asset-preview/releases/tag/0.0.2):
+AppImage, portable archive, Flatpak, `.deb`, `.rpm`, Arch package and `.run`.
+See [Linux installation](docs/install-linux.md) for commands and requirements.
+Private container: `ghcr.io/rareskey/asset-preview:0.0.2`.
+[Dependency notices](THIRD_PARTY_NOTICES.md), corresponding sources and checksums
+accompany the downloads. `asset-preview licenses` prints the notices.
 
 ## Build and install
 

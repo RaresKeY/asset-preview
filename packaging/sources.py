@@ -6,6 +6,8 @@ from urllib.request import urlopen
 from pathlib import Path
 bundle=Path(sys.argv[1]);out=Path(sys.argv[2]);out.mkdir(parents=True,exist_ok=True)
 licenses=bundle/'licenses';licenses.mkdir()
+shutil.copytree('/appimage-sources',out/'appimage-runtime')
+shutil.copytree('/appimage-sources/licenses',licenses/'appimage-runtime')
 shutil.copytree('/usr/share/common-licenses',licenses/'common-licenses')
 packages=set(Path('/runtime-packages.txt').read_text().splitlines());sources=set()
 for path in json.loads((bundle/'dependency-manifest.json').read_text()).values():

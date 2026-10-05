@@ -1,7 +1,7 @@
 # Distribution
 
 Source ownership: `packaging/`, `.github/workflows/release.yml`, `CMakeLists.txt`,
-`LICENSE`, `THIRD_PARTY_NOTICES.md`. Release version: 0.0.1; platform: Linux x86_64.
+`LICENSE`, `THIRD_PARTY_NOTICES.md`. Current release version: 0.0.2; platform: Linux x86_64.
 
 The Ubuntu 24.04 build image compiles FFmpeg 7.1.5 without GPL/nonfree components,
 libmpv 0.41.0 in LGPL mode, VTK 9.4.2, F3D 3.5.0 with native/Assimp 6.0.5 readers,
@@ -47,5 +47,25 @@ Proof covers NVIDIA RTX 2080 Ti with X11/XWayland, not every Linux/GPU combinati
 The container supplies OpenGL loaders and font configuration; host GPU drivers
 are supplied at launch. `docs/distribution-options.md` compares conventional
 Linux formats and documents the MIT application license.
-Future executable bundles include root `LICENSE`; the published 0.0.1 artifacts
-predate this license file and are not rebuilt by the licensing change.
+The root `VERSION` controls package/CLI versions; all 0.0.2 formats include MIT
+`LICENSE`. Historical 0.0.1 artifacts are retained at their original tag.
+
+
+Desktop formats share one portable dynamic payload: `.tar.gz`, self-extracting
+`.run`, AppImage, `.deb`, `.rpm` and makepkg-built Arch `.pkg.tar.zst`. Native
+packages install private libraries under `/opt/asset-preview` and standard
+CLI/desktop/icon/AppStream/license entries. They require glibc >=2.39 and system
+graphics loaders; packages remain unsigned local downloads, not apt/dnf/AUR
+repository publications. AppImage assembly uses a checksum-pinned type-2 runtime
+and SquashFS; its MIT/LGPL and static-library notices/rebuild sources accompany
+the corresponding-source archive. Runtime binary downloads are content-checked;
+if upstream replaces a continuous asset, refresh the pin and sources together.
+
+Flatpak uses `io.github.RaresKeY.AssetPreview`, Freedesktop 25.08 and the
+committed binary-payload manifest. It has X11/IPC/DRI access, broad host and temp
+filesystem permissions, a writable private socket prefix and the Flatpak host
+command D-Bus permission for generators. This is a trusted developer tool with
+host execution; no strict sandbox claim. Its host CLI bridge is a separate small
+release archive requiring host Python 3. The `.flatpak` bundle and bridge are
+GitHub Release downloads; no public Flathub submission or remote update channel.
+`docs/install-linux.md` owns install/remove/update commands and platform limits.

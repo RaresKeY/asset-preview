@@ -11,7 +11,7 @@ library client starts it once under a private startup flock, waits for socket
 readiness and then sends newline JSON. The native server holds a QLockFile before
 removing a stale socket. Unix socket permissions restrict access to the owning
 user. SIGTERM/SIGINT wake Qt through a self-pipe; no signal polling timer is used.
-`--version` reports release 0.0.1; `licenses` prints dependency notices without
+`--version` reports the root `VERSION`; `licenses` prints dependency notices without
 starting the service. The launcher defaults its child process to `QT_QPA_PLATFORM=xcb`, using XWayland
 on KDE Wayland. Explicit platform overrides are retained. Native Wayland 3D
 embedding is currently unsupported; ping/list expose the actual Qt platform.
@@ -59,3 +59,11 @@ generator coalescing/cancellation/timeouts, completion and restart persistence.
 Lifecycle probes for existing-service commands and startup allow up to 15 seconds
 to avoid launching a second daemon during a slow first GPU render. Fast startup
 polling still uses a short probe while watching the exact spawned child.
+
+Flatpak packages keep the server in a foreground sandbox process; their host CLI
+bridge serializes startup and uses a separate private `asset-preview-flatpak`
+socket and app data directory. Generators run via `flatpak-spawn --host --watch-bus`
+in the specified host cwd. Flatpak owns their host session/process group; local
+helper cancellation forwards signals and bus disconnect retires the host group.
+Packaged desktop launchers set the canonical reverse-DNS desktop identity;
+source-checkout launchers keep their existing desktop entry identity.

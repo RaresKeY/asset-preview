@@ -1,18 +1,25 @@
-Linux x86_64 release with image, 3D model, baked material and video previews.
+Linux x86_64 desktop distribution release, including the MIT application license.
 
-- Standalone executable: download `asset-preview-0.0.1-linux-x86_64.run`, run `chmod +x` on it, then execute it. Qt, F3D, LGPL libmpv/FFmpeg and Python are bundled; no build tools are needed.
-- Container: `ghcr.io/rareskey/asset-preview:0.0.1` (private; pulling requires a GitHub token with `read:packages`). `latest` points to the same release.
-- `SHA256SUMS` verifies both release downloads.
-- `asset-preview-0.0.1-corresponding-sources.tar.xz` contains dependency sources, exact Ubuntu source packages, application source and build instructions. Dependency notices are included in the executable and image; the image also includes this source archive under `/opt/sources/`.
+- AppImage: `asset-preview-0.0.2-linux-x86_64.AppImage`.
+- Portable: `asset-preview-0.0.2-linux-x86_64.tar.gz`; `.run` remains available.
+- Native installers: `.deb` (Ubuntu 24.04+/Debian 13+), `.rpm` (Fedora 42+),
+  `.pkg.tar.zst` (current Arch/CachyOS), plus the verified Arch `PKGBUILD`.
+- Flatpak: `asset-preview-0.0.2-linux-x86_64.flatpak` and host CLI bridge archive.
+- Private container: `ghcr.io/rareskey/asset-preview:0.0.2`; `latest` matches it.
+- `SHA256SUMS` covers every download. The corresponding-source archive includes
+  exact Ubuntu/upstream dependency sources and the AppImage runtime work sources.
 
-Requirements: Linux x86_64, glibc 2.39 or newer, X11/XWayland and host OpenGL/EGL drivers. The executable extracts into a private directory under `$XDG_CACHE_HOME/asset-preview` (or `~/.cache/asset-preview`). Keep it available while a service is running.
+[Installation instructions](https://github.com/RaresKeY/asset-preview/blob/main/docs/install-linux.md).
+AppImage/portable/native require glibc 2.39+, X11/XWayland and host OpenGL/EGL
+drivers. Flatpak uses Freedesktop 25.08 and has broad filesystem/host-generator
+permissions appropriate to this trusted developer tool. The host CLI bridge
+requires Python 3. Containers need explicit display/GPU/project mounts; their
+generators execute inside the container. GPU drivers are supplied by the host
+(or Flatpak's driver extensions), not copied from the workstation.
 
-The executable is a self-extracting binary bundle, not a statically linked single ELF. GPU drivers and glibc are intentionally not bundled. The container requires explicit display authorization, GPU device access and project mounts. Its default command runs the foreground service and opens the window. Mount a private runtime directory and set `ASSET_PREVIEW_RUNTIME_DIR` to share its socket with the host CLI; mount project directories at identical absolute paths. Persistent registrations require a writable state mount and `ASSET_PREVIEW_STATE_DIR`. Use the host UID/GID for both mounts. Avoid granting unrestricted X server access with `xhost +`. Generator commands run inside the container when the service runs there; host-only build tools are not available automatically.
-
-The release builds libmpv with `gpl=false` and FFmpeg without GPL/nonfree components. It does not bundle the workstation's GPL media builds, x264/x265 encoders, proprietary GPU drivers or external asset projects. Codec availability can differ from a system mpv installation. Codec patent obligations depend on distribution and jurisdiction.
-
-Asset Preview's own source is MIT licensed; see the repository's `LICENSE`. The original 0.0.1 artifacts predate that file. Included dependency licenses apply to those dependencies; LGPL components remain dynamically linked and replaceable.
-
-The release omits Qt’s optional TIFF plugin because Ubuntu’s TIFF library links
-GPL JBIG code. Convert TIFF image previews to PNG; this restriction does not
-change the separately built VTK model readers. Minimal libmpv omits scripting.
+Application: MIT. Bundled dependencies retain their licenses. Qt/media libraries
+remain dynamically replaceable. FFmpeg is built without GPL/nonfree components,
+mpv uses LGPL mode without scripting, and the GPL JBIG-linked TIFF image plugin
+is excluded. TIFF images should be converted to PNG. Codec availability differs
+from full system mpv builds; codec patent questions are separate from copyright.
+No public package store or automatic-update distribution repository is configured.

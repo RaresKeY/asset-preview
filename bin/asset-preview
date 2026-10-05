@@ -114,7 +114,7 @@ def path(value: str) -> str:
 
 def parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(description="One live window for images, videos, models and baked materials.")
-    p.add_argument("--version", action="version", version="Asset Preview 0.0.1")
+    p.add_argument("--version", action="version", version="Asset Preview " + (ROOT / "VERSION").read_text().strip())
     sub = p.add_subparsers(dest="action")
     for action, text in [("gui", "Open the preview window"), ("start", "Start the background server"),
                          ("stop", "Stop the server and its generators"), ("hide", "Suspend all previews"),

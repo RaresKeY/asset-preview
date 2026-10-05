@@ -549,7 +549,14 @@ void Service::build(const QString& id) {
         stopBuilder(*e); status(*e,"Generator timed out");
     });
     status(*e,"Building · waiting for output");
-    p->start(args[0].toString(),arguments);
+    if (qEnvironmentVariableIsSet("ASSET_PREVIEW_FLATPAK")) {
+        // Flatpak owns the host session; watch-bus cancels its process group
+        // when our local helper is stopped on hide, timeout or shutdown.
+        arguments.prepend(args[0].toString());
+        arguments.prepend(QStringLiteral("--directory=")+e->config["cwd"].toString());
+        arguments.prepend("--watch-bus"); arguments.prepend("--host");
+        p->start("/usr/bin/flatpak-spawn",arguments);
+    } else p->start(args[0].toString(),arguments);
 }
 void Service::activate(const QString& id) {
     auto e=entries[id]; if (e->active) return;

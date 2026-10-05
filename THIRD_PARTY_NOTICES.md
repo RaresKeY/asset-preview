@@ -52,3 +52,16 @@ this local system requires reviewing the exact packaged dependency notices.
 The release omits Qt’s optional TIFF plugin because Ubuntu’s TIFF library links
 GPL JBIG code. Convert TIFF image previews to PNG; this restriction does not
 change the separately built VTK model readers. Minimal libmpv omits scripting.
+
+
+## Desktop distribution formats
+
+Release 0.0.2 includes the MIT application license in every payload. AppImage
+adds AppImage/type2-runtime (MIT), libfuse 3.15 (LGPL-2.1), squashfuse (BSD-2-Clause),
+musl and mimalloc (MIT), zstd (BSD-3-Clause option), and zlib (Zlib). Their notices
+are under `licenses/appimage-runtime`; the corresponding-source archive carries
+the checksum-pinned runtime binary, runtime work sources, libfuse patch/build
+instructions and linked-component source/notice archives for rebuilding and
+relinking the LGPL runtime component. See `packaging/appimage/runtime.json`.
+The Freedesktop Flatpak runtime and graphics extensions are installed separately
+and retain their own notices/licenses. Distribution package tools are build-only.

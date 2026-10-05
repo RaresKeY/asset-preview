@@ -1,0 +1,12 @@
+[Desktop Entry]
+Type=Application
+Name=Asset Preview
+GenericName=Live Asset Viewer
+Comment=Preview images, videos, models and materials as AI agents produce them
+Exec=asset-preview
+Icon=io.github.RaresKeY.AssetPreview
+Terminal=false
+StartupNotify=false
+StartupWMClass=asset-preview
+Categories=Graphics;3DGraphics;
+Keywords=Asset;Preview;Live;3D;Model;Material;Video;

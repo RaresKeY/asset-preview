@@ -1,15 +1,19 @@
 #!/usr/bin/env python3
-import hashlib, subprocess, sys
+"""Export the bundle, a self-extracting executable and exact corresponding sources."""
+import hashlib, shutil, subprocess, sys
 from pathlib import Path
+
 def digest(path):
- with path.open('rb') as f:return hashlib.file_digest(f,'sha256').hexdigest()
-out=Path(sys.argv[1]); name='asset-preview-0.0.1-linux-x86_64.run'
-archive=out/'bundle.tar.gz'
+    with path.open('rb') as f:return hashlib.file_digest(f,'sha256').hexdigest()
+
+out=Path(sys.argv[1]);bundle=out/'asset-preview'
+version=(bundle/'VERSION').read_text().strip();release=out/'release';release.mkdir()
+archive=release/f'asset-preview-{version}-linux-x86_64.tar.gz'
 subprocess.run(['tar','-czf',str(archive),'-C',str(out),'asset-preview'],check=True)
 header='''#!/bin/sh
 set -eu
 umask 077
-preview_cache="${XDG_CACHE_HOME:-$HOME/.cache}/asset-preview/0.0.1-BUNDLE_HASH"
+preview_cache="${XDG_CACHE_HOME:-$HOME/.cache}/asset-preview/VERSION-BUNDLE_HASH"
 if [ ! -x "$preview_cache/asset-preview/asset-preview" ]; then
  mkdir -p -- "$(dirname -- "$preview_cache")"
  preview_tmp=$(mktemp -d "${preview_cache}.XXXXXX")
@@ -21,14 +25,13 @@ if [ ! -x "$preview_cache/asset-preview/asset-preview" ]; then
 fi
 exec "$preview_cache/asset-preview/asset-preview" "$@"
 '''
-header=header.replace('BUNDLE_HASH',digest(archive)[:16])
+header=header.replace('VERSION',version).replace('BUNDLE_HASH',digest(archive)[:16])
 header=header.replace('HEADER_LINES',str(len(header.splitlines())+1))
-p=out/name
+p=release/f'asset-preview-{version}-linux-x86_64.run'
 with p.open('wb') as f:
- f.write(header.encode())
- with archive.open('rb') as a:
-  import shutil;shutil.copyfileobj(a,f)
-p.chmod(0o755);archive.unlink()
-source=out/'asset-preview-0.0.1-corresponding-sources.tar.xz'
+    f.write(header.encode())
+    with archive.open('rb') as a:shutil.copyfileobj(a,f)
+p.chmod(0o755)
+source=release/f'asset-preview-{version}-corresponding-sources.tar.xz'
 subprocess.run(['tar','-I','xz -T2 -0','-cf',str(source),'-C',str(out),'sources'],check=True)
-(out/'SHA256SUMS').write_text(''.join(f'{digest(p)}  {p.name}\n' for p in (out/name,source)))
+(release/'SHA256SUMS').write_text(''.join(f'{digest(p)}  {p.name}\n' for p in (archive,p,source)))

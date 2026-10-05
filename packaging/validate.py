@@ -8,7 +8,7 @@ def call(*words):
     result=subprocess.run([exe,*words],capture_output=True,text=True)
     if result.returncode:raise RuntimeError(words[0]+": "+result.stderr.strip())
     return json.loads(result.stdout) if words[:1]==('status',) else result.stdout
-with tempfile.TemporaryDirectory(prefix='asset-preview-release-check-') as d:
+with tempfile.TemporaryDirectory(prefix='asset-preview-release-check-',dir=os.environ.get('ASSET_PREVIEW_VALIDATION_PARENT')) as d:
     fixture=Path(d);os.environ['ASSET_PREVIEW_RUNTIME_DIR']=str(fixture/'runtime');os.environ['ASSET_PREVIEW_STATE_DIR']=str(fixture/'state')
     def chunk(kind,data):return struct.pack('>I',len(data))+kind+data+struct.pack('>I',zlib.crc32(kind+data)&0xffffffff)
     image=fixture/'texture.png';image.write_bytes(b'\x89PNG\r\n\x1a\n'+chunk(b'IHDR',struct.pack('>IIBBBBB',64,64,8,2,0,0,0))+chunk(b'IDAT',zlib.compress((b'\0'+bytes((70,150,190))*64)*64))+chunk(b'IEND',b''))

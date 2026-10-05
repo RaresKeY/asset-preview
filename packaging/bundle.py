@@ -14,9 +14,11 @@ src = Path('/src'); deps = Path('/opt/dependencies')
 for name in ('bin', 'skills', 'fish', 'examples'):
     shutil.copytree(src/name, out/name, ignore=shutil.ignore_patterns('__pycache__', '*.pyc'))
 shutil.copy2(src/'packaging/container-service.py', out/'container-service.py')
-for name in ('README.md', 'LICENSE', 'THIRD_PARTY_NOTICES.md', 'icon.svg'):
+for name in ('README.md', 'VERSION', 'LICENSE', 'THIRD_PARTY_NOTICES.md', 'icon.svg'):
     shutil.copy2(src/name, out/name)
 shutil.copytree(src/'docs', out/'docs')
+shutil.copytree(src/'packaging/flatpak', out/'flatpak')
+shutil.copytree(src/'packaging/desktop', out/'desktop')
 # Preserve the documented bin/asset-preview entrypoint without host Python.
 (out/'bin/asset-preview').rename(out/'bin/client.py')
 (out/'bin/asset-preview').write_text('#!/bin/sh\nset -eu\npreview_root=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)\nexec "$preview_root/asset-preview" "$@"\n')
@@ -61,7 +63,7 @@ while pending:
         dest=out/'lib'/soname
         if not dest.exists():shutil.copy2(dep.resolve(),dest)
         manifest[soname]=str(dep.resolve());pending.append(dep)
-(out/'build-info.json').write_text(json.dumps({'version':'0.0.1','source_commit':os.environ.get('SOURCE_COMMIT','unknown'),'platform':'linux-x86_64'},indent=2)+'\n')
+(out/'build-info.json').write_text(json.dumps({'version':(src/'VERSION').read_text().strip(),'source_commit':os.environ.get('SOURCE_COMMIT','unknown'),'platform':'linux-x86_64'},indent=2)+'\n')
 (out/'dependency-manifest.json').write_text(json.dumps(manifest,indent=2)+'\n')
 (out/'asset-preview').write_text('''#!/bin/sh
 set -eu
@@ -73,6 +75,7 @@ if [ "${ASSET_PREVIEW_BUNDLE_ROOT:-}" != "$preview_root" ]; then
  export ASSET_PREVIEW_ORIGINAL_PYTHONNOUSERSITE="${PYTHONNOUSERSITE-}"
 fi
 export ASSET_PREVIEW_BUNDLE_ROOT="$preview_root"
+export ASSET_PREVIEW_DESKTOP_ID=io.github.RaresKeY.AssetPreview
 export LD_LIBRARY_PATH="$preview_root/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
 export QT_PLUGIN_PATH="$preview_root/qt/plugins"
 export PYTHONHOME="$preview_root/python"

@@ -30,7 +30,8 @@ ARG SOURCE_COMMIT=unknown
 RUN cmake -S /src -B /src/build -G Ninja -DCMAKE_BUILD_TYPE=Release \
  -DCMAKE_PREFIX_PATH=/opt/dependencies -DCMAKE_BUILD_RPATH=/opt/dependencies/lib \
  && cmake --build /src/build --parallel 2
-RUN python3 /src/packaging/bundle.py /out/asset-preview \
+RUN python3 /src/packaging/prepare-appimage.py \
+ && python3 /src/packaging/bundle.py /out/asset-preview \
  && python3 /src/packaging/sources.py /out/asset-preview /out/sources \
  && cp /src/packaging/Containerfile /src/packaging/build-dependencies.sh /src/packaging/build-assimp.sh /src/packaging/build-f3d.sh /out/sources/ \
  && cp /src/packaging/bundle.py /src/packaging/sources.py /out/sources/
@@ -40,18 +41,17 @@ FROM runtime-base AS runtime
 RUN apt-get update && apt-get install -y --no-install-recommends libopengl0 fontconfig-config \
  && rm -rf /var/lib/apt/lists/*
 ARG SOURCE_COMMIT=unknown
+ARG ASSET_PREVIEW_VERSION=0.0.2
 ARG DEBIAN_FRONTEND=noninteractive
 LABEL org.opencontainers.image.source="https://github.com/RaresKeY/asset-preview" \
- org.opencontainers.image.version="0.0.1" \
+ org.opencontainers.image.version="${ASSET_PREVIEW_VERSION}" \
  org.opencontainers.image.revision="${SOURCE_COMMIT}" \
  org.opencontainers.image.description="Live asset preview for AI agent workflows"
 COPY --from=build /out/asset-preview /opt/asset-preview
-COPY --from=build /out/asset-preview-0.0.1-corresponding-sources.tar.xz /opt/sources/
+COPY --from=build /out/release/*-corresponding-sources.tar.xz /opt/sources/
 ENV QT_QPA_PLATFORM=xcb
 WORKDIR /workspace
 CMD ["/opt/asset-preview/asset-preview", "--foreground"]
 
 FROM scratch AS artifacts
-COPY --from=build /out/asset-preview-0.0.1-linux-x86_64.run /
-COPY --from=build /out/asset-preview-0.0.1-corresponding-sources.tar.xz /
-COPY --from=build /out/SHA256SUMS /
+COPY --from=build /out/release/ /

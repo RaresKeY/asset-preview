@@ -1,0 +1,37 @@
+{
+  "app-id": "io.github.RaresKeY.AssetPreview",
+  "runtime": "org.freedesktop.Platform",
+  "runtime-version": "25.08",
+  "sdk": "org.freedesktop.Sdk",
+  "command": "asset-preview",
+  "finish-args": [
+    "--socket=x11",
+    "--share=ipc",
+    "--device=dri",
+    "--filesystem=host",
+    "--filesystem=/tmp",
+    "--filesystem=xdg-run/asset-preview-flatpak:create",
+    "--talk-name=org.freedesktop.Flatpak",
+    "--env=QT_QPA_PLATFORM=xcb"
+  ],
+  "modules": [
+    {
+      "name": "asset-preview",
+      "buildsystem": "simple",
+      "build-commands": [
+        "mkdir -p /app/asset-preview /app/bin /app/share/applications /app/share/icons/hicolor/scalable/apps /app/share/metainfo",
+        "cp -a . /app/asset-preview/",
+        "install -m755 flatpak/launcher.sh /app/bin/asset-preview",
+        "install -m644 desktop/*.desktop /app/share/applications/",
+        "install -m644 desktop/*.xml /app/share/metainfo/",
+        "install -m644 icon.svg /app/share/icons/hicolor/scalable/apps/io.github.RaresKeY.AssetPreview.svg"
+      ],
+      "sources": [
+        {
+          "type": "archive",
+          "path": "../../release/asset-preview-0.0.2-linux-x86_64.tar.gz"
+        }
+      ]
+    }
+  ]
+}
