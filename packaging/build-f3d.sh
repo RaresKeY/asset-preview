@@ -9,3 +9,5 @@ cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release \
  -DF3D_PLUGINS_STATIC_BUILD=ON -DBUILD_TESTING=OFF
 cmake --build build --parallel 4
 cmake --install build
+
+cmake --install build --component sdk
