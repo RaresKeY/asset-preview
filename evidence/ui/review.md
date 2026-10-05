@@ -49,9 +49,19 @@ ASSET_PREVIEW_TEST_WIDTH=1600 ASSET_PREVIEW_TEST_HEIGHT=1000 \
   ./tools/offscreen.sh python tools/ui_scenes.py --phase after --output evidence/ui
 fish -c 'source fish/completions/asset-preview.fish; complete -C "asset-preview layout grid --size "'
 git diff --check
+./tools/offscreen.sh python tools/profile.py \
+  --model ../material-atlas/assets/models/sugar_cube/sugar_cube_textured.glb \
+  --albedo ../material-atlas/assets/materials/smoked_walnut_albedo.png \
+  --normal ../material-atlas/assets/materials/smoked_walnut_normal.png \
+  --orm ../material-atlas/assets/materials/smoked_walnut_orm.png \
+  --output evidence/profile
 ```
 
 - Functional: 13 passed, 3 hardware-only skips. Hardware: all 16 passed.
+- Current studio-lighting resource snapshot: fresh process 48.1 MiB RSS,
+  representative model 457.4 MiB, four-card grid 538.8 MiB. All settled 1.5-second
+  samples recorded zero CPU ticks and zero extra paints; these are process RSS
+  samples, not dedicated GPU memory or a large-grid benchmark.
 - Orbit tests verify zero horizon roll, constant radius, pole clamping,
   camera retention and Z-up. A real mouse click opens the native overlay menu;
   keyboard activation toggles textures, proving controls receive input over GL.

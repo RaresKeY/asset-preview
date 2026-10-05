@@ -4,19 +4,24 @@ Release build on the owning CachyOS workstation, Qt 6.11.2 and F3D 3.5.0.
 Automated visuals stayed inside Gamescope's headless backend. The loaded view
 reported **NVIDIA GeForce RTX 2080 Ti/PCIe/SSE2**, using Qt `xcb` through XWayland.
 
-`./tools/test.sh functional`: 14 tests, 12 passed and 2 hardware-only skips.
-`./tools/test.sh gpu`: all 14 passed. Coverage includes concurrent startup, private
+Functional lane: 16 tests, 13 passed and 3 hardware-only skips.
+Hardware lane: all 16 passed. Coverage includes concurrent startup, private
 socket, inert registration, visible-only paging, atomic replacement, missing files
 and directories, failed-save recovery, generator coalescing and descendant
 cancellation, timeouts, persistence, read-only completion, corrupt-state preservation,
 OBJ/MTL/material-map refresh, keyboard navigation, native model orbit, idle paint
 counts and saved intermediate outputs during a running generator.
+New checks include larger-grid paging/persistence, compact status visibility,
+zero horizon roll and pitch limits through native mouse input, Z-up, native
+overlay menu clicks, and texture/clay appearance restoration without moving the
+camera. The [UI review](ui/review.md) records matched captures and exact commands.
 
 The fish function/completions and managed desktop entry are installed. Normal fish
 autoload resolves `asset-preview`; layout completion returns `single` and `grid`.
 The desktop entry passes `desktop-file-validate` and KDE's application cache was
-refreshed. The real desktop session's background service reports `platform=xcb`,
-zero active entries and a hidden window. No visible automated launch was used.
+refreshed. The updated real desktop service reports `platform=xcb`. Its already
+open empty window was gracefully closed to save geometry, then reopened with the
+new build; registrations/selection/layout were retained. Automated scenes stayed offscreen.
 
 ## Measured resources
 
@@ -28,12 +33,12 @@ PSS apportions shared pages and depends on other running processes.
 
 | State | Active | RSS MiB | PSS MiB | Idle CPU seconds | Additional paints |
 |---|---:|---:|---:|---:|---:|
-| Fresh background | 0 | 48.0 | 13.3 | 0.01 | 0 |
-| 256px image | 1 | 65.8 | 20.5 | 0 | 0 |
-| Textured sugar-cube GLB | 1 | 412.2 | 299.0 | 0 | 0 |
-| Walnut material, three 2048px maps | 1 | 415.2 | 302.0 | 0.01 | 0 |
-| Four-card grid | 4 | 493.1 | 379.9 | 0 | 0 |
-| Hidden after using 3D | 0 | 327.2 | 212.7 | 0 | 0 |
+| Fresh background | 0 | 48.1 | 14.9 | 0 | 0 |
+| 256px image | 1 | 66.1 | 22.4 | 0 | 0 |
+| Textured sugar-cube GLB | 1 | 457.4 | 341.6 | 0 | 0 |
+| Walnut material, three 2048px maps | 1 | 461.7 | 345.9 | 0 | 0 |
+| Four-card grid | 4 | 538.8 | 421.0 | 0 | 0 |
+| Hidden after using 3D | 0 | 366.8 | 249.4 | 0 | 0 |
 
 The lazy backend keeps F3D/VTK out of fresh background and image-only sessions.
 3D loading brings substantial library and GPU-driver memory. Hiding destroys all
@@ -41,6 +46,9 @@ engines/images/generators and trims free heap pages, but retains the backend and
 driver caches. Stop/restart returns to the fresh-process baseline. These short
 idle measurements establish event-driven behavior; they are not a benchmark of
 large imports, interactive frame times, or every supported scene format.
+These samples use the new default studio lighting and current overlay layout.
+Nine/sixteen active complex 3D scenes have not been benchmarked; opting into
+larger grids raises the active-resource limit rather than making scenes cheaper.
 
 Visuals: [four-card grid](profile/grid.png), [textured model](profile/model.png),
 [baked sphere](profile/material.png), [image](profile/image.png).
