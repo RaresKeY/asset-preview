@@ -1,0 +1,211 @@
+#!/usr/bin/env python3
+"""Qt-free local client and lifecycle entrypoint. Standard library only."""
+from __future__ import annotations
+import argparse
+import contextlib
+import fcntl
+import json
+import os
+from pathlib import Path
+import socket
+import stat
+import subprocess
+import sys
+import time
+
+ROOT = Path(__file__).resolve().parents[1]
+LIMIT = 1024 * 1024
+_SPAWNED: list[subprocess.Popen] = []
+
+def locations() -> tuple[Path, Path]:
+    runtime_base = Path(os.environ.get("XDG_RUNTIME_DIR", f"/tmp/asset-preview-{os.getuid()}"))
+    runtime = Path(os.environ.get("ASSET_PREVIEW_RUNTIME_DIR", runtime_base / "asset-preview"))
+    state_base = Path(os.environ.get("XDG_STATE_HOME", Path.home() / ".local/state"))
+    state = Path(os.environ.get("ASSET_PREVIEW_STATE_DIR", state_base / "asset-preview"))
+    return runtime.absolute(), state.absolute()
+
+def private_directory(path: Path) -> None:
+    path.mkdir(mode=0o700, parents=True, exist_ok=True)
+    info = path.lstat()
+    if not stat.S_ISDIR(info.st_mode) or info.st_uid != os.getuid() or info.st_mode & 0o077:
+        raise RuntimeError(f"A private directory owned by this user is required: {path}")
+
+def rpc(request: dict, timeout: float = 15) -> dict:
+    runtime, _ = locations()
+    data = (json.dumps(request, ensure_ascii=False) + "\n").encode()
+    if len(data) > LIMIT:
+        raise RuntimeError("Request exceeds 1 MiB")
+    with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as client:
+        client.settimeout(timeout)
+        client.connect(str(runtime / "preview.sock"))
+        client.sendall(data)
+        response = bytearray()
+        while b"\n" not in response:
+            chunk = client.recv(65536)
+            if not chunk:
+                raise RuntimeError("Server closed the connection without a response")
+            response.extend(chunk)
+            if len(response) > 8 * LIMIT:
+                raise RuntimeError("Server response too large")
+    result = json.loads(response.split(b"\n", 1)[0])
+    if not result.get("ok"):
+        raise RuntimeError(result.get("error", "Preview request failed"))
+    return result
+
+def running() -> bool:
+    # Reap daemons started by an embedded client such as the integration harness.
+    _SPAWNED[:] = [process for process in _SPAWNED if process.poll() is None]
+    try:
+        return rpc({"method": "ping"}, timeout=0.3).get("protocol") == 1
+    except (OSError, RuntimeError, ValueError):
+        return False
+
+def start() -> bool:
+    runtime, state = locations()
+    private_directory(runtime)
+    private_directory(state)
+    # Serialize concurrent first clients without relying on a race-prone PID file.
+    lock_path = runtime / "start.lock"
+    fd = os.open(lock_path, os.O_CREAT | os.O_RDWR | os.O_NOFOLLOW, 0o600)
+    with os.fdopen(fd, "w") as lock:
+        expires = time.monotonic() + 15
+        while True:
+            try:
+                fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                break
+            except BlockingIOError:
+                if time.monotonic() >= expires:
+                    raise RuntimeError("Timed out waiting for concurrent server startup")
+                time.sleep(0.05)
+        if running():
+            return False
+        binary = ROOT / "build/asset-preview-server"
+        if not binary.is_file():
+            raise RuntimeError("Build first: tools/build.sh")
+        log_path = state / "server.log"
+        # Keep one bounded session log; never accumulate older generated logs.
+        log_fd = os.open(log_path, os.O_CREAT | os.O_WRONLY | os.O_TRUNC | os.O_NOFOLLOW, 0o600)
+        preview_env = os.environ.copy()
+        # The embedded native OpenGL views are verified through XWayland on KDE.
+        # Preserve an explicit override, including the offscreen functional lane.
+        preview_env.setdefault("QT_QPA_PLATFORM", "xcb")
+        with os.fdopen(log_fd, "wb") as log:
+            process = subprocess.Popen(
+                [str(binary), "--socket", str(runtime / "preview.sock"), "--state", str(state)],
+                cwd=ROOT, stdin=subprocess.DEVNULL, stdout=log, stderr=log,
+                start_new_session=True, env=preview_env,
+            )
+        _SPAWNED.append(process)
+        deadline = time.monotonic() + 12
+        while time.monotonic() < deadline:
+            if running():
+                return True
+            if process.poll() is not None:
+                raise RuntimeError(f"Server exited {process.returncode}; see {log_path}")
+            time.sleep(0.05)
+        # Terminate only this startup's exact child group.
+        with contextlib.suppress(ProcessLookupError):
+            os.killpg(process.pid, 15)
+        raise RuntimeError(f"Server did not become ready; see {log_path}")
+
+def path(value: str) -> str:
+    # Keep the filename rather than resolving a symlink: replacements must remain observable.
+    return os.path.abspath(os.path.expanduser(value))
+
+def parser() -> argparse.ArgumentParser:
+    p = argparse.ArgumentParser(description="One live window for images, models and baked materials.")
+    sub = p.add_subparsers(dest="action")
+    for action, text in [("gui", "Open the preview window"), ("start", "Start the background server"),
+                         ("stop", "Stop the server and its generators"), ("hide", "Suspend all previews"),
+                         ("list", "List connected previews"), ("status", "Show live state and metrics"),
+                         ("paths", "Print local socket and state paths")]:
+        q = sub.add_parser(action, help=text)
+        if action in {"list", "status"}: q.add_argument("--json", action="store_true")
+    add = sub.add_parser("add", help="Watch an image or model output; optionally run a generator on source saves")
+    add.add_argument("file")
+    add.add_argument("--id", help="Stable ID; reusing it updates that registration")
+    add.add_argument("--label")
+    add.add_argument("--kind", choices=["auto", "image", "model"], default="auto")
+    add.add_argument("--watch", action="append", default=[], metavar="SOURCE", help="Additional input/dependency file (repeatable)")
+    add.add_argument("--cwd", default=os.getcwd(), help="Working directory for explicit generator")
+    add.add_argument("--timeout", type=int, default=120)
+    add.add_argument("--exec", nargs=argparse.REMAINDER, dest="command", help="Generator program and arguments; put this option last")
+    mat = sub.add_parser("material", help="Watch baked albedo/normal/ORM maps on a sample shape")
+    mat.add_argument("albedo"); mat.add_argument("--normal"); mat.add_argument("--orm")
+    mat.add_argument("--shape", choices=["sphere", "cube", "plane"], default="sphere")
+    mat.add_argument("--id"); mat.add_argument("--label")
+    mat.add_argument("--watch", action="append", default=[])
+    mat.add_argument("--cwd", default=os.getcwd()); mat.add_argument("--timeout", type=int, default=120)
+    mat.add_argument("--exec", nargs=argparse.REMAINDER, dest="command")
+    for action in ["remove", "select", "reload"]:
+        sub.add_parser(action).add_argument("id")
+    sub.add_parser("layout").add_argument("mode", choices=["single", "grid"])
+    settings = sub.add_parser("settings", help="Update per-preview options with a JSON object")
+    settings.add_argument("id"); settings.add_argument("value", help='For example: {"grid":false,"light":1.2}')
+    sub.add_parser("capture", help="Save the current visible window to a new PNG").add_argument("file")
+    return p
+
+def main() -> int:
+    # Fish completion: read-only, no Qt import, server startup, generators or mutations.
+    if sys.argv[1:] == ["--complete-ids"]:
+        try:
+            runtime, state = locations()
+            if running():
+                entries = rpc({"method": "list"}, timeout=0.5)["entries"]
+            else:
+                entries = json.loads((state / "previews.json").read_text())["entries"]
+            for entry in entries:
+                print(f'{entry["id"]}\t{entry.get("label", "").replace(chr(10), " ").replace(chr(9), " ")}')
+        except (OSError, RuntimeError, ValueError, KeyError):
+            pass
+        return 0
+    args = parser().parse_args()
+    action = args.action or "gui"
+    if action == "paths":
+        runtime, state = locations()
+        print(json.dumps({"socket": str(runtime / "preview.sock"), "state": str(state)}, indent=2))
+        return 0
+    if action in {"stop", "hide", "status", "list"} and not running():
+        if action == "status": print('{"running": false}' if args.json else "Server stopped")
+        elif action == "list" and args.json: print("[]")
+        return 0
+    if action == "start":
+        created = start(); print("Server started" if created else "Server already running"); return 0
+    if action in {"gui", "add", "material"}: start()
+    request = {"method": {"gui": "show", "stop": "quit", "status": "list"}.get(action, action)}
+    if action in {"add", "material"}:
+        entry = {"path": path(args.albedo if action == "material" else args.file),
+                 "kind": "material" if action == "material" else args.kind,
+                 "watch": [path(p) for p in args.watch], "cwd": path(args.cwd), "timeout": args.timeout}
+        for key in ("id", "label", "command"):
+            value = getattr(args, key)
+            if value is not None: entry[key] = value
+        if args.command == []: raise RuntimeError("--exec requires a generator program")
+        if action == "material":
+            entry["maps"] = {key: path(getattr(args, key)) for key in ("normal", "orm") if getattr(args, key)}
+            entry["settings"] = {"shape": args.shape}
+        request = {"method": "add", "entry": entry}
+    if action in {"select", "remove", "reload", "settings"}: request["id"] = args.id
+    if action == "settings": request["settings"] = json.loads(args.value)
+    if action == "layout": request["layout"] = args.mode
+    if action == "capture": request["path"] = path(args.file)
+    result = rpc(request)
+    if action in {"add", "material"}: print(result["id"])
+    elif action == "status":
+        result["running"] = True
+        if args.json: print(json.dumps(result, indent=2))
+        else:
+            print(f'{len(result["entries"])} previews · {result["active"]} active · {result["layout"]} · PID {result["pid"]}')
+            for row in result["entries"]: print(f'  {row["id"]}: {row["label"]} — {row["status"]}')
+    elif action == "list":
+        if args.json: print(json.dumps(result["entries"], indent=2))
+        else:
+            for row in result["entries"]: print(f'{row["id"]}\t{row["label"]}\t{row["path"]}')
+    return 0
+
+if __name__ == "__main__":
+    try:
+        raise SystemExit(main())
+    except (OSError, RuntimeError, ValueError) as exc:
+        print(f"asset-preview: {exc}", file=sys.stderr)
+        raise SystemExit(1)

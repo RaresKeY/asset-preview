@@ -1,0 +1,15 @@
+complete -c asset-preview -n '__fish_use_subcommand' -a 'gui start stop hide list status paths add material remove select reload layout settings capture' -d 'Live asset preview'
+complete -c asset-preview -n '__fish_seen_subcommand_from remove select reload settings' -a '(asset-preview --complete-ids)' -f
+complete -c asset-preview -n '__fish_seen_subcommand_from layout' -a 'single grid' -f
+complete -c asset-preview -n '__fish_seen_subcommand_from add material' -l id -r -d 'Stable preview ID'
+complete -c asset-preview -n '__fish_seen_subcommand_from add material' -l label -r -d 'Display name'
+complete -c asset-preview -n '__fish_seen_subcommand_from add material' -l watch -r -F -d 'Watch source or dependency (repeatable)'
+complete -c asset-preview -n '__fish_seen_subcommand_from add material' -l cwd -r -a '(__fish_complete_directories)' -d 'Generator working directory'
+complete -c asset-preview -n '__fish_seen_subcommand_from add material' -l exec -r -d 'Explicit generator program and arguments; last option'
+complete -c asset-preview -n '__fish_seen_subcommand_from add material' -l timeout -r -d 'Generator timeout in seconds'
+complete -c asset-preview -n '__fish_seen_subcommand_from add' -l kind -r -f -a 'auto image model' -d 'Preview type'
+complete -c asset-preview -n '__fish_seen_subcommand_from material' -l normal -r -F -d 'Tangent-space normal map'
+complete -c asset-preview -n '__fish_seen_subcommand_from material' -l orm -r -F -d 'Occlusion / roughness / metallic map'
+complete -c asset-preview -n '__fish_seen_subcommand_from material' -l shape -r -f -a 'sphere cube plane' -d 'Material sample shape'
+complete -c asset-preview -n '__fish_seen_subcommand_from status list' -l json -d 'Machine-readable state'
+complete -c asset-preview -l help -s h -d 'Show help'

@@ -1,0 +1,65 @@
+{
+  "active": 1,
+  "entries": [
+    {
+      "active": false,
+      "building": false,
+      "builds": 0,
+      "command": [],
+      "id": "model",
+      "kind": "model",
+      "label": "cube.obj",
+      "log": "",
+      "maps": {},
+      "path": "/tmp/asset-preview-tests-q28eucv5/cube.obj",
+      "revisions": 3,
+      "settings": {},
+      "status": "Suspended",
+      "timeout": 120,
+      "watch": []
+    },
+    {
+      "active": true,
+      "building": false,
+      "builds": 0,
+      "command": [],
+      "id": "material",
+      "kind": "material",
+      "label": "albedo.png",
+      "log": "",
+      "maps": {
+        "normal": "/tmp/asset-preview-tests-q28eucv5/normal.png",
+        "orm": "/tmp/asset-preview-tests-q28eucv5/orm.png"
+      },
+      "metrics": {
+        "engine": true,
+        "loads": 3,
+        "renderer": "NVIDIA GeForce RTX 2080 Ti/PCIe/SSE2",
+        "renders": 4
+      },
+      "path": "/tmp/asset-preview-tests-q28eucv5/albedo.png",
+      "revisions": 2,
+      "settings": {
+        "axes": true,
+        "shape": "cube"
+      },
+      "status": "Live \u00b7 model ready",
+      "timeout": 120,
+      "viewport": {
+        "height": 506,
+        "width": 946,
+        "x": 27,
+        "y": 148
+      },
+      "watch": []
+    }
+  ],
+  "layout": "single",
+  "ok": true,
+  "pid": 3143264,
+  "platform": "xcb",
+  "selected": "material",
+  "watched_directories": 1,
+  "watched_files": 3,
+  "window_visible": true
+}

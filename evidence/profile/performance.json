@@ -1,0 +1,88 @@
+{
+  "date": "2026-10-05T01:33:41.126424+00:00",
+  "platform": "xcb",
+  "display": ":2",
+  "pid": 3146085,
+  "samples": [
+    {
+      "name": "background",
+      "Rss_kib": 49136,
+      "Pss_kib": 13662,
+      "Private_Clean_kib": 0,
+      "Private_Dirty_kib": 9768,
+      "idle_seconds": 1.5003273710026406,
+      "cpu_seconds": 0.01,
+      "active": 0,
+      "render_delta": {}
+    },
+    {
+      "name": "image",
+      "Rss_kib": 67348,
+      "Pss_kib": 20987,
+      "Private_Clean_kib": 252,
+      "Private_Dirty_kib": 14540,
+      "idle_seconds": 1.500074643001426,
+      "cpu_seconds": 0.0,
+      "active": 1,
+      "render_delta": {
+        "image": 0
+      }
+    },
+    {
+      "name": "model",
+      "Rss_kib": 422048,
+      "Pss_kib": 306187,
+      "Private_Clean_kib": 108688,
+      "Private_Dirty_kib": 182020,
+      "idle_seconds": 1.5000986329978332,
+      "cpu_seconds": 0.0,
+      "active": 1,
+      "render_delta": {
+        "model": 0
+      }
+    },
+    {
+      "name": "material",
+      "Rss_kib": 425156,
+      "Pss_kib": 309238,
+      "Private_Clean_kib": 110932,
+      "Private_Dirty_kib": 182872,
+      "idle_seconds": 1.500068633002229,
+      "cpu_seconds": 0.01,
+      "active": 1,
+      "render_delta": {
+        "material": 0
+      }
+    },
+    {
+      "name": "grid",
+      "Rss_kib": 504964,
+      "Pss_kib": 389036,
+      "Private_Clean_kib": 110416,
+      "Private_Dirty_kib": 263196,
+      "idle_seconds": 1.5000987359962892,
+      "cpu_seconds": 0.0,
+      "active": 4,
+      "render_delta": {
+        "image": 0,
+        "model": 0,
+        "material": 0,
+        "albedo": 0
+      }
+    },
+    {
+      "name": "hidden_after_3d",
+      "Rss_kib": 335072,
+      "Pss_kib": 217855,
+      "Private_Clean_kib": 110280,
+      "Private_Dirty_kib": 93352,
+      "idle_seconds": 1.500076992000686,
+      "cpu_seconds": 0.0,
+      "active": 0,
+      "render_delta": {}
+    }
+  ],
+  "model": "/workspace/material-atlas/assets/models/sugar_cube/sugar_cube_textured.glb",
+  "albedo": "/workspace/material-atlas/assets/materials/smoked_walnut_albedo.png",
+  "renderer": "NVIDIA GeForce RTX 2080 Ti/PCIe/SSE2"
+}

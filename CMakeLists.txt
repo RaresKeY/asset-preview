@@ -1,0 +1,26 @@
+cmake_minimum_required(VERSION 3.22)
+project(asset_preview VERSION 0.1.0 LANGUAGES CXX)
+set(CMAKE_CXX_STANDARD 20)
+set(CMAKE_CXX_STANDARD_REQUIRED ON)
+set(CMAKE_AUTOMOC ON)
+find_package(Qt6 6.4 REQUIRED COMPONENTS Widgets Network OpenGL)
+find_package(f3d 3.5 REQUIRED COMPONENTS library)
+add_executable(asset-preview-server src/main.cpp src/service.cpp src/viewer.cpp)
+target_link_libraries(asset-preview-server PRIVATE Qt6::Widgets Qt6::Network)
+# The workstation's F3D dependency graph includes jemalloc with initial-exec TLS.
+# It cannot be dlopened late. Map just that tiny dependency at startup, putting
+# libstdc++ and libc first so C++ new/delete and C allocation share glibc's heap.
+find_library(ASSET_PREVIEW_JEMALLOC jemalloc)
+if(ASSET_PREVIEW_JEMALLOC AND CMAKE_SYSTEM_NAME STREQUAL "Linux")
+    find_file(ASSET_PREVIEW_LIBC_DSO NAMES libc.so.6
+        PATHS /usr/lib /lib /usr/lib/${CMAKE_LIBRARY_ARCHITECTURE} /lib/${CMAKE_LIBRARY_ARCHITECTURE} REQUIRED)
+    find_file(ASSET_PREVIEW_STDCXX_DSO NAMES libstdc++.so.6
+        PATHS /usr/lib /lib /usr/lib/${CMAKE_LIBRARY_ARCHITECTURE} /lib/${CMAKE_LIBRARY_ARCHITECTURE} REQUIRED)
+    target_link_libraries(asset-preview-server PRIVATE "-Wl,--no-as-needed" ${ASSET_PREVIEW_STDCXX_DSO} ${ASSET_PREVIEW_LIBC_DSO} ${ASSET_PREVIEW_JEMALLOC} "-Wl,--as-needed")
+endif()
+target_compile_options(asset-preview-server PRIVATE -Wall -Wextra -Wpedantic)
+target_compile_definitions(asset-preview-server PRIVATE ASSET_PREVIEW_ROOT="${CMAKE_CURRENT_SOURCE_DIR}")
+add_library(asset-preview-f3d MODULE src/model_view.cpp)
+set_target_properties(asset-preview-f3d PROPERTIES PREFIX "" AUTOMOC OFF)
+target_link_libraries(asset-preview-f3d PRIVATE Qt6::Widgets Qt6::OpenGL f3d::libf3d)
+target_compile_options(asset-preview-f3d PRIVATE -Wall -Wextra -Wpedantic)
