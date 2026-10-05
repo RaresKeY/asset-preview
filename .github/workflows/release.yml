@@ -1,0 +1,36 @@
+name: Build release
+on:
+  workflow_dispatch:
+permissions:
+  contents: write
+  packages: write
+jobs:
+  linux-x86_64:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+      - name: Build runtime and standalone artifacts
+        run: |
+          docker build -f packaging/Containerfile --target runtime -t ghcr.io/rareskey/asset-preview:0.0.1 .
+          docker build -f packaging/Containerfile --target artifacts --output type=local,dest=release .
+      - name: Check standalone service
+        run: |
+          chmod +x release/asset-preview-0.0.1-linux-x86_64.run
+          export QT_QPA_PLATFORM=offscreen
+          release/asset-preview-0.0.1-linux-x86_64.run start
+          release/asset-preview-0.0.1-linux-x86_64.run status --json
+          release/asset-preview-0.0.1-linux-x86_64.run stop
+          cd release && sha256sum -c SHA256SUMS
+      - name: Push private container package
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          printf '%s' "$GH_TOKEN" | docker login ghcr.io -u "${{ github.actor }}" --password-stdin
+          docker push ghcr.io/rareskey/asset-preview:0.0.1
+          docker logout ghcr.io
+      - name: Upload draft release for hardware validation
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create 0.0.1 --draft --target "$GITHUB_SHA" --title 'Asset Preview 0.0.1' --notes-file packaging/release-notes.md release/*

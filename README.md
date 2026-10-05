@@ -15,6 +15,17 @@ Compact 2×2: component inspection.
 
 ![Compact 2×2 component grid](docs/screenshots/compact-grid-components.png)
 
+## Downloads
+
+[Release 0.0.1](https://github.com/RaresKeY/asset-preview/releases/tag/0.0.1)
+provides a standalone Linux x86_64 executable. Download the `.run` file, make it
+executable with `chmod +x`, and run it. Requires glibc 2.39+ and host
+X11/XWayland/OpenGL drivers.
+
+Private container: `ghcr.io/rareskey/asset-preview:0.0.1`.
+See [distribution notes](packaging/release-notes.md) for runtime requirements,
+container mounts and dependency sources.
+
 ## Build and install
 
 Requires Linux, CMake 3.22+, a C++20 compiler, Python 3, Qt 6.4+

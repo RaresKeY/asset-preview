@@ -1,0 +1,41 @@
+FROM docker.io/library/ubuntu:24.04 AS build
+ARG DEBIAN_FRONTEND=noninteractive
+RUN sed -i 's/Types: deb$/Types: deb deb-src/' /etc/apt/sources.list.d/ubuntu.sources \
+ && apt-get update && apt-get install -y --no-install-recommends \
+ build-essential cmake ninja-build meson pkg-config curl ca-certificates xz-utils \
+ qt6-base-dev qt6-image-formats-plugins python3 python3-dev \
+ libassimp-dev libass-dev libplacebo-dev libpulse-dev libegl1-mesa-dev \
+ libgl1-mesa-dev libx11-dev libxkbcommon-x11-0 libxcb-cursor0 \
+ libgl1-mesa-dri libglx-mesa0 libvulkan1 dpkg-dev \
+ && rm -rf /var/lib/apt/lists/*
+COPY packaging/build-dependencies.sh /build-dependencies.sh
+RUN bash /build-dependencies.sh
+COPY . /src
+RUN cmake -S /src -B /src/build -G Ninja -DCMAKE_BUILD_TYPE=Release \
+ -DCMAKE_PREFIX_PATH=/opt/dependencies -DCMAKE_BUILD_RPATH=/opt/dependencies/lib \
+ && cmake --build /src/build --parallel 2
+RUN python3 /src/packaging/bundle.py /out/asset-preview \
+ && python3 /src/packaging/sources.py /out/asset-preview /out/sources \
+ && cp /src/packaging/Containerfile /src/packaging/build-dependencies.sh /out/sources/ \
+ && cp /src/packaging/bundle.py /src/packaging/sources.py /out/sources/
+RUN python3 /src/packaging/make-release.py /out
+
+FROM docker.io/library/ubuntu:24.04 AS runtime
+ARG DEBIAN_FRONTEND=noninteractive
+LABEL org.opencontainers.image.source="https://github.com/RaresKeY/asset-preview" \
+ org.opencontainers.image.version="0.0.1" \
+ org.opencontainers.image.description="Live asset preview for AI agent workflows"
+RUN apt-get update && apt-get install -y --no-install-recommends \
+ libgl1 libegl1 libglx-mesa0 libgl1-mesa-dri libvulkan1 libx11-6 libxcb1 \
+ ca-certificates fonts-dejavu-core \
+ && rm -rf /var/lib/apt/lists/*
+COPY --from=build /out/asset-preview /opt/asset-preview
+COPY --from=build /out/asset-preview-0.0.1-corresponding-sources.tar.xz /opt/sources/
+ENV QT_QPA_PLATFORM=xcb
+WORKDIR /workspace
+ENTRYPOINT ["/opt/asset-preview/asset-preview"]
+
+FROM scratch AS artifacts
+COPY --from=build /out/asset-preview-0.0.1-linux-x86_64.run /
+COPY --from=build /out/asset-preview-0.0.1-corresponding-sources.tar.xz /
+COPY --from=build /out/SHA256SUMS /
