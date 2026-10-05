@@ -7,8 +7,8 @@ No license is assigned to this project's own source by this file.
 | Dependency | Upstream license/source |
 |---|---|
 | Qt 6 Core, Gui, Widgets, Network, OpenGL | [Qt licensing](https://www.qt.io/licensing/open-source-lgpl-obligations), LGPL-3.0 / GPL / commercial options depending on distribution |
-| F3D / libf3d | [F3D license](https://github.com/f3d-app/f3d/blob/v3.5.0/LICENSE), BSD-3-Clause |
-| VTK (through F3D) | [VTK copyright](https://gitlab.kitware.com/vtk/vtk/-/blob/master/Copyright.txt), BSD-style |
+| F3D / libf3d | [F3D license](https://github.com/f3d-app/f3d/blob/v3.5.0/LICENSE.md), BSD-3-Clause |
+| VTK (through F3D) | [VTK copyright](https://gitlab.kitware.com/vtk/vtk/-/blob/v9.4.2/Copyright.txt), BSD-style |
 | Assimp (F3D reader) | [Assimp license](https://github.com/assimp/assimp/blob/master/LICENSE), BSD-3-Clause |
 | jemalloc (installed F3D dependency, static TLS compatibility) | [jemalloc license](https://github.com/jemalloc/jemalloc/blob/dev/COPYING), BSD-2-Clause |
 | libmpv (lazy video backend) | [mpv copyright](https://github.com/mpv-player/mpv/blob/v0.41.0/Copyright), Release: LGPL-2.1-or-later (`gpl=false`); installed system builds may use GPL-2.0-or-later |
@@ -27,7 +27,7 @@ Each executable bundle contains `licenses/`, `dependency-manifest.json` and
 `ubuntu-packages.txt`. The corresponding-source release archive includes original
 upstream archives, exact Ubuntu source packages (including packaging patches),
 application source and packaging scripts. The container also carries this archive
-under `/opt/sources/`. VTK third-party notices are retained. System base-image
+under `/opt/sources/`. VTK third-party notices and F3D embedded font/resource attributions are retained. System base-image
 packages retain their notices under `/usr/share/doc`.
 
 LGPL libraries are dynamically linked and can be replaced in the extracted

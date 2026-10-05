@@ -2,7 +2,7 @@
 """Validate release previews in an isolated hardware-rendered display session."""
 import argparse, json, os, shutil, struct, subprocess, tempfile, time, zlib
 from pathlib import Path
-parser=argparse.ArgumentParser();parser.add_argument('executable');parser.add_argument('--output',type=Path,required=True);parser.add_argument('--video',type=Path);args=parser.parse_args()
+parser=argparse.ArgumentParser();parser.add_argument('executable');parser.add_argument('--output',type=Path,required=True);parser.add_argument('--video',type=Path);parser.add_argument('--foreground',action='store_true');args=parser.parse_args()
 exe=str(Path(args.executable).resolve());args.output.mkdir(parents=True,exist_ok=True)
 def call(*words):
     result=subprocess.run([exe,*words],check=True,capture_output=True,text=True)
@@ -15,7 +15,15 @@ with tempfile.TemporaryDirectory(prefix='asset-preview-release-check-') as d:
     video=fixture/'video.mp4'
     if args.video:shutil.copy2(args.video,video)
     else:subprocess.run(['ffmpeg','-v','error','-f','lavfi','-i','testsrc2=size=320x240:rate=12','-t','3','-c:v','mpeg4','-an',str(video)],check=True)
+    supervisor=None
     try:
+        if args.foreground:
+            supervisor=subprocess.Popen([exe,'--foreground'])
+            deadline=time.monotonic()+30
+            while not call('status','--json').get('running'):
+                if supervisor.poll() is not None:raise RuntimeError('Foreground service exited')
+                if time.monotonic()>deadline:raise RuntimeError('Foreground startup timed out')
+                time.sleep(.1)
         generator=fixture/'generate.sh'
         generator.write_text('#!/bin/sh\nset -eu\n[ -z "${ASSET_PREVIEW_BUNDLE_ROOT:-}" ]\n[ -z "${PYTHONHOME:-}" ]\ncp "$1" "$2.tmp"\nmv "$2.tmp" "$2"\n')
         generator.chmod(0o755)
@@ -47,3 +55,4 @@ with tempfile.TemporaryDirectory(prefix='asset-preview-release-check-') as d:
         print(json.dumps(report))
     finally:
         call('stop')
+        if supervisor and supervisor.wait(timeout=20)!=0:raise RuntimeError('Foreground shutdown failed')

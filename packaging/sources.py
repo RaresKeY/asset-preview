@@ -27,6 +27,10 @@ for component in ('ffmpeg','mpv','f3d','vtk'):
     for p in tree.iterdir():
         if p.is_file() and (p.name.startswith(('COPYING','LICENSE','Copyright'))):shutil.copy2(p,dest/p.name)
     for p in Path('/dependency-sources').glob(component+'.tar.*'):shutil.copy2(p,out/p.name)
+# F3D includes font, colormap and embedded-library attributions beyond its BSD license.
+f3d=Path('/dependency-sources/f3d')
+shutil.copy2(f3d/'THIRD_PARTY_LICENSES.md',licenses/'f3d/THIRD_PARTY_LICENSES.md')
+shutil.copy2(f3d/'resources/colormaps/licenses.md',licenses/'f3d/colormap-licenses.md')
 # VTK embeds permissive dependencies; retain their notices as well.
 for p in (Path('/dependency-sources/vtk/ThirdParty')).rglob('*'):
     if p.is_file() and p.name.lower().startswith(('copyright','copying','license')):
