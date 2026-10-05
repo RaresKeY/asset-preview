@@ -12,12 +12,16 @@ RUN sed -i 's/Types: deb$/Types: deb deb-src/' /etc/apt/sources.list.d/ubuntu.so
  && apt-get update && apt-get install -y --no-install-recommends \
  build-essential cmake ninja-build meson pkg-config curl ca-certificates xz-utils \
  qt6-base-dev qt6-image-formats-plugins python3 python3-dev \
- libassimp-dev libass-dev libplacebo-dev libpulse-dev libegl1-mesa-dev \
+ libassimp-dev libass-dev libplacebo-dev libpulse-dev libegl1-mesa-dev nasm libdav1d-dev libqt6svg6 \
  libgl1-mesa-dev libx11-dev libxkbcommon-x11-0 libxcb-cursor0 \
  libgl1-mesa-dri libglx-mesa0 libvulkan1 dpkg-dev \
  && rm -rf /var/lib/apt/lists/*
 COPY packaging/build-dependencies.sh /build-dependencies.sh
-RUN bash /build-dependencies.sh
+RUN bash /build-dependencies.sh prepare
+RUN bash /build-dependencies.sh ffmpeg
+RUN bash /build-dependencies.sh mpv
+RUN bash /build-dependencies.sh vtk
+RUN bash /build-dependencies.sh f3d
 COPY . /src
 RUN cmake -S /src -B /src/build -G Ninja -DCMAKE_BUILD_TYPE=Release \
  -DCMAKE_PREFIX_PATH=/opt/dependencies -DCMAKE_BUILD_RPATH=/opt/dependencies/lib \

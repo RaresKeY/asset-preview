@@ -1,7 +1,7 @@
 Linux x86_64 release with image, 3D model, baked material and video previews.
 
 - Standalone executable: download `asset-preview-0.0.1-linux-x86_64.run`, run `chmod +x` on it, then execute it. Qt, F3D, LGPL libmpv/FFmpeg and Python are bundled; no build tools are needed.
-- Container: `ghcr.io/rareskey/asset-preview:0.0.1` (private; GitHub authentication required).
+- Container: `ghcr.io/rareskey/asset-preview:0.0.1` (private; pulling requires a GitHub token with `read:packages`). `latest` points to the same release.
 - `SHA256SUMS` verifies both release downloads.
 - `asset-preview-0.0.1-corresponding-sources.tar.xz` contains dependency sources, exact Ubuntu source packages, application source and build instructions. Dependency notices are included in the executable and image; the image also includes this source archive under `/opt/sources/`.
 

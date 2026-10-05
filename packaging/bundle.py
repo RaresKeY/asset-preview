@@ -32,7 +32,7 @@ extdir=out/'python/lib'/pyver/'lib-dynload';extdir.mkdir()
 for p in (stdlib/'lib-dynload').glob('*.so'):
     if p.name.split('.')[0] in extensions: shutil.copy2(p,extdir/p.name);roots.append(p)
 plugins=Path('/usr/lib/x86_64-linux-gnu/qt6/plugins')
-for group in ('platforms','imageformats','xcbglintegrations'):
+for group in ('platforms','imageformats','xcbglintegrations','iconengines'):
     dst=out/'qt/plugins'/group;dst.mkdir(parents=True)
     for p in (plugins/group).glob('*.so'):
         if group=='platforms' and p.name not in ('libqxcb.so','libqoffscreen.so'):continue
