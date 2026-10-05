@@ -37,6 +37,8 @@ RUN python3 /src/packaging/bundle.py /out/asset-preview \
 RUN python3 /src/packaging/make-release.py /out
 
 FROM runtime-base AS runtime
+RUN apt-get update && apt-get install -y --no-install-recommends libopengl0 \
+ && rm -rf /var/lib/apt/lists/*
 ARG SOURCE_COMMIT=unknown
 ARG DEBIAN_FRONTEND=noninteractive
 LABEL org.opencontainers.image.source="https://github.com/RaresKeY/asset-preview" \

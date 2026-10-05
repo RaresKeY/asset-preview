@@ -16,7 +16,7 @@ for path in json.loads((bundle/'dependency-manifest.json').read_text()).values()
         result=subprocess.run(['dpkg-query','-S',path.replace('/usr/lib/','/lib/',1)],text=True,capture_output=True)
     if result.returncode:raise RuntimeError('No package owner: '+path)
     packages.add(result.stdout.split(': /',1)[0])
-packages.add('python3.12-minimal');packages.add('libpython3.12-stdlib')
+packages.add('libopengl0');packages.add('python3.12-minimal');packages.add('libpython3.12-stdlib')
 for package in sorted(packages):
     info=subprocess.check_output(['dpkg-query','-W','-f=${binary:Package}\t${Version}\t${source:Package}\t${source:Version}\n',package],text=True).strip().split('\t')
     source,version=info[2:];sources.add(source+'='+version)
@@ -41,7 +41,8 @@ for p in Path('/dependency-sources/assimp/contrib').rglob('*'):
     if p.is_file() and p.name.lower().startswith(('copyright','copying','license')):
         dest=licenses/'assimp-third-party'/p.relative_to('/dependency-sources/assimp/contrib');dest.parent.mkdir(parents=True,exist_ok=True);shutil.copy2(p,dest)
 subprocess.run(['apt-get','update'],check=True)
-ubuntu=out/'ubuntu';ubuntu.mkdir()
+ubuntu=Path('/dependency-archive-cache') if Path('/dependency-archive-cache').is_dir() else out/'ubuntu'
+ubuntu.mkdir(exist_ok=True)
 for item in sorted(sources):
     result=subprocess.run(['apt-get','source','--download-only',item],cwd=ubuntu)
     if result.returncode:
@@ -64,6 +65,7 @@ for item in sorted(sources):
                 digest,size,filename=line.split()
                 with (ubuntu/filename).open('rb') as stream:actual=hashlib.file_digest(stream,'sha256').hexdigest()
                 if actual!=digest:raise RuntimeError('Ubuntu source checksum mismatch: '+filename)
+if ubuntu!=out/'ubuntu':shutil.copytree(ubuntu,out/'ubuntu')
 (bundle/'ubuntu-packages.txt').write_text('\n'.join(sorted(packages))+'\n')
 (out/'ubuntu-sources.txt').write_text('\n'.join(sorted(sources))+'\n')
 # Include this application's exact source and packaging instructions, without
