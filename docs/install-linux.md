@@ -6,7 +6,7 @@ with access, or use `gh release download 0.0.2 -R RaresKeY/asset-preview`.
 Verify downloads with `sha256sum -c SHA256SUMS` in the download directory.
 
 All formats are Linux x86_64. AppImage, portable and native packages require
-glibc 2.39+, X11/XWayland and installed OpenGL/EGL drivers. They include private
+glibc 2.39+, X11/XWayland and installed OpenGL/EGL drivers and the Vulkan loader (`libvulkan.so.1`). They include private
 Qt, F3D, media and Python libraries; compiler tools are unnecessary. Flatpak uses
 the Freedesktop 25.08 runtime instead of the host's glibc and graphics libraries.
 MIT applies to the application; dependency notices and corresponding sources

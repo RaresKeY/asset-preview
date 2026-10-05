@@ -7,7 +7,7 @@ pkgdesc='Live asset previews for AI agent workflows'
 arch=('x86_64')
 url='https://github.com/RaresKeY/asset-preview'
 license=('MIT' 'custom:bundled-dependencies')
-depends=('glibc>=2.39' 'libglvnd' 'fontconfig' 'ttf-dejavu')
+depends=('glibc>=2.39' 'libglvnd' 'vulkan-icd-loader' 'fontconfig' 'ttf-dejavu')
 options=('!strip' '!debug')
 source=("asset-preview-${pkgver}-linux-x86_64.tar.gz")
 # Supply the release archive's verified digest when generating this recipe.

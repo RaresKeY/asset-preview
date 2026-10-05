@@ -9,6 +9,7 @@ Requires: glibc >= 2.39
 Requires: libGL.so.1()(64bit)
 Requires: libEGL.so.1()(64bit)
 Requires: libOpenGL.so.0()(64bit)
+Requires: libvulkan.so.1()(64bit)
 Requires: fontconfig
 Recommends: dejavu-sans-fonts
 AutoReqProv: no

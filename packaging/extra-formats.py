@@ -77,7 +77,7 @@ Section: graphics
 Priority: optional
 Homepage: https://github.com/RaresKeY/asset-preview
 Installed-Size: {size}
-Depends: libc6 (>= 2.39), libgl1, libegl1, libopengl0, fontconfig-config, fonts-dejavu-core
+Depends: libc6 (>= 2.39), libgl1, libegl1, libopengl0, libvulkan1, fontconfig-config, fonts-dejavu-core
 Description: Live asset previews for AI agent workflows
  Viewer and command client with private Qt/F3D/media libraries under /opt.
  Dependency licenses and corresponding sources accompany the release.
