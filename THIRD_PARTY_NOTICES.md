@@ -2,7 +2,8 @@
 
 Source builds use installed dynamic libraries. Release 0.0.1 bundles dynamically
 linked dependencies, their notices and corresponding source packages.
-No license is assigned to this project's own source by this file.
+Asset Preview's own source is licensed under MIT; see [LICENSE](LICENSE).
+Dependencies retain their individual licenses.
 
 | Dependency | Upstream license/source |
 |---|---|
@@ -34,8 +35,8 @@ LGPL libraries are dynamically linked and can be replaced in the extracted
 bundle's `lib/` and `qt/plugins/` directories. Dependency licenses permit the
 reverse engineering needed to debug modifications to those libraries; no project
 restriction is added here. Source redistribution and modification rights granted
-by dependency licenses apply to their corresponding components. No application
-license is assigned by this notice.
+by dependency licenses apply to their corresponding components. The application MIT license does not
+replace these dependency licenses.
 
 GPU drivers, the host glibc, optional GPL Python readline/GDBM modules, and the
 workstation's GPL mpv/FFmpeg builds are not included in the standalone bundle.

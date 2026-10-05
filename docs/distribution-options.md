@@ -30,27 +30,16 @@ References: [AppImage portability guidance](https://docs.appimage.org/reference/
 [Arch package guidelines](https://wiki.archlinux.org/title/Arch_package_guidelines),
 [Nix packaging](https://nixos.org/manual/nixpkgs/stable/).
 
-## License recommendation
+## License
 
-Recommend **MIT** for Asset Preview's own code: short, permissive, and suitable
-for reuse in agent workflows and developer tooling, including commercial use.
-Recipients retain the copyright and license notice. It does not require forks
-to publish their changes. [MIT text](https://opensource.org/license/mit).
+Asset Preview's own code uses [MIT](../LICENSE): permissive reuse, including
+commercial use, with copyright and license notices retained. Distributed forks
+are not required to publish their changes. Recipients may redistribute the app,
+including publicly; a private repository controls access rather than imposing
+confidentiality.
 
-Choose **Apache-2.0** instead if an explicit contributor patent grant and patent
-litigation termination are priorities. It adds notice/change requirements.
-[Apache-2.0 text](https://www.apache.org/licenses/LICENSE-2.0).
-
-Choose **GPL-3.0-or-later** if distributed modified versions should remain open
-source under copyleft. That is a different policy choice rather than an install
-requirement. [GPL-3.0 text](https://www.gnu.org/licenses/gpl-3.0.html).
-
-MIT recipients may redistribute the app, including publicly; a private GitHub
-repository controls access rather than imposing confidentiality.
-
-This is a recommendation; no application license has been applied. Keep dependency
-notices and corresponding-source obligations separate. An MIT application license
-does not relicense Qt or the LGPL media libraries, remove codec patent concerns,
-or change GitHub repository/package visibility. Qt LGPL libraries must remain
-replaceable and their applicable distribution obligations still apply.
+Dependencies retain their own licenses. MIT does not relicense Qt or the LGPL
+media libraries, remove codec patent concerns, or replace dependency notice and
+corresponding-source obligations. Qt LGPL libraries remain replaceable; see
+[third-party notices](../THIRD_PARTY_NOTICES.md) and
 [Qt LGPL obligations](https://www.qt.io/development/open-source-lgpl-obligations).

@@ -1,7 +1,7 @@
 # Distribution
 
 Source ownership: `packaging/`, `.github/workflows/release.yml`, `CMakeLists.txt`,
-`THIRD_PARTY_NOTICES.md`. Release version: 0.0.1; platform: Linux x86_64.
+`LICENSE`, `THIRD_PARTY_NOTICES.md`. Release version: 0.0.1; platform: Linux x86_64.
 
 The Ubuntu 24.04 build image compiles FFmpeg 7.1.5 without GPL/nonfree components,
 libmpv 0.41.0 in LGPL mode, VTK 9.4.2, F3D 3.5.0 with native/Assimp 6.0.5 readers,
@@ -28,7 +28,7 @@ The manually dispatched GitHub workflow builds artifacts (or loads locally
 validated artifacts from the draft release), checks service startup,
 pushes the private GHCR package using its scoped GITHUB_TOKEN, and uploads a draft
 release. Publish the draft only after local hardware validation and privacy review.
-No application license is inferred from dependency licensing. Source packages,
+Application source uses MIT in root `LICENSE`; dependencies retain their licenses. Source packages,
 notices, dependency manifest and checksums are release artifacts.
 `packaging/validate.py` checks image/model/material/video loads and hardware
 renderer identity in an isolated Gamescope display session. Local generated
@@ -46,4 +46,6 @@ records remote digests and isolated native/container hardware preview checks.
 Proof covers NVIDIA RTX 2080 Ti with X11/XWayland, not every Linux/GPU combination.
 The container supplies OpenGL loaders and font configuration; host GPU drivers
 are supplied at launch. `docs/distribution-options.md` compares conventional
-Linux formats and recommends MIT without applying an application license.
+Linux formats and documents the MIT application license.
+Future executable bundles include root `LICENSE`; the published 0.0.1 artifacts
+predate this license file and are not rebuilt by the licensing change.

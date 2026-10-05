@@ -11,4 +11,4 @@ Static/paused views have no perpetual rendering/polling timer. Playing videos
 render only when libmpv requests frames; unload players off-page/hidden. Preserve the socket's same-user boundary,
 bounded protocol/logs and exact child-process-group ownership.
 Keep `icon.svg` at the root. This is a tool, not a game; `play.sh` exists for
-the workstation's Playpad launcher integration. No project license is assigned.
+the workstation's Playpad launcher integration. The project is MIT licensed; preserve dependency notices and licenses.

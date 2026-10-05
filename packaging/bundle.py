@@ -14,7 +14,7 @@ src = Path('/src'); deps = Path('/opt/dependencies')
 for name in ('bin', 'skills', 'fish', 'examples'):
     shutil.copytree(src/name, out/name, ignore=shutil.ignore_patterns('__pycache__', '*.pyc'))
 shutil.copy2(src/'packaging/container-service.py', out/'container-service.py')
-for name in ('README.md', 'THIRD_PARTY_NOTICES.md', 'icon.svg'):
+for name in ('README.md', 'LICENSE', 'THIRD_PARTY_NOTICES.md', 'icon.svg'):
     shutil.copy2(src/name, out/name)
 shutil.copytree(src/'docs', out/'docs')
 # Preserve the documented bin/asset-preview entrypoint without host Python.

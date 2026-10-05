@@ -133,3 +133,8 @@ GPU checks use headless Gamescope; video fixtures require FFmpeg.
 [Agent workflow](docs/agent-flow.md) · [Protocol and settings](docs/protocol.md) ·
 [Specs](specs/_readme.md) · [Rendering](vendored/rendering.md) ·
 [Verification evidence](evidence/verification.md)
+
+## License
+
+[MIT](LICENSE) for Asset Preview. Dependencies retain their own licenses; see
+[third-party notices](THIRD_PARTY_NOTICES.md).
