@@ -37,7 +37,24 @@ with tempfile.TemporaryDirectory(prefix='asset-preview-formats-') as temporary:
         assert digest(runtime)==lock['sha256'],'AppImage runtime checksum mismatch'
         appdir=work/'AppDir';appdir.mkdir()
         shutil.copytree(bundle,appdir/'asset-preview')
-        (appdir/'AppRun').write_text('#!/bin/sh\nset -eu\npreview_appdir=${APPDIR:-$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)}\nexec "$preview_appdir/asset-preview/asset-preview" "$@"\n')
+        (appdir/'AppRun').write_text(f'''#!/bin/sh
+set -eu
+umask 077
+preview_appdir=${{APPDIR:-$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)}}
+# The CLI starts a persistent server. Retain its libraries after this AppImage
+# invocation unmounts instead of leaving the server tied to a temporary mount.
+preview_cache="${{XDG_CACHE_HOME:-$HOME/.cache}}/asset-preview/{version}-{digest(archive)[:16]}"
+if [ ! -x "$preview_cache/asset-preview/asset-preview" ]; then
+ mkdir -p -- "$(dirname -- "$preview_cache")"
+ preview_tmp=$(mktemp -d "${{preview_cache}}.XXXXXX")
+ trap 'rm -rf -- "$preview_tmp"' EXIT HUP INT TERM
+ cp -a "$preview_appdir/asset-preview" "$preview_tmp/asset-preview"
+ if [ ! -d "$preview_cache" ]; then mv -T -- "$preview_tmp" "$preview_cache"; fi
+ rm -rf -- "$preview_tmp"
+ trap - EXIT HUP INT TERM
+fi
+exec "$preview_cache/asset-preview/asset-preview" "$@"
+''')
         (appdir/'AppRun').chmod(0o755)
         shutil.copy2(bundle/'desktop'/f'{APP_ID}.desktop',appdir/f'{APP_ID}.desktop')
         shutil.copy2(bundle/'icon.svg',appdir/f'{APP_ID}.svg')

@@ -22,7 +22,9 @@ chmod +x asset-preview-0.0.2-linux-x86_64.AppImage
 ```
 
 If FUSE mounting is unavailable, use `--appimage-extract-and-run` before the
-application arguments. The AppImage contains the same CLI as the portable bundle.
+application arguments. The AppImage contains the same CLI as the portable bundle. On first launch it
+caches its payload under `~/.cache/asset-preview` so the persistent preview server
+keeps access to its libraries after a CLI invocation unmounts the AppImage.
 For persistent desktop/fish/skill integration, extract with `--appimage-extract`
 and use the extracted bundle's installer; keep that directory in place.
 The AppImage runtime and its linked-library notices/rebuild sources accompany
