@@ -5,7 +5,8 @@ from pathlib import Path
 parser=argparse.ArgumentParser();parser.add_argument('executable');parser.add_argument('--output',type=Path,required=True);parser.add_argument('--video',type=Path);parser.add_argument('--foreground',action='store_true');args=parser.parse_args()
 exe=str(Path(args.executable).resolve());args.output.mkdir(parents=True,exist_ok=True)
 def call(*words):
-    result=subprocess.run([exe,*words],check=True,capture_output=True,text=True)
+    result=subprocess.run([exe,*words],capture_output=True,text=True)
+    if result.returncode:raise RuntimeError(words[0]+": "+result.stderr.strip())
     return json.loads(result.stdout) if words[:1]==('status',) else result.stdout
 with tempfile.TemporaryDirectory(prefix='asset-preview-release-check-') as d:
     fixture=Path(d);os.environ['ASSET_PREVIEW_RUNTIME_DIR']=str(fixture/'runtime');os.environ['ASSET_PREVIEW_STATE_DIR']=str(fixture/'state')

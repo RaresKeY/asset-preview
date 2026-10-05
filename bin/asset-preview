@@ -52,11 +52,11 @@ def rpc(request: dict, timeout: float = 15) -> dict:
         raise RuntimeError(result.get("error", "Preview request failed"))
     return result
 
-def running() -> bool:
+def running(timeout: float = 0.3) -> bool:
     # Reap daemons started by an embedded client such as the integration harness.
     _SPAWNED[:] = [process for process in _SPAWNED if process.poll() is None]
     try:
-        return rpc({"method": "ping"}, timeout=0.3).get("protocol") == 1
+        return rpc({"method": "ping"}, timeout=timeout).get("protocol") == 1
     except (OSError, RuntimeError, ValueError):
         return False
 
@@ -77,7 +77,7 @@ def start() -> bool:
                 if time.monotonic() >= expires:
                     raise RuntimeError("Timed out waiting for concurrent server startup")
                 time.sleep(0.05)
-        if running():
+        if running(timeout=15):
             return False
         binary = ROOT / "build/asset-preview-server"
         if not binary.is_file():
@@ -174,7 +174,7 @@ def main() -> int:
         runtime, state = locations()
         print(json.dumps({"socket": str(runtime / "preview.sock"), "state": str(state)}, indent=2))
         return 0
-    if action in {"stop", "hide", "status", "list"} and not running():
+    if action in {"stop", "hide", "status", "list"} and not running(timeout=15):
         if action == "status": print('{"running": false}' if args.json else "Server stopped")
         elif action == "list" and args.json: print("[]")
         return 0

@@ -16,7 +16,7 @@ for path in json.loads((bundle/'dependency-manifest.json').read_text()).values()
         result=subprocess.run(['dpkg-query','-S',path.replace('/usr/lib/','/lib/',1)],text=True,capture_output=True)
     if result.returncode:raise RuntimeError('No package owner: '+path)
     packages.add(result.stdout.split(': /',1)[0])
-packages.add('libopengl0');packages.add('python3.12-minimal');packages.add('libpython3.12-stdlib')
+packages.add('fontconfig-config');packages.add('libopengl0');packages.add('python3.12-minimal');packages.add('libpython3.12-stdlib')
 for package in sorted(packages):
     info=subprocess.check_output(['dpkg-query','-W','-f=${binary:Package}\t${Version}\t${source:Package}\t${source:Version}\n',package],text=True).strip().split('\t')
     source,version=info[2:];sources.add(source+'='+version)

@@ -55,3 +55,7 @@ video publication from registration, and routes detailed options to the protocol
 Verification: `tools/test.sh functional` exercises the real daemon, concurrent
 startup, permissions, schema failures, save replacement/recovery, bounded lifetime,
 generator coalescing/cancellation/timeouts, completion and restart persistence.
+
+Lifecycle probes for existing-service commands and startup allow up to 15 seconds
+to avoid launching a second daemon during a slow first GPU render. Fast startup
+polling still uses a short probe while watching the exact spawned child.
