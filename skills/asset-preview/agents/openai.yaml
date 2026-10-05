@@ -1,4 +1,4 @@
 interface:
   display_name: "Asset Preview"
-  short_description: "Connect live previews while authoring assets"
-  default_prompt: "Use $asset-preview to connect this asset and its source saves to our live preview window."
+  short_description: "Connect live image, video, model and material previews"
+  default_prompt: "Use $asset-preview to connect this asset's exported outputs to the live preview window and verify refresh as I iterate."

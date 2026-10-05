@@ -40,6 +40,11 @@ starting a server. `play.sh` delegates to the same GUI entrypoint for Playpad di
 The skill's canonical source/UI metadata is versioned in `skills/asset-preview/`;
 installation links it into `${CODEX_HOME:-~/.codex}/skills/asset-preview` without
 changing unrelated skills or invocation policy. Automatic skill selection is enabled.
+The skill covers images, videos, exported models and baked materials. It uses one
+stable registration per view and ordinary output watching during iteration;
+reconnection replaces configuration, so agents retain explicit generator inputs
+and user settings. It distinguishes visible-only generation and asynchronous
+video publication from registration, and routes detailed options to the protocol.
 
 Verification: `tools/test.sh functional` exercises the real daemon, concurrent
 startup, permissions, schema failures, save replacement/recovery, bounded lifetime,
