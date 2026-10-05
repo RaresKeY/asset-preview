@@ -7,7 +7,7 @@ pkgdesc='Live asset previews for AI agent workflows'
 arch=('x86_64')
 url='https://github.com/RaresKeY/asset-preview'
 license=('MIT' 'custom:bundled-dependencies')
-depends=('glibc>=2.39' 'libglvnd' 'fontconfig' 'ttf-dejavu')
+depends=('glibc>=2.39' 'libglvnd' 'vulkan-icd-loader' 'fontconfig' 'ttf-dejavu')
 options=('!strip' '!debug')
 source=("asset-preview-${pkgver}-linux-x86_64.tar.gz")
 # Supply the release archive's verified digest when generating this recipe.
@@ -17,7 +17,8 @@ package() {
     "$pkgdir/usr/share/icons/hicolor/scalable/apps" "$pkgdir/usr/share/metainfo" \
     "$pkgdir/usr/share/licenses/asset-preview" "$pkgdir/usr/share/doc/asset-preview"
   cp -a "$srcdir/asset-preview" "$pkgdir/opt/asset-preview"
-  ln -s /opt/asset-preview/asset-preview "$pkgdir/usr/bin/asset-preview"
+  printf '#!/bin/sh\nexec /opt/asset-preview/asset-preview "$@"\n' > "$pkgdir/usr/bin/asset-preview"
+  chmod 755 "$pkgdir/usr/bin/asset-preview"
   install -m644 "$srcdir/asset-preview/desktop/"*.desktop "$pkgdir/usr/share/applications/"
   install -m644 "$srcdir/asset-preview/desktop/"*.xml "$pkgdir/usr/share/metainfo/"
   install -m644 "$srcdir/asset-preview/icon.svg" "$pkgdir/usr/share/icons/hicolor/scalable/apps/io.github.RaresKeY.AssetPreview.svg"

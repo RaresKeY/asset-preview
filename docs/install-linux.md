@@ -6,7 +6,7 @@ with access, or use `gh release download 0.0.2 -R RaresKeY/asset-preview`.
 Verify downloads with `sha256sum -c SHA256SUMS` in the download directory.
 
 All formats are Linux x86_64. AppImage, portable and native packages require
-glibc 2.39+, X11/XWayland and installed OpenGL/EGL drivers. They include private
+glibc 2.39+, X11/XWayland and installed OpenGL/EGL drivers and the Vulkan loader (`libvulkan.so.1`). They include private
 Qt, F3D, media and Python libraries; compiler tools are unnecessary. Flatpak uses
 the Freedesktop 25.08 runtime instead of the host's glibc and graphics libraries.
 MIT applies to the application; dependency notices and corresponding sources
@@ -93,8 +93,9 @@ service. The supported display backend is X11/XWayland.
 This developer tool has broad host/project filesystem access and permission to
 run **explicitly registered generators on the host** through `flatpak-spawn`.
 It is not a tightly confined read-only viewer. Host generator tools need to be
-installed on the host; the app does not install them. Flatpak's watch-bus helper
-owns and cancels the host process group when the viewer's generator is stopped.
+installed on the host; the app does not install them. Host Python 3 also runs the generator supervisor. Flatpak's watch-bus helper
+cancels that supervisor, which sends TERM/KILL to the generator's own child
+process group when the viewer's generator is stopped.
 Read-only preview registration needs no generator. The same `--watch`, `--cwd`
 and `--exec` syntax works through `asset-preview-flatpak`.
 
