@@ -28,7 +28,8 @@ with tempfile.TemporaryDirectory(prefix='asset-preview-formats-') as temporary:
     payload=work/'payload';(payload/'opt').mkdir(parents=True)
     shutil.copytree(bundle,payload/'opt/asset-preview')
     (payload/'usr/bin').mkdir(parents=True)
-    (payload/'usr/bin/asset-preview').symlink_to('/opt/asset-preview/asset-preview')
+    (payload/'usr/bin/asset-preview').write_text('#!/bin/sh\nexec /opt/asset-preview/asset-preview "$@"\n')
+    (payload/'usr/bin/asset-preview').chmod(0o755)
     copy_desktop(bundle,payload)
     if 'appimage' in args.formats:
         lock=json.loads((ROOT/'packaging/appimage/runtime.json').read_text())
