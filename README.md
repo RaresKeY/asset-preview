@@ -7,6 +7,10 @@ Registration preserves window placement and selection.
 
 ## Screenshots
 
+Single view: assembled PC from a three-quarter angle, showing components and cabling.
+
+![Assembled PC in the live asset preview](docs/screenshots/assembled-pc.png)
+
 Compact 3×3: PC components, character models and clay inspection.
 
 ![Compact 3×3 asset grid](docs/screenshots/compact-grid-showcase.png)
