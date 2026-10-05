@@ -1,0 +1,6 @@
+.git
+build
+evidence
+release
+__pycache__
+*.pyc
