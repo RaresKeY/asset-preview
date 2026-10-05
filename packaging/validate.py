@@ -36,7 +36,7 @@ with tempfile.TemporaryDirectory(prefix='asset-preview-release-check-') as d:
         deadline=time.monotonic()+60
         while True:
             status=call('status','--json')
-            if len(status['entries'])==4 and all(e.get('active') and e.get('metrics',{}).get('loads',0)>0 for e in status['entries']):break
+            if len(status.get('entries',[]))==4 and all(e.get('active') and e.get('metrics',{}).get('loads',0)>0 for e in status['entries']):break
             if time.monotonic()>deadline:raise RuntimeError('Preview loading timed out: '+json.dumps(status))
             time.sleep(.2)
         renderers=sorted({e['metrics']['renderer'] for e in status['entries'] if 'renderer' in e.get('metrics',{})})
@@ -54,5 +54,7 @@ with tempfile.TemporaryDirectory(prefix='asset-preview-release-check-') as d:
         (args.output/'validation.json').write_text(json.dumps(report,indent=2)+'\n')
         print(json.dumps(report))
     finally:
+        log=fixture/'state/server.log'
+        if log.exists():shutil.copy2(log,args.output/'server.log')
         call('stop')
         if supervisor and supervisor.wait(timeout=20)!=0:raise RuntimeError('Foreground shutdown failed')

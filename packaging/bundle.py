@@ -40,6 +40,7 @@ plugins=Path('/usr/lib/x86_64-linux-gnu/qt6/plugins')
 for group in ('platforms','imageformats','xcbglintegrations','iconengines'):
     dst=out/'qt/plugins'/group;dst.mkdir(parents=True)
     for p in (plugins/group).glob('*.so'):
+        if group=='imageformats' and p.name=='libqtiff.so':continue
         if group=='platforms' and p.name not in ('libqxcb.so','libqoffscreen.so'):continue
         shutil.copy2(p,dst/p.name);roots.append(p)
 # Keep glibc and the display/GPU dispatch libraries on the host. Vendor GPU

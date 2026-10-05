@@ -33,3 +33,7 @@ notices, dependency manifest and checksums are release artifacts.
 `packaging/validate.py` checks image/model/material/video loads and hardware
 renderer identity in an isolated Gamescope display session. Local generated
 release outputs are removed after remote upload verification.
+
+The release omits Qt’s optional TIFF plugin because Ubuntu’s TIFF library links
+GPL JBIG code. Convert TIFF image previews to PNG; this restriction does not
+change the separately built VTK model readers. Minimal libmpv omits scripting.

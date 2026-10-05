@@ -47,3 +47,7 @@ assessment. Codec patent obligations are separate from copyright licensing.
 Python's standard library runs the command client and tools; CMake/compiler,
 Gamescope and fish are build, verification or desktop tools. Distribution beyond
 this local system requires reviewing the exact packaged dependency notices.
+
+The release omits Qt’s optional TIFF plugin because Ubuntu’s TIFF library links
+GPL JBIG code. Convert TIFF image previews to PNG; this restriction does not
+change the separately built VTK model readers. Minimal libmpv omits scripting.

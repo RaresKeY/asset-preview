@@ -84,7 +84,13 @@ bool VideoView::reload(const QJsonObject& cfg, QString& error) {
         candidate.reset();
         auto next=std::make_unique<Player>();
         next->client=mpv_create(); if (!next->client) throw std::runtime_error("Cannot create libmpv player");
-        auto option=[&](const char* key,const char* value) { checked(mpv_set_option_string(next->client,key,value)); };
+        auto option=[&](const char* key,const char* value) {
+            const int code=mpv_set_option_string(next->client,key,value);
+            // Minimal LGPL libmpv builds can omit scripting entirely.
+            if (code==MPV_ERROR_OPTION_NOT_FOUND &&
+                (qstrcmp(key,"load-scripts")==0 || qstrcmp(key,"ytdl")==0 || qstrcmp(key,"osc")==0)) return;
+            checked(code);
+        };
         option("config","no"); option("load-scripts","no"); option("ytdl","no");
         option("input-default-bindings","no"); option("input-vo-keyboard","no"); option("osc","no"); option("osd-level","0");
         option("vo","libmpv"); option("hwdec","auto-safe"); option("keep-open","yes");

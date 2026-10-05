@@ -12,3 +12,7 @@ The executable is a self-extracting binary bundle, not a statically linked singl
 The release builds libmpv with `gpl=false` and FFmpeg without GPL/nonfree components. It does not bundle the workstation's GPL media builds, x264/x265 encoders, proprietary GPU drivers or external asset projects. Codec availability can differ from a system mpv installation. Codec patent obligations depend on distribution and jurisdiction.
 
 No license has been assigned to Asset Preview's own source. Included dependency licenses apply to those dependencies; LGPL components remain dynamically linked and replaceable.
+
+The release omits Qt’s optional TIFF plugin because Ubuntu’s TIFF library links
+GPL JBIG code. Convert TIFF image previews to PNG; this restriction does not
+change the separately built VTK model readers. Minimal libmpv omits scripting.
