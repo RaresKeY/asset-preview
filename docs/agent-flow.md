@@ -92,8 +92,9 @@ This viewer loads their products and does not add a geometry repair engine.
 
 Keep an asset's model and small owner-generated PNG proof views connected under
 separate IDs: host/material and raking edge, leaf closed/open, and raised-seat
-contact when present. Each PNG must depict the matching saved export, with
-recorded pose/camera/light/export and receipt hashes. A generic material sphere,
+contact when present. Each PNG must identify its matching saved native or reopened
+export geometry, with recorded pose/camera/light/source/export and receipt hashes.
+A native diagnostic is not an imported-export or engine appearance proof. A generic material sphere,
 painted ownership diagram or count overlay cannot show whether the underlying
 host faces were removed or an opening exists. Inspect the full model with authored
 materials and neutral clay as appropriate; exact shader appearance remains an
@@ -121,3 +122,7 @@ prove viewer lifecycle/diagnostics only. They do not certify geometry, material
 ownership, opening clearance or animation. A schema-valid receipt may still have
 untested or failed checks. Keep execution, saved geometry, visual verdict and
 runtime adoption as separate outcomes.
+
+The [finite surface fixture connector](../examples/surface_fixture.md) delegates
+to the owner construct, watches its explicit inputs and registers actual host
+models plus diagnostic proof views without changing the viewer or user layout.
