@@ -70,3 +70,54 @@ its manifest helper uses stable `workshop-<asset>-<view>` IDs.
 The newline JSON socket is available when another tool needs a direct connection;
 the CLI implements startup serialization and validation, so prefer it for ordinary
 agent work. See [protocol.md](protocol.md). The skill follows this maintained contract.
+
+## Surface-owned models and proof views
+
+For fixed flush windows, paint strips and thin panels, connect the **host's actual
+exported GLB**. Their faces belong to host topology with named material regions;
+joining a duplicate coplanar patch into the same object does not remove competing
+faces. A moving door/window is a separate named leaf fitted to a real aperture
+and its boundary. A raised turret/machinery seat is a seated component and needs
+no decorative hull hole. Classify raised covers, slats and curved features before
+choosing an operator.
+
+The canonical `surface-ownership/v1` declaration and saved-readback helpers belong
+to `game-dev-tools/tools/geometry-authoring/src/surface_ownership.py`; read that
+owner's `specs/surface-ownership.md` through its
+[spec map](../../game-dev-tools/specs/_readme.md). Asset Workshop's
+`constructs/surface-ownership` is the intended pinned caller; read the
+[workshop map](../../asset-workshop/specs/_readme.md) and construct's own contract.
+Recheck those files, implementation/pin hashes and current tests before invocation.
+This viewer loads their products and does not add a geometry repair engine.
+
+Keep an asset's model and small owner-generated PNG proof views connected under
+separate IDs: host/material and raking edge, leaf closed/open, and raised-seat
+contact when present. Each PNG must depict the matching saved export, with
+recorded pose/camera/light/export and receipt hashes. A generic material sphere,
+painted ownership diagram or count overlay cannot show whether the underlying
+host faces were removed or an opening exists. Inspect the full model with authored
+materials and neutral clay as appropriate; exact shader appearance remains an
+owning-engine capture.
+
+Use one finite owner build to publish the validated model, receipt and proof
+images. Watch its declaration/recipe, source geometry, material source and build
+wrapper/pin files, excluding their generated outputs. Attach that generator to
+the model view only; image views watch their published files. While the agent owns
+the build, ordinary output watching is enough. Publish candidate files atomically
+after saved readback passes, and publish a hash manifest last so a mixed set of
+revisions cannot be accepted as one candidate. Retain the last good revision on
+failure and report the rejected candidate.
+
+Before accepting a surface edit, bind the receipt to exact source/export bytes
+and independently reopen its geometry. Native face IDs and exported primitive-local
+triangle IDs are different index spaces. Check actual host material membership,
+absence of competing faces, aperture/rim and leaf fit through the intended sweep,
+or raised-seat contact. Recheck affected UV/tangent/bake, LOD, collision, animation
+and appearance after topology changes. Report saved triangles/mesh nodes/material
+primitives separately from render passes and gameplay cost.
+
+`status --json`, a Live label, successful loads, triangle counts and HUD overlays
+prove viewer lifecycle/diagnostics only. They do not certify geometry, material
+ownership, opening clearance or animation. A schema-valid receipt may still have
+untested or failed checks. Keep execution, saved geometry, visual verdict and
+runtime adoption as separate outcomes.

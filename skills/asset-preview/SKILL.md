@@ -69,6 +69,27 @@ occlusion/roughness/metallic in R/G/B. F3D does not execute Godot `.gd`, `.tscn`
 Godot PNG capture for exact shader appearance. F3D lighting is an inspection
 environment, not engine-shader equivalence.
 
+For a flush window, paint strip or thin fixed panel, preview the actual host GLB
+whose topology/material regions own that surface; joining coplanar duplicate
+faces into one object is insufficient. A moving leaf stays separate and fits a
+real aperture/rim. Raised seats retain purposeful contact without decorative
+holes. Use the owner-produced host/material, edge and closed/open-leaf PNGs with
+the exported model, rather than a generic material sample or ownership diagram.
+The canonical `surface-ownership/v1` helper is in game-dev-tools' geometry-authoring
+family; Asset Workshop's `constructs/surface-ownership` is the intended pinned caller.
+Read their current specs, implementation/pin hashes and saved-readback tests before
+claiming support. Details and proof-view requirements are in `docs/agent-flow.md`.
+The viewer does not implement these geometry operations.
+
+Watch declaration/recipe, source geometry, materials and the finite owner wrapper
+or pin inputs; exclude generated models/receipts/images. Attach that build to one
+model view and let the proof-image views watch its outputs. Publish validated
+candidates atomically and their export/proof hash manifest last. Exact byte-bound
+saved geometry/material/opening/leaf-fit checks are required alongside appearance;
+native IDs, schema validity, Live/load status, triangle counts or UI overlays are
+not geometry proof. Topology changes invalidate the affected UV/tangent/bake,
+LOD, collision, motion and visual evidence until its owner rechecks them.
+
 For rendered turntables/animation captures, connect the local finished encode with
 `add /absolute/project/preview/turntable.mp4 --id project-turntable`; common video
 extensions are automatic, other local video formats can use `--kind video`.
