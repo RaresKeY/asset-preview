@@ -16,3 +16,5 @@
 - Update this map when a spec is added, moved, split, or removed.
 - Keep plans, TODOs, work logs, and merge handoffs outside `specs/`.
 - Label planned behavior and open decisions; do not present them as implemented facts.
+
+[Surface authoring and live proof views](../docs/agent-flow.md) and [the finite fixture connector](../examples/surface_fixture.md) route real host GLBs, separate owner diagnostics, exact publication checks and renderer evidence; viewer counts never certify topology.
