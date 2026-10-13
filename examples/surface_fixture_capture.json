@@ -4,7 +4,7 @@
   "scope": "hardware import/appearance and viewer lifecycle; geometry verdict belongs to the separate owner saved audit",
   "capture": {
     "file": "surface_fixture.png",
-    "sha256": "9f2e4315fe7fc6d9f33765ae075433f6994dde42f9074403d0259e62d142b83b",
+    "sha256": "feb6634d8eb79b5bbe523ab912d436638d884054fde7fb4ef468f0d06376c8f2",
     "pixels": [
       1000,
       720
@@ -24,17 +24,17 @@
       },
       "surface_topology_blender": {
         "path": "tools/geometry-authoring/src/surface_topology_blender.py",
-        "sha256": "6f5fc14a315085beeab641c217a8cbc8f5e9111d22264a824a1e175a17f82bfd"
+        "sha256": "40625e3605b428a8572a9ff65f2d8aa4cee64662e663688cdc44e21a809eb923"
       }
     },
     "repository": "game-dev-tools",
-    "revision": "a0b98942ba6222c9e6e06ab7155e59f6636512d5",
+    "revision": "55de6f31177b4725dabe05e15d50dd233aaabd98",
     "schema": "surface-ownership-construct-pin/v1"
   },
   "owner_outputs": "asset-workshop/constructs/surface-ownership/examples/exports",
   "owner_manifest": {
     "file": "manifest.json",
-    "sha256": "6eb60116687ad92fe5a58c3cef499264f2240e1c43312c5024d7342f5cd4a25e",
+    "sha256": "2c313caa25df580536d452cf4dadc01edb3bb04ca2a64b8ddde6564cae38c037",
     "scope": "saved rest geometry plus two sampled leaf poses; CPU PNGs diagnostic only"
   },
   "source": {
@@ -43,12 +43,12 @@
   },
   "native": {
     "file": "surface-fixture.blend",
-    "sha256": "fc0bee0392dea1d55a0edbdcabc96e8b0cc368ac9a00cafecfa912c6eecd1814"
+    "sha256": "a5058a5a9eca68d92e80f153e93572f87a75061aefae56ed8684b936e0d9a2b4"
   },
   "models": [
     {
       "file": "surface-fixture.glb",
-      "sha256": "1f6acad73cc422665cfc7ce48a7fc738a6b4410f729814e8dca74a443c74a707",
+      "sha256": "378faeb278f2494423c8dc0de4c8b4e79afc080256ed0218bb06910a65a06d49",
       "renderer": "NVIDIA GeForce RTX 2080 Ti/PCIe/SSE2",
       "camera": {
         "focal": [
@@ -72,7 +72,7 @@
     },
     {
       "file": "surface-fixture-open.glb",
-      "sha256": "c2b660dace956d8b1586aa8b59b36dbe83193edb1e6093db4f927dee25c86e6d",
+      "sha256": "3f639e55280a2f65dbcf21d0ff49f51eb517bfa1aa4624aaf96fb37935cb2778",
       "renderer": "NVIDIA GeForce RTX 2080 Ti/PCIe/SSE2",
       "camera": {
         "focal": [
@@ -98,7 +98,7 @@
   "native_diagnostics": [
     {
       "file": "host-material.png",
-      "sha256": "a482c395a239d9c48f0ffe5a65504f157d0d5b13d9740ff6342df8ce15340e82",
+      "sha256": "ef97b6be72c94fbf9565ed1debdfb99dd1f7db64d3e0161e65a2db9015b85efc",
       "renderer": "Cycles CPU diagnostic",
       "frame": 1,
       "derived_wire_view": false,
@@ -106,7 +106,7 @@
     },
     {
       "file": "cut-edges.png",
-      "sha256": "a5d2f3dd5d12c8918ddcfc0d5f8996df986abc480bf9459f42b0e53502607e75",
+      "sha256": "02818a8797f43dcd83a43eda5540ad300974e763dcbd0c58fc6b1f5ee5d00a62",
       "renderer": "Cycles CPU diagnostic",
       "frame": 1,
       "derived_wire_view": true,
@@ -114,7 +114,7 @@
     },
     {
       "file": "closed-leaf.png",
-      "sha256": "16119813bd1a87511507f88a2f061173606b78e469504efe9734ef5d416fc2a1",
+      "sha256": "2199614b4c8b2989315e6237150ea605411831a9a45aaaf010160c70427fdfa2",
       "renderer": "Cycles CPU diagnostic",
       "frame": 1,
       "derived_wire_view": false,
@@ -122,7 +122,7 @@
     },
     {
       "file": "seat-contact.png",
-      "sha256": "d90f2bdf14a32c5030f9cd165b76e8c7a1e721d13a680df592b33539ce915ab7",
+      "sha256": "a4befdb0c09e84722f5a1ce13b5ed694db0573da9f70461767be05b3ac509918",
       "renderer": "Cycles CPU diagnostic",
       "frame": 1,
       "derived_wire_view": false,
@@ -130,7 +130,7 @@
     },
     {
       "file": "open-leaf.png",
-      "sha256": "fe7c9bb06bcd7ea587ff96d7acdb8fa2db1df26009bc96e182862abfdbb47dc1",
+      "sha256": "611a5f415a81a51e7beddaf8e3dd997d030ec201bc2979705a91e4c6a4d110f7",
       "renderer": "Cycles CPU diagnostic",
       "frame": 31,
       "derived_wire_view": false,
@@ -139,7 +139,7 @@
   ],
   "owner_saved_audit": {
     "file": "surface-fixture.audit.json",
-    "sha256": "b39297a7c582ba47d2f6bae3e62079955032c10f3e2f83ab5128bc78be8670b9",
+    "sha256": "e0d5f74b4670c2610c3851c9c341454d3d4ecc6a29cda48fb803d881aafdd52f",
     "scope": "saved_membership_and_bounded_planar_geometry",
     "checks": {
       "aperture_open": "passed",
@@ -160,7 +160,7 @@
   },
   "sampled_open_pose": {
     "aperture_open": "passed",
-    "artifact_sha256": "c2b660dace956d8b1586aa8b59b36dbe83193edb1e6093db4f927dee25c86e6d",
+    "artifact_sha256": "3f639e55280a2f65dbcf21d0ff49f51eb517bfa1aa4624aaf96fb37935cb2778",
     "frame": 31,
     "saved_leaf_displacement_m": [
       0.0,
