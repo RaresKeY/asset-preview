@@ -50,7 +50,7 @@ def plan(workshop: Path, preview: Path, tools: Path, runner: Path,
     output = construct / "examples/exports"
     inputs = [construct / name for name in (
         "examples/fixture.json", "scripts/build.sh", "src/build_fixture.py",
-        "src/canonical.py", "canonical-pin.json",
+        "src/canonical.py", "src/publish.py", "src/ownership.py", "canonical-pin.json",
     )]
     inputs += [tools / "tools/geometry-authoring/src" / name for name in (
         "surface_ownership.py", "surface_topology_blender.py",

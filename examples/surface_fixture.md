@@ -14,8 +14,13 @@ python3 examples/connect_surface_fixture.py
 
 This changes only the seven `workshop-surface-fixture-*` registrations. It leaves
 the window, selection, layout and inspection settings in place. It neither builds
-nor opens a desktop window. Build manually through the owner's finite wrapper,
-or reconnect with `--generate` to let the model view own the builder:
+nor opens a desktop window. Build manually through the owner's finite wrapper:
+
+```sh
+~/workspace/asset-workshop/constructs/surface-ownership/scripts/build.sh --capture
+```
+
+Or reconnect with `--generate` to let the model view own the builder:
 
 ```sh
 python3 examples/connect_surface_fixture.py --generate
@@ -24,9 +29,9 @@ python3 examples/connect_surface_fixture.py --generate
 Only a shown model view may run the generator. The five PNGs and open-pose GLB
 watch published outputs. Do not also run the builder manually while that view
 owns it. Recipe/declaration, material definitions in `build_fixture.py`, wrapper,
-canonical loader/pin and the two pinned implementation modules are watched;
-generated outputs are excluded. The finite command invokes the prescribed shared
-Podman wrapper through the construct. The explicit 1,200-second timeout covers
+publication/receipt helpers, canonical loader/pin and the two pinned implementation
+modules are watched; generated outputs are excluded. The finite command invokes
+the prescribed shared Podman wrapper through the construct. The explicit 1,200-second timeout covers
 its optional CPU diagnostic captures; override it only for a known finite run.
 
 Defaults use the owners' normal checkouts under `~/workspace`. For isolated
@@ -59,3 +64,12 @@ The connector never selects entries, changes settings, accepts a geometry verdic
 publishes externally or cleans another task's state. Remove only the seven IDs
 you own when the connection is no longer useful. See the
 [agent flow](../docs/agent-flow.md) for the general authoring contract.
+
+The example was loaded in one isolated Gamescope headless session on an NVIDIA
+GeForce RTX 2080 Ti. Both saved GLBs and all five owner PNGs loaded; hiding the
+window released the views and the isolated process exited. The
+[capture metadata](surface_fixture_capture.json) binds this screenshot to its
+exact model/native/proof bytes and canonical pin. It records the separate saved
+geometry audit's bounded scope and the two-pose motion limit.
+
+![Actual saved fixture GLBs and matching native diagnostic views](surface_fixture.png)

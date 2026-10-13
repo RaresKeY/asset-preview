@@ -1,0 +1,179 @@
+{
+  "schema": "surface-fixture-preview-capture/v1",
+  "verification_date": "2026-10-13",
+  "scope": "hardware import/appearance and viewer lifecycle; geometry verdict belongs to the separate owner saved audit",
+  "capture": {
+    "file": "surface_fixture.png",
+    "sha256": "9f2e4315fe7fc6d9f33765ae075433f6994dde42f9074403d0259e62d142b83b",
+    "pixels": [
+      1000,
+      720
+    ],
+    "display": "Gamescope headless 1280x960",
+    "audio": "no audio sources",
+    "platform": "xcb",
+    "layout": "grid",
+    "grid_size": 3,
+    "compact": true
+  },
+  "canonical": {
+    "modules": {
+      "surface_ownership": {
+        "path": "tools/geometry-authoring/src/surface_ownership.py",
+        "sha256": "ba85758c32a06e844d499ad8ac15e11dc88893f4d665d1695e3dc532d3758ebe"
+      },
+      "surface_topology_blender": {
+        "path": "tools/geometry-authoring/src/surface_topology_blender.py",
+        "sha256": "6f5fc14a315085beeab641c217a8cbc8f5e9111d22264a824a1e175a17f82bfd"
+      }
+    },
+    "repository": "game-dev-tools",
+    "revision": "a0b98942ba6222c9e6e06ab7155e59f6636512d5",
+    "schema": "surface-ownership-construct-pin/v1"
+  },
+  "owner_outputs": "asset-workshop/constructs/surface-ownership/examples/exports",
+  "owner_manifest": {
+    "file": "manifest.json",
+    "sha256": "6eb60116687ad92fe5a58c3cef499264f2240e1c43312c5024d7342f5cd4a25e",
+    "scope": "saved rest geometry plus two sampled leaf poses; CPU PNGs diagnostic only"
+  },
+  "source": {
+    "file": "asset-workshop/constructs/surface-ownership/examples/fixture.json",
+    "sha256": "89f0b0f07836a7aa0f5b0d2d8c1e566e7494785a9dbfc011dde0e45125fb9d28"
+  },
+  "native": {
+    "file": "surface-fixture.blend",
+    "sha256": "fc0bee0392dea1d55a0edbdcabc96e8b0cc368ac9a00cafecfa912c6eecd1814"
+  },
+  "models": [
+    {
+      "file": "surface-fixture.glb",
+      "sha256": "1f6acad73cc422665cfc7ce48a7fc738a6b4410f729814e8dca74a443c74a707",
+      "renderer": "NVIDIA GeForce RTX 2080 Ti/PCIe/SSE2",
+      "camera": {
+        "focal": [
+          0,
+          0.2600000035017729,
+          0
+        ],
+        "position": [
+          5.760001099068579,
+          4.452937902304924,
+          9.976614555239356
+        ],
+        "up": [
+          -0.1710100716628344,
+          0.9396926207859083,
+          -0.29619813272602397
+        ]
+      },
+      "inspection_settings": {},
+      "loaded_source_triangles": 122
+    },
+    {
+      "file": "surface-fixture-open.glb",
+      "sha256": "c2b660dace956d8b1586aa8b59b36dbe83193edb1e6093db4f927dee25c86e6d",
+      "renderer": "NVIDIA GeForce RTX 2080 Ti/PCIe/SSE2",
+      "camera": {
+        "focal": [
+          0,
+          0.4500001221895218,
+          -0.09999999403953552
+        ],
+        "position": [
+          5.8578345261182845,
+          4.714154931717364,
+          10.04606702752849
+        ],
+        "up": [
+          -0.1710100716628344,
+          0.9396926207859084,
+          -0.29619813272602397
+        ]
+      },
+      "inspection_settings": {},
+      "loaded_source_triangles": 122
+    }
+  ],
+  "native_diagnostics": [
+    {
+      "file": "host-material.png",
+      "sha256": "a482c395a239d9c48f0ffe5a65504f157d0d5b13d9740ff6342df8ce15340e82",
+      "renderer": "Cycles CPU diagnostic",
+      "frame": 1,
+      "derived_wire_view": false,
+      "appearance_acceptance": false
+    },
+    {
+      "file": "cut-edges.png",
+      "sha256": "a5d2f3dd5d12c8918ddcfc0d5f8996df986abc480bf9459f42b0e53502607e75",
+      "renderer": "Cycles CPU diagnostic",
+      "frame": 1,
+      "derived_wire_view": true,
+      "appearance_acceptance": false
+    },
+    {
+      "file": "closed-leaf.png",
+      "sha256": "16119813bd1a87511507f88a2f061173606b78e469504efe9734ef5d416fc2a1",
+      "renderer": "Cycles CPU diagnostic",
+      "frame": 1,
+      "derived_wire_view": false,
+      "appearance_acceptance": false
+    },
+    {
+      "file": "seat-contact.png",
+      "sha256": "d90f2bdf14a32c5030f9cd165b76e8c7a1e721d13a680df592b33539ce915ab7",
+      "renderer": "Cycles CPU diagnostic",
+      "frame": 1,
+      "derived_wire_view": false,
+      "appearance_acceptance": false
+    },
+    {
+      "file": "open-leaf.png",
+      "sha256": "fe7c9bb06bcd7ea587ff96d7acdb8fa2db1df26009bc96e182862abfdbb47dc1",
+      "renderer": "Cycles CPU diagnostic",
+      "frame": 31,
+      "derived_wire_view": false,
+      "appearance_acceptance": false
+    }
+  ],
+  "owner_saved_audit": {
+    "file": "surface-fixture.audit.json",
+    "sha256": "b39297a7c582ba47d2f6bae3e62079955032c10f3e2f83ab5128bc78be8670b9",
+    "scope": "saved_membership_and_bounded_planar_geometry",
+    "checks": {
+      "aperture_open": "passed",
+      "leaf_fit": "passed",
+      "material_membership": "passed",
+      "no_competing_surface_faces": "passed",
+      "seat_contact": "passed"
+    },
+    "counts": {
+      "draw_primitives": 6,
+      "mesh_nodes": 5,
+      "triangles": 122
+    },
+    "limitations": [
+      "Rest geometry only; arbitrary curved footprints and motion/contact sweeps are not certified.",
+      "Unnamed open edges are unclassified, not automatically accidental holes; whole-scene topology remains a separate audit."
+    ]
+  },
+  "sampled_open_pose": {
+    "aperture_open": "passed",
+    "artifact_sha256": "c2b660dace956d8b1586aa8b59b36dbe83193edb1e6093db4f927dee25c86e6d",
+    "frame": 31,
+    "saved_leaf_displacement_m": [
+      0.0,
+      0.4999999701976776,
+      -0.8999999761581421
+    ]
+  },
+  "publication_check": "13 exact file hashes plus declared source/pin/native/export binding passed",
+  "hidden_views_unloaded": true,
+  "isolated_process_exited": true,
+  "limits": [
+    "CPU images depict saved native geometry, not imported GLB shader appearance.",
+    "Two sampled poses do not certify a complete motion/contact sweep.",
+    "Live labels, triangle counts and capture overlays are viewer diagnostics, not geometry proof."
+  ]
+}
