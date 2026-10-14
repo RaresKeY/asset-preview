@@ -145,6 +145,11 @@ class XInput:
         self.motion(x,y)
         self.xt.XTestFakeButtonEvent(self.display,1,1,0)
         self.xt.XTestFakeButtonEvent(self.display,1,0,0); self.x.XFlush(self.display)
+    def scroll(self,x,y,up=True):
+        self.motion(x,y)
+        button=4 if up else 5
+        self.xt.XTestFakeButtonEvent(self.display,button,1,0)
+        self.xt.XTestFakeButtonEvent(self.display,button,0,0); self.x.XFlush(self.display)
     def drag(self,x,y,dx=70,dy=25):
         self.motion(x,y)
         self.xt.XTestFakeButtonEvent(self.display,1,1,0)
@@ -397,6 +402,67 @@ class PreviewIntegration(unittest.TestCase):
             input.press("Left"); eventually(lambda:client.rpc({"method":"list"})["selected"]=="orbit")
         finally: input.close()
 
+    @unittest.skipUnless(GPU and os.environ.get("QT_QPA_PLATFORM")!="wayland","Hardware Gamescope X11 input lane")
+    def test_25_pointer_zoom_camera(self):
+        obj=self.root/"zoom-cube.obj"
+        subprocess.run([sys.executable,str(ROOT/"examples/generate_cube.py"),str(obj)],check=True,capture_output=True)
+        client.rpc({"method":"add","entry":{"id":"zoom","path":str(obj)}})
+        self.show()
+        eventually(lambda:row("zoom").get("metrics",{}).get("engine"))
+        renderer=row("zoom")["metrics"]["renderer"]
+        self.assertFalse(any(s in renderer.lower() for s in ("llvmpipe","softpipe","software","unknown")),renderer)
+        input=XInput()
+        try:
+            for orthographic in (False,True):
+                client.rpc({"method":"settings","id":"zoom","settings":{"orthographic":orthographic}})
+                time.sleep(.2)
+                view=row("zoom")["viewport"]
+                x=view["x"]+view["width"]*3//4; y=view["y"]+view["height"]//3
+                input.click(x,y); time.sleep(.1)
+                before=row("zoom")["metrics"]["camera"]
+                input.scroll(x,y)
+                eventually(lambda:math.dist(before["focal"],row("zoom")["metrics"]["camera"]["focal"])>1e-5)
+                after=row("zoom")["metrics"]["camera"]
+                distance=math.dist(before["position"],before["focal"])
+                new_distance=math.dist(after["position"],after["focal"])
+                if orthographic: self.assertAlmostEqual(distance,new_distance,places=6)
+                else: self.assertLess(new_distance,distance)
+                for a,b in zip(before["up"],after["up"]): self.assertAlmostEqual(a,b,places=12)
+                input.scroll(x,y,False)
+                eventually(lambda:math.dist(before["focal"],row("zoom")["metrics"]["camera"]["focal"])<1e-6)
+                restored=row("zoom")["metrics"]["camera"]
+                for key in ("position","focal","up"):
+                    for a,b in zip(before[key],restored[key]): self.assertAlmostEqual(a,b,places=6)
+        finally: input.close()
+
+    @unittest.skipUnless(GPU and os.environ.get("QT_QPA_PLATFORM")!="wayland","Hardware Gamescope X11 input lane")
+    def test_26_pointer_zoom_image(self):
+        self.add("zoom-image",settings={"background":"dark"}); self.show()
+        eventually(lambda:row("zoom-image").get("metrics",{}).get("loads"))
+        time.sleep(.2)
+        view=row("zoom-image")["viewport"]
+        size=min(view["width"],view["height"])
+        # Just outside the fitted square: center zoom would move the edge
+        # across this point, while pointer zoom keeps it outside the image.
+        x=view["x"]+(view["width"]+size)//2+5
+        y=view["y"]+view["height"]//2
+        capture=self.root/"image-zoom.png"
+        client.rpc({"method":"capture","path":str(capture)})
+        before=png_pixel(capture,x,y)
+        self.assertEqual(before,(23,28,34))
+        input=XInput()
+        try:
+            renders=row("zoom-image")["metrics"]["renders"]
+            input.click(x,y); time.sleep(.1); input.scroll(x,y)
+            eventually(lambda:row("zoom-image")["metrics"]["renders"]>renders)
+            time.sleep(.1)
+            capture.unlink()
+            client.rpc({"method":"capture","path":str(capture)})
+            self.assertEqual(png_pixel(capture,x,y),before)
+            # The edge itself moves away from the anchor as the image grows.
+            self.assertEqual(png_pixel(capture,x-5,y),before)
+        finally: input.close()
+
     @unittest.skipUnless(GPU,"Hardware model triangle counts and overlays")
     def test_21_triangle_counts_overlay_layout_and_refresh(self):
         obj=self.root/"counted-cube.obj"
@@ -443,6 +509,40 @@ class PreviewIntegration(unittest.TestCase):
         client.rpc({"method":"hide"}); self.assertNotIn("metrics",row("sample"))
         self.show(); eventually(lambda:row("sample").get("metrics",{}).get("engine"))
         self.assertEqual(row("sample")["metrics"]["triangles"],2)
+
+    @unittest.skipUnless(GPU,"Native top settings menu")
+    def test_31_top_settings_menu_defaults_and_current(self):
+        self.add("menu-image"); self.show()
+        input=XInput()
+        try:
+            input.shortcut("s")
+            eventually(lambda:client.rpc({"method":"list"})["options_open"])
+            input.press("p"); time.sleep(.2)
+            input.press("Return")
+            eventually(lambda:row("menu-image")["settings"].get("nearest") is True)
+            input.shortcut("s"); time.sleep(.2)
+            input.press("i"); time.sleep(.2)
+            input.press("Return")
+            eventually(lambda:client.rpc({"method":"list"})["preferences"]["image"].get("nearest") is False)
+            self.assertTrue(row("menu-image")["settings"]["nearest"])
+            self.add("menu-new")
+            self.assertFalse(row("menu-new")["settings"]["nearest"])
+        finally: input.close()
+
+    def test_30_explicit_defaults_are_independent_and_persisted(self):
+        self.add("existing")
+        original=row("existing")["settings"]
+        client.rpc({"method":"defaults","group":"image","settings":{"nearest":True,"background":"light"}})
+        self.assertEqual(row("existing")["settings"],original)
+        self.add("new")
+        self.assertEqual(row("new")["settings"],{"nearest":True,"background":"light"})
+        for request in ({"group":"bad","settings":{}},{"group":"3d","settings":{"light":6}}):
+            with self.assertRaises(RuntimeError): client.rpc({"method":"defaults",**request})
+        before=client.rpc({"method":"list"})["preferences"]
+        # Persistence is also checked after a clean restart.
+        client.rpc({"method":"quit"}); eventually(lambda:not client.running())
+        client.start()
+        self.assertEqual(client.rpc({"method":"list"})["preferences"],before)
 
     def test_22_preferences_inheritance_reconnect_and_close_all(self):
         self.add("image-settings")

@@ -86,3 +86,6 @@ Video metrics add `backend=libmpv`, `loading`, width/height, duration/position
 until playback initializes; GPU renderer identity alone does not prove hardware
 video decoding. `revisions` increases only after successful asynchronous video
 publication, not merely when a load command is accepted.
+
+
+Defaults can be edited without a registered preview: `{"method":"defaults","group":"3d","settings":{"edges":true}}`. Groups are `image`, `video`, and `3d`; settings use the existing validation and persist for future registrations without modifying existing entries.

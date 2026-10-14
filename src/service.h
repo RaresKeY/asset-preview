@@ -9,6 +9,7 @@
 #include <QTimer>
 #include <memory>
 
+class QMenu;
 class QLabel;
 class QComboBox;
 class QPushButton;
@@ -48,6 +49,7 @@ protected:
     void dropEvent(QDropEvent*) override;
 private:
     void options(const QString& id);
+    void populateSettings(QMenu*,const QString&,const QJsonObject&,const std::function<void(QJsonObject)>&);
     void reportError(const QString& error);
     Service* service;
     QWidget* canvas;

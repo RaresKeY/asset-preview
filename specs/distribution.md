@@ -82,3 +82,5 @@ include later UI work beyond the frozen release. Runtime libraries and graphics
 drivers remain external as described above; native packages are unsigned.
 The temporary OCI transport archive is removed from Releases after private GHCR
 publication; generated local candidates are removed after remote verification.
+
+Local Podman builds use `packaging/build-image.sh`. The default runtime target is retained; `ASSET_PREVIEW_BUILD_TARGET=build` or `artifacts` marks task images ephemeral. Intermediate build images carry ephemeral retention and project labels. The wrapper holds the shared workstation build-retention flock. This local policy does not change published Docker/GHCR release workflows.

@@ -60,7 +60,10 @@ void ImageView::paintEvent(QPaintEvent*) {
     p.drawImage(QRectF(QPointF((width() - size.width()) / 2, (height() - size.height()) / 2) + pan, size), image);
 }
 void ImageView::wheelEvent(QWheelEvent* e) {
-    zoom = std::clamp(zoom * std::pow(1.0015, e->angleDelta().y()), 0.05, 32.0);
+    const double next = std::clamp(zoom * std::pow(1.0015, e->angleDelta().y()), 0.05, 32.0);
+    const QPointF offset = e->position() - QPointF(width()/2.0, height()/2.0);
+    pan = offset - (offset - pan) * (next / zoom);
+    zoom = next;
     update(); e->accept();
 }
 void ImageView::mousePressEvent(QMouseEvent* e) { last = e->position(); setFocus(); }

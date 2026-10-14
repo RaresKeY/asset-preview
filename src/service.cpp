@@ -18,6 +18,8 @@
 #include <QLocale>
 #include <QMimeData>
 #include <QMenu>
+#include <QMenuBar>
+#include <QInputDialog>
 #include <QResizeEvent>
 #include <QShowEvent>
 #include <QToolButton>
@@ -361,6 +363,19 @@ QJsonObject Service::request(const QJsonObject& r) {
                 {"watched_directories",watcher.directories().size()},{"pid",qint64(QCoreApplication::applicationPid())},
                 {"platform",QGuiApplication::platformName()},{"options_open",bool(QApplication::activePopupWidget())},{"preferences",preferences}});
         }
+        if (method=="defaults") {
+            const auto group=r["group"].toString();
+            if (!QSet<QString>{"image","video","3d"}.contains(group)) return failure("Invalid defaults group");
+            if (!r["settings"].isObject()) return failure("settings must be an object");
+            auto remembered=preferences.value(group).toObject();
+            const auto patch=r["settings"].toObject();
+            for (auto i=patch.begin();i!=patch.end();++i) remembered[i.key()]=i.value();
+            QJsonObject config{{"path",statePath+"/preference-validation"},{"kind",group=="3d"?"model":group},{"settings",remembered}};
+            const auto error=validate(config); if (!error.isEmpty()) return failure(error);
+            const auto old=preferences; preferences[group]=remembered;
+            try { save(); } catch (...) { preferences=old; throw; }
+            return success();
+        }
         if (method=="add") return add(r["entry"].toObject());
         if (method=="close_all") {
             const auto previousOrder=order; const auto previousSelected=selected;
@@ -433,7 +448,7 @@ QJsonObject Service::request(const QJsonObject& r) {
             const auto old=e->config; e->config=config;
             const auto previousPreferences=preferences;
             const auto group=preferenceGroup(config["kind"].toString());
-            auto remembered=preferences[group].toObject();
+            auto remembered=preferences.value(group).toObject();
             for (auto i=patch.begin();i!=patch.end();++i) remembered[i.key()]=i.value();
             preferences[group]=remembered;
             try { save(); } catch (...) { e->config=old; preferences=previousPreferences; throw; }
@@ -697,6 +712,30 @@ QJsonObject Service::navigate(int delta) {
 PreviewWindow::PreviewWindow(Service* s) : service(s) {
     setWindowTitle("Asset Preview"); setWindowIcon(QIcon(QStringLiteral(":/icon.svg")));
     setMinimumSize(540,380); resize(1000,720); setAcceptDrops(true);
+    auto* settingsMenu=menuBar()->addMenu("&Settings");
+    menuBar()->setNativeMenuBar(false);
+    connect(settingsMenu,&QMenu::aboutToShow,this,[this,settingsMenu] {
+        settingsMenu->clear();
+        auto* current=settingsMenu->addMenu("Current &preview");
+        const auto entry=service->entries.value(service->selected);
+        current->setEnabled(bool(entry));
+        if (entry) {
+            const auto id=service->selected;
+            populateSettings(current,entry->config["kind"].toString(),entry->config["settings"].toObject(),[this,id](QJsonObject patch) {
+                const auto result=service->request({{"method","settings"},{"id",id},{"settings",patch}});
+                if (!result["ok"].toBool()) reportError(result["error"].toString());
+            });
+        }
+        settingsMenu->addSeparator();
+        settingsMenu->addAction("Defaults for new previews")->setEnabled(false);
+        for (const auto& group:QStringList{"image","video","3d"}) {
+            auto* defaults=settingsMenu->addMenu(group=="3d"?"&3D / materials":group=="image"?"&Images":"&Videos");
+            populateSettings(defaults,group=="3d"?"material":group,service->preferences.value(group).toObject(),[this,group](QJsonObject patch) {
+                const auto result=service->request({{"method","defaults"},{"group",group},{"settings",patch}});
+                if (!result["ok"].toBool()) reportError(result["error"].toString());
+            });
+        }
+    });
     auto* central=new QWidget; auto* vertical=new QVBoxLayout(central); vertical->setContentsMargins(8,6,8,6); vertical->setSpacing(6);
     auto* addButton=new QPushButton("Add files"); addButton->setMinimumHeight(32);
     closeAllButton=new QPushButton("Close all"); closeAllButton->setMinimumHeight(32);
@@ -752,6 +791,20 @@ PreviewWindow::PreviewWindow(Service* s) : service(s) {
     connect(left,&QShortcut::activated,this,[navigate] { navigate(-1); });
     auto* right=new QShortcut(this); right->setKeys({QKeySequence("Right"),QKeySequence("Alt+Right")});
     connect(right,&QShortcut::activated,this,[navigate] { navigate(1); });
+    for (const auto& binding : {std::pair{"E","edges"},std::pair{"M","triangles"}}) {
+        auto* shortcut=new QShortcut(QKeySequence(binding.first),this);
+        shortcut->setAutoRepeat(false);
+        connect(shortcut,&QShortcut::activated,this,[this,key=QString(binding.second)] {
+            const auto entry=service->entries.value(service->selected);
+            if (!entry) return;
+            const auto kind=entry->config["kind"].toString();
+            if (kind!="model" && kind!="material") return;
+            const bool value=entry->config["settings"].toObject()[key].toBool(key=="triangles");
+            const auto result=service->request({{"method","settings"},{"id",service->selected},
+                {"settings",QJsonObject{{key,!value}}}});
+            if (!result["ok"].toBool()) reportError(result["error"].toString());
+        });
+    }
     QSettings settings(service->statePath+"/window.ini",QSettings::IniFormat);
     restoreGeometry(settings.value("geometry").toByteArray());
 }
@@ -825,7 +878,7 @@ void PreviewWindow::createCard(Entry& e) {
     e.surface=widget;
     card->setSurface(widget);
     widget->setToolTip(e.config["kind"].toString()=="video"?"Space / double click to pause · Shift+Left / Right seek · Home restart · M mute":
-        e.config["kind"].toString()=="image"?"Scroll to zoom · drag to pan · double click to fit":"Drag to orbit · right / middle drag to pan · scroll to zoom · double click to fit");
+        e.config["kind"].toString()=="image"?"Scroll to zoom · drag to pan · double click to fit":"Drag to orbit · right / middle drag to pan · scroll to zoom · double click to fit · E edges / lines · M triangle count");
     connect(card->fit,&QToolButton::clicked,this,[this,id] {
         const auto e=service->entries.value(id); if (!e || !e->view) return;
         if (e->config["kind"].toString()=="video") service->request({{"method","settings"},{"id",id},{"settings",QJsonObject{{"paused",!e->config["settings"].toObject()["paused"].toBool()}}}});
@@ -850,45 +903,61 @@ void PreviewWindow::options(const QString& id) {
         auto result=service->request({{"method","settings"},{"id",id},{"settings",fields}});
         if (!result["ok"].toBool()) reportError(result["error"].toString());
     };
-    auto toggle=[&](const QString& label,const QString& key,bool defaultValue=false) {
-        auto* action=menu.addAction(label); action->setCheckable(true); action->setChecked(settings[key].toBool(defaultValue));
-        connect(action,&QAction::toggled,this,[patch,key](bool value) { patch({{key,value}}); }); return action;
-    };
-    auto choice=[&](const QString& label,const QString& key,const QStringList& labels,const QStringList& values,const QString& fallback) {
-        auto* sub=menu.addMenu(label);
-        for (int i=0;i<values.size();++i) {
-            auto* action=sub->addAction(labels[i]); action->setCheckable(true); action->setChecked(settings[key].toString(fallback)==values[i]);
-            connect(action,&QAction::triggered,this,[patch,key,value=values[i]] { patch({{key,value}}); });
-        }
-    };
-    if (e->config["kind"].toString()=="image") toggle("Pixel filtering","nearest");
-    else if (e->config["kind"].toString()=="video") {
-        toggle("&Paused · Space","paused"); toggle("&Muted · M","muted",true); toggle("&Loop","loop",true);
+    populateSettings(&menu,e->config["kind"].toString(),settings,patch);
+    if (e->config["kind"].toString()=="video") {
         connect(menu.addAction("Restart · Home"),&QAction::triggered,this,[this,id] { service->request({{"method","seek"},{"id",id},{"seconds",0}}); });
         for (int delta:{-5,5}) connect(menu.addAction(delta<0?"Back 5 seconds · Shift+Left":"Forward 5 seconds · Shift+Right"),&QAction::triggered,this,[this,id,delta] {
             const auto e=service->entries.value(id); if (!e || !e->view) return;
             service->request({{"method","seek"},{"id",id},{"seconds",std::max(0.0,e->view->metrics()["position"].toDouble()+delta)}});
         });
     }
-    else {
-        toggle("Show triangle &count","triangles",true);
-        toggle("Show &materials","materials",true);
-        toggle("Show &textures","textures",true)->setEnabled(settings["materials"].toBool(true));
-        toggle("Lock &horizon","lock_horizon",true);
-        toggle("Ground grid","grid",true); toggle("Axis indicator","axes"); toggle("Show edges","edges"); toggle("Orthographic camera","orthographic");
-        choice("Floor / up axis","up_axis",{"Y up · XZ floor","Z up · XY floor"},{"y","z"},"y");
-        choice("Lighting","lighting",{"Studio · HDRI + light kit","F3D light kit"},{"studio","lightkit"},"studio");
-        auto* intensity=menu.addMenu(QString("Light intensity · %1").arg(settings["light"].toDouble(1)));
-        for (double value:{0.5,1.0,1.5,2.0,3.0,5.0}) {
-            auto* action=intensity->addAction(QString::number(value)); action->setCheckable(true); action->setChecked(settings["light"].toDouble(1)==value);
-            connect(action,&QAction::triggered,this,[patch,value] { patch({{"light",value}}); });
-        }
-        if (e->config["kind"].toString()=="material") choice("Sample shape","shape",{"Sphere","Cube","Plane"},{"sphere","cube","plane"},"sphere");
-    }
-    choice("Background","background",{"Dark","Light","Checker"},{"dark","light","checker"},e->config["kind"].toString()=="image"?"checker":"dark");
     menu.addSeparator();
     connect(menu.addAction("Remove preview"),&QAction::triggered,this,[this,id] { service->request({{"method","remove"},{"id",id}}); });
     menu.exec(e->optionsButton->mapToGlobal(QPoint(0,e->optionsButton->height())));
+}
+void PreviewWindow::populateSettings(QMenu* menu,const QString& kind,const QJsonObject& settings,
+    const std::function<void(QJsonObject)>& patch) {
+    auto number=[&](const QString& label,const QString& key,double fallback,double maximum) {
+        const auto value=settings[key].toDouble(fallback);
+        auto* action=menu->addAction(QString("%1 · %2…").arg(label).arg(value));
+        connect(action,&QAction::triggered,this,[this,patch,key,label,value,maximum] {
+            bool accepted=false;
+            const double next=QInputDialog::getDouble(this,"Preview settings",label,value,0,maximum,3,&accepted);
+            if (accepted) patch({{key,next}});
+        });
+    };
+    auto toggle=[&](const QString& label,const QString& key,bool defaultValue=false) {
+        auto* action=menu->addAction(label); action->setCheckable(true); action->setChecked(settings[key].toBool(defaultValue));
+        connect(action,&QAction::toggled,this,[patch,key](bool value) { patch({{key,value}}); }); return action;
+    };
+    auto choice=[&](const QString& label,const QString& key,const QStringList& labels,const QStringList& values,const QString& fallback) {
+        auto* sub=menu->addMenu(label);
+        for (int i=0;i<values.size();++i) {
+            auto* action=sub->addAction(labels[i]); action->setCheckable(true); action->setChecked(settings[key].toString(fallback)==values[i]);
+            connect(action,&QAction::triggered,this,[patch,key,value=values[i]] { patch({{key,value}}); });
+        }
+    };
+    if (kind=="image") toggle("Pixel filtering","nearest");
+    else if (kind=="video") {
+        toggle("&Paused · Space","paused"); toggle("&Muted · M","muted",true); toggle("&Loop","loop",true);
+
+    }
+    else {
+        toggle("Show triangle &count · M","triangles",true);
+        toggle("Show &materials","materials",true);
+        toggle("Show &textures","textures",true)->setEnabled(settings["materials"].toBool(true));
+        toggle("Lock &horizon","lock_horizon",true);
+        toggle("Ground grid","grid",true); toggle("Axis indicator","axes"); toggle("Show edges / lines · E","edges"); toggle("Orthographic camera","orthographic");
+        choice("Floor / up axis","up_axis",{"Y up · XZ floor","Z up · XY floor"},{"y","z"},"y");
+        choice("Lighting","lighting",{"Studio · HDRI + light kit","F3D light kit"},{"studio","lightkit"},"studio");
+        number("Light intensity","light",1,5);
+        if (kind=="material") {
+            choice("Sample shape","shape",{"Sphere","Cube","Plane"},{"sphere","cube","plane"},"sphere");
+            number("Roughness (without ORM map)","roughness",0.5,1);
+            number("Metallic (without ORM map)","metallic",0,1);
+        }
+    }
+    choice("Background","background",kind=="image"?QStringList{"Dark","Light","Checker"}:QStringList{"Dark","Light"},kind=="image"?QStringList{"dark","light","checker"}:QStringList{"dark","light"},kind=="image"?"checker":"dark");
 }
 void PreviewWindow::closeEvent(QCloseEvent* event) {
     QSettings settings(service->statePath+"/window.ini",QSettings::IniFormat); settings.setValue("geometry",saveGeometry());

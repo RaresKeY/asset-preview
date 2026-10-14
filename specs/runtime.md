@@ -83,3 +83,5 @@ generator’s separate child group with TERM/KILL, including SIGINT-ignoring
 background jobs and descendants left behind after normal generator completion.
 Packaged desktop launchers set the canonical reverse-DNS desktop identity;
 source-checkout launchers keep their existing desktop entry identity.
+
+The `defaults` request accepts `group` (`image`, `video`, `3d`) and a validated `settings` patch. It saves remembered values atomically without changing existing entries; failed saves restore preferences. The top Settings menu uses this path independently of per-preview changes.

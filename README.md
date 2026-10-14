@@ -7,6 +7,14 @@ Registration preserves window placement and selection.
 
 ## Screenshots
 
+Image preview: a comparison image of generated and authored segmented Hauler assets.
+
+![Asset Preview interface displaying a Hauler comparison image over a checker background](docs/screenshots/image-preview-hauler.png)
+
+3D model preview: the authored segmented Hauler with a ground grid, axes and triangle count.
+
+![Asset Preview interface displaying the Hauler 3D model with grid, axes and triangle count](docs/screenshots/model-preview-hauler.png)
+
 Single view: assembled PC from a three-quarter angle, showing components and cabling.
 
 ![Assembled PC in the live asset preview](docs/screenshots/assembled-pc.png)

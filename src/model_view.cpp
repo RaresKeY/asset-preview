@@ -262,7 +262,29 @@ QImage ModelView::snapshot() {
     return image;
 }
 void ModelView::wheelEvent(QWheelEvent* e) {
-    if (engine) { makeCurrent(); engine->getWindow().getCamera().dolly(std::pow(1.0015,e->angleDelta().y())); doneCurrent(); update(); }
+    if (engine) {
+        makeCurrent();
+        auto& window=engine->getWindow();
+        auto& camera=window.getCamera();
+        // F3D display coordinates are physical pixels with a bottom-left origin.
+        const double scale=devicePixelRatioF();
+        auto display=window.getDisplayFromWorld(camera.getFocalPoint());
+        display[0]=e->position().x()*scale;
+        display[1]=(height()-e->position().y())*scale;
+        const auto anchor=window.getWorldFromDisplay(display);
+        const double factor=std::pow(1.0015,e->angleDelta().y());
+        if (config["settings"].toObject()["orthographic"].toBool()) camera.zoom(factor);
+        else camera.dolly(factor);
+        display[2]=window.getDisplayFromWorld(camera.getFocalPoint())[2];
+        const auto moved=window.getWorldFromDisplay(display);
+        auto state=camera.getState();
+        for (int i=0;i<3;++i) {
+            state.position[i]+=anchor[i]-moved[i];
+            state.focalPoint[i]+=anchor[i]-moved[i];
+        }
+        camera.setState(state);
+        doneCurrent(); update();
+    }
     e->accept();
 }
 void ModelView::mousePressEvent(QMouseEvent* e) { last=e->position(); requestActivate(); }

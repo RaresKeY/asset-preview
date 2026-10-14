@@ -44,6 +44,11 @@ Baked color/normal/ORM maps apply to sphere/cube/plane geometry. F3D does not
 evaluate native Godot or Material Maker source. Models load on the OpenGL GUI thread;
 arbitrary-scene memory and import latency are not bounded by the file-size cap.
 
+Scroll zoom anchors images at the pointer, respecting the existing zoom limits.
+Model/material scroll zoom anchors the pointer on the camera's focal plane,
+preserving orientation in perspective and orthographic modes. Orthographic zoom
+changes parallel scale; perspective zoom changes camera distance.
+
 Turntable orbit defaults to Y-up / XZ floor and a locked horizon. Yaw rotates
 around world up; pitch clamps to ±88.2 degrees, preventing pole flips. Z-up / XY
 floor and unlocked orbit are per-view options. Fit, reload and display settings
@@ -60,7 +65,10 @@ engine and reload the scene to restore authored shading, preserving the camera
 and last-good behavior. Authored vertex-color neutralization is not verified.
 
 Triangle counts default visible and can be toggled per model/material via options
-or the boolean `triangles` setting without reloading geometry. Counts derive from
+or the boolean `triangles` setting without reloading geometry. Window shortcuts
+E toggles edges/lines and M toggles the triangle-count overlay for the selected
+model/material preview; holding a key does not repeatedly toggle it. The video
+surface retains M for mute. Counts derive from
 GLB/glTF primitive metadata in the selected scene (including mesh instances),
 streamed OBJ face sizes after triangulation, or the generated material sample.
 This runs only after successful loads, preserves last-good counts on rejected
@@ -146,3 +154,5 @@ playback disables the audio track; unmuting selects it again. mpv user
 configs/scripts, online URL helpers, external media references, automatic audio
 sidecars and subtitles are disabled. Common video extensions and animated GIF
 route automatically; explicit `kind=video` handles other installed-codec formats.
+
+The native top Settings menu exposes current-preview controls and independent image, video and shared 3D/material defaults, even with an empty registry. It shares controls with card options, including edges/lines, grid, axes, camera, lighting, background, playback, filtering and material sample options. Numeric dialogs accept light intensity 0–5 and roughness/metallic 0–1; sample scalar controls describe their no-ORM scope. Checker background is offered only for images.
