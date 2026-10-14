@@ -892,4 +892,45 @@ class PreviewIntegration(unittest.TestCase):
                 eventually(lambda:client.rpc({"method":"list"})["selected"]=="after-failure")
             finally: input.close()
 
+    def test_32_close_returns_to_recent_preview(self):
+        for key in ("one","two","three","four","five"): self.add(key)
+        client.rpc({"method":"select","id":"four"})
+        client.rpc({"method":"select","id":"five"})
+        client.rpc({"method":"remove","id":"five"})
+        self.assertEqual(client.rpc({"method":"list"})["selected"],"four")
+        client.rpc({"method":"select","id":"two"})
+        client.rpc({"method":"remove","id":"three"})
+        self.assertEqual(client.rpc({"method":"list"})["selected"],"two")
+        client.rpc({"method":"remove","id":"two"})
+        self.assertEqual(client.rpc({"method":"list"})["selected"],"four")
+        client.rpc({"method":"remove","id":"four"})
+        self.assertEqual(client.rpc({"method":"list"})["selected"],"one")
+        client.rpc({"method":"remove","id":"one"})
+        self.assertEqual(client.rpc({"method":"list"})["selected"],"")
+        # No history after restart: choose a neighbor instead of entry one.
+        for key in ("first","middle","last"): self.add(key)
+        client.rpc({"method":"select","id":"last"})
+        client.rpc({"method":"quit"}); eventually(lambda:not client.running()); client.start()
+        client.rpc({"method":"remove","id":"last"})
+        self.assertEqual(client.rpc({"method":"list"})["selected"],"middle")
+        client.rpc({"method":"select","id":"first"})
+        client.rpc({"method":"remove","id":"first"})
+        self.assertEqual(client.rpc({"method":"list"})["selected"],"middle")
+
+    def test_33_failed_close_preserves_view_and_history(self):
+        self.add("close-before"); self.add("close-current"); self.show()
+        client.rpc({"method":"select","id":"close-current"})
+        eventually(lambda:row("close-current").get("metrics",{}).get("loads"))
+        loads=row("close-current")["metrics"]["loads"]
+        registry=self.root/"state/previews.json"; backup=registry.with_suffix(".backup")
+        registry.rename(backup); registry.mkdir()
+        try:
+            with self.assertRaises(RuntimeError): client.rpc({"method":"remove","id":"close-current"})
+            self.assertEqual(client.rpc({"method":"list"})["selected"],"close-current")
+            self.assertEqual(row("close-current")["metrics"]["loads"],loads)
+            self.assertTrue(row("close-current")["active"])
+        finally: registry.rmdir(); backup.replace(registry)
+        client.rpc({"method":"remove","id":"close-current"})
+        self.assertEqual(client.rpc({"method":"list"})["selected"],"close-before")
+
 if __name__ == "__main__": unittest.main(verbosity=2)

@@ -24,6 +24,12 @@ invalid/corrupt state with an error. Session diagnostics are separate from specs
 Failed selection saves retain the previous selection and active views; toolbar
 and keyboard navigation report the failure without terminating the service.
 Transient save/settings errors show the status bar even in compact mode.
+Removing the selected preview returns to the most recently selected surviving
+preview in this service session. Without selection history, it selects the
+previous neighbor, or the next neighbor when closing the first entry. Removing
+another preview preserves selection. History has one entry per surviving ID,
+is cleared by Close all, and is not persisted. Failed removal saves preserve
+the registry, selection, history and live views.
 Grid size (2/3/4) and compact mode are optional version-1 fields with backward
 compatible defaults; partial layout requests merge and validate before saving.
 Every display/playback setting change also updates remembered defaults, persisted

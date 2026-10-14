@@ -95,6 +95,7 @@ private:
     void status(Entry&, const QString&);
     QJsonObject describe(const Entry&) const;
     QJsonObject preferences;
+    QStringList selectionHistory;
     QLocalServer server;
     QFileSystemWatcher watcher;
     QTimer debounce;

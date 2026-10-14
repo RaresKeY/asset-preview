@@ -50,7 +50,9 @@ preserving orientation in perspective and orthographic modes. Orthographic zoom
 changes parallel scale; perspective zoom changes camera distance.
 
 Turntable orbit defaults to Y-up / XZ floor and a locked horizon. Yaw rotates
-around world up; pitch clamps to ±88.2 degrees, preventing pole flips. Z-up / XY
+around world up; pitch clamps to ±88.2 degrees, preventing pole flips. Vertical
+orbit dragging is inverted: dragging down raises camera elevation, in both locked
+and unlocked modes. Z-up / XY
 floor and unlocked orbit are per-view options. Fit, reload and display settings
 respect horizon lock. Default studio lighting uses F3D embedded HDRI ambient,
 normal scene lighting and tone mapping; light-kit mode omits HDRI. F3D installs

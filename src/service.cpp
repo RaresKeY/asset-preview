@@ -381,6 +381,7 @@ QJsonObject Service::request(const QJsonObject& r) {
             const auto previousOrder=order; const auto previousSelected=selected;
             order.clear(); selected.clear();
             try { save(); } catch (...) { order=previousOrder; selected=previousSelected; throw; }
+            selectionHistory.clear();
             // Persist first so failed saves leave running previews intact.
             for (const auto& id:previousOrder) deactivate(id);
             entries.clear(); reconcile(); return success();
@@ -423,13 +424,32 @@ QJsonObject Service::request(const QJsonObject& r) {
         if (!entries.contains(id)) return failure("Unknown preview: " + id);
         auto e=entries[id];
         if (method=="remove") {
-            deactivate(id); entries.remove(id); order.removeAll(id);
-            if (selected==id) selected=order.value(0);
-            save(); reconcile(); return success();
+            const auto previousOrder=order; const auto previousSelected=selected;
+            const int index=order.indexOf(id);
+            entries.remove(id); order.removeAll(id);
+            if (selected==id) {
+                selected.clear();
+                for (auto it=selectionHistory.crbegin();it!=selectionHistory.crend();++it)
+                    if (entries.contains(*it)) { selected=*it; break; }
+                if (selected.isEmpty()) selected=order.value(std::max(0,index-1));
+            }
+            try { save(); } catch (...) {
+                entries[id]=e; order=previousOrder; selected=previousSelected; throw;
+            }
+            selectionHistory.removeAll(id);
+            selectionHistory.removeAll(selected);
+            // Keep live views intact until the removal has been persisted.
+            entries[id]=e; deactivate(id); entries.remove(id);
+            reconcile(); return success();
         }
         if (method=="select") {
             const auto previous=selected; selected=id;
             try { save(); } catch (...) { selected=previous; throw; }
+            if (previous!=id && !previous.isEmpty()) {
+                selectionHistory.removeAll(previous);
+                selectionHistory.append(previous);
+                selectionHistory.removeAll(id);
+            }
             reconcile(); return success();
         }
         if (method=="reload") { if (e->active) { if (!e->config["command"].toArray().isEmpty()) build(id); else reload(id); } return success(); }

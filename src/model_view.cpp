@@ -297,8 +297,8 @@ void ModelView::mouseMoveEvent(QMouseEvent* e) {
         double distance=std::sqrt(std::pow(p[0]-f[0],2)+std::pow(p[1]-f[1],2)+std::pow(p[2]-f[2],2));
         c.pan(-d.x()*distance/height(),d.y()*distance/height());
     } else if (config["settings"].toObject()["lock_horizon"].toBool(true)) {
-        orbit(-d.x()*.4*std::numbers::pi/180,-d.y()*.4*std::numbers::pi/180);
-    } else { c.azimuth(-d.x()*.4).elevation(-d.y()*.4); }
+        orbit(-d.x()*.4*std::numbers::pi/180,d.y()*.4*std::numbers::pi/180);
+    } else { c.azimuth(-d.x()*.4).elevation(d.y()*.4); }
     doneCurrent(); update();
 }
 void ModelView::mouseDoubleClickEvent(QMouseEvent*) { fit(); }
