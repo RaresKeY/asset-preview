@@ -104,7 +104,9 @@ bounded to 0.05–32; pan offsets are fractions of the viewport width and height
 `reopen` restores the latest closed preview in this service session, including
 its list position and inspection state. At most 32 configurations are retained;
 an already re-registered ID is skipped. `list.closed_count` reports the count.
-Entry `selected` identifies the active card independently of decoded `active`.
+Entry `selected` identifies the shortcut/menu target independently of decoded
+`active`. Hovering a visible preview updates this selection without clicking;
+cards have no selection highlight. Outside previews, the last target is retained.
 
 `{"method":"compare","ids":["before","after"],"camera_sync":true}` displays
 two model/material previews with linked orbit, pan and zoom. Use `ids:[]` to

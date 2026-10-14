@@ -22,9 +22,18 @@ Completed drags and scroll/fit/reset input save camera state without idle pollin
 Image zoom and pan also persist per preview; pan uses viewport-relative offsets
 so restored views behave consistently after resizing.
 
-Clicking a visible card or its content selects it without reloading the page.
-A muted title border marks the active card; menus, shortcuts and the selector
-follow that selection. Ctrl+W closes it and Ctrl+Shift+T reopens the latest closed
+Hovering a visible card, overlay or native surface in the active window targets
+that preview without clicking, reloading or rearranging the page. Menus,
+shortcuts, playback keys and the selector follow that target; keyboard focus
+also moves to its surface so a previously focused video cannot consume a model's
+M shortcut. Cards have no selection tint or border change. Mouse entry/movement
+drives targeting, with no polling timer. Outside the previews, the last active
+preview remains the target for menus and keyboard use. Open popups/dialogs and
+mouse drags freeze hover targeting; explicit clicks and keyboard/CLI selection
+still work. Reflow beneath a stationary pointer does not override keyboard/CLI
+selection; movement, wheel input or a click resumes mouse targeting. Accessible
+card names identify the active preview.
+Ctrl+W closes it and Ctrl+Shift+T reopens the latest closed
 preview with its position, display options and inspection state. Closed entries
 retain configuration only; no decoded content or generator is kept running.
 
@@ -92,7 +101,7 @@ and last-good behavior. Authored vertex-color neutralization is not verified.
 
 Triangle counts default visible and can be toggled per model/material via options
 or the boolean `triangles` setting without reloading geometry. Window shortcuts
-E toggles edges/lines and M toggles the triangle-count overlay for the selected
+E toggles edges/lines and M toggles the triangle-count overlay for the targeted
 model/material preview; holding a key does not repeatedly toggle it. The video
 surface retains M for mute. Counts derive from
 GLB/glTF primitive metadata in the selected scene (including mesh instances),

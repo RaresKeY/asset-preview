@@ -23,6 +23,10 @@
 #include <QActionGroup>
 #include <QClipboard>
 #include <QContextMenuEvent>
+#include <QCursor>
+#include <QEnterEvent>
+#include <QMouseEvent>
+#include <QWheelEvent>
 #include <QDateTime>
 #include <QDesktopServices>
 #include <QMessageBox>
@@ -93,7 +97,7 @@ public:
             "QToolButton {color:#e8edf3;background:transparent;border:1px solid transparent;border-radius:3px;padding:2px;}"
             "QToolButton:hover {background:#394453;} QToolButton:pressed {background:#485566;}"
             "QToolButton:focus {border-color:#82d9c8;}";
-        header->setStyleSheet(style+"QFrame#viewOverlay[activePreview=true] {border-color:#667582;border-left:2px solid #667582;}");
+        header->setStyleSheet(style);
         auto* row=new QHBoxLayout(header); row->setContentsMargins(7,1,7,1); row->setSpacing(0);
         name=new QLabel(title,header); name->setTextFormat(Qt::PlainText); name->setToolTip(title+"\n"+path);
         name->setSizePolicy(QSizePolicy::Ignored,QSizePolicy::Preferred);
@@ -116,9 +120,6 @@ public:
     }
     void setSurface(QWidget* surface) { content->addWidget(surface); }
     void setSelected(bool selected) {
-        if (header->property("activePreview").toBool()==selected) return;
-        header->setProperty("activePreview",selected);
-        header->style()->unpolish(header); header->style()->polish(header); header->update();
         setAccessibleName((selected?"Active preview: ":"Preview: ")+fullTitle);
     }
     void setCompact(bool value) {
@@ -1010,12 +1011,13 @@ void PreviewWindow::setupMenus(QToolButton* openButton) {
     });
     auto* help=menuBar()->addMenu("&Help");
     action(help,"&Keyboard Shortcuts","help-contents",QKeySequence::HelpContents,[this] {
-        QMessageBox::information(this,"Keyboard Shortcuts","Open assets: Ctrl+O\nClose preview: Ctrl+W\nReopen closed preview: Ctrl+Shift+T\nPrevious / next: Left / Right\nFit view: F\nReset camera: Ctrl+Home\nEdges: E · Triangle count: M (3D)\nCamera: 1 front · 3 right · 7 top · 9 isometric\nCtrl+1 / 3 / 7: opposite view · Numpad supported\nSave screenshot: Ctrl+Shift+S\nCopy screenshot: Ctrl+Shift+C\nReload / rebuild: Ctrl+R\nVideo: Space pause · M mute · Home restart\nVideo seek: Shift+Left / Right");
+        QMessageBox::information(this,"Keyboard Shortcuts","Point at a preview to target its shortcuts and menus.\nOutside previews, the last active preview stays the target.\n\nOpen assets: Ctrl+O\nClose preview: Ctrl+W\nReopen closed preview: Ctrl+Shift+T\nPrevious / next: Left / Right\nFit view: F\nReset camera: Ctrl+Home\nEdges: E · Triangle count: M (3D)\nCamera: 1 front · 3 right · 7 top · 9 isometric\nCtrl+1 / 3 / 7: opposite view · Numpad supported\nSave screenshot: Ctrl+Shift+S\nCopy screenshot: Ctrl+Shift+C\nReload / rebuild: Ctrl+R\nVideo: Space pause · M mute · Home restart\nVideo seek: Shift+Left / Right");
     });
     action(help,"&About Asset Preview","help-about",{},[this] { QMessageBox::about(this,"About Asset Preview","Asset Preview\nLive images, models, videos and baked materials.\nMIT licensed. Dependencies retain their own licenses."); });
 }
 
 PreviewWindow::PreviewWindow(Service* s) : service(s) {
+    hoverPosition=QCursor::pos();
     setWindowTitle("Asset Preview"); setWindowIcon(QIcon(QStringLiteral(":/icon.svg")));
     setMinimumSize(540,380); resize(1000,720); setAcceptDrops(true);
     auto* central=new QWidget; auto* vertical=new QVBoxLayout(central); vertical->setContentsMargins(8,6,8,6); vertical->setSpacing(6);
@@ -1103,6 +1105,10 @@ PreviewWindow::PreviewWindow(Service* s) : service(s) {
     restoreGeometry(settings.value("geometry").toByteArray());
 }
 void PreviewWindow::navigation() {
+    if (hoverTarget!=service->selected) {
+        hoverTarget=service->selected;
+        hoverPosition=QCursor::pos();
+    }
     QSignalBlocker block(selection); selection->clear();
     for (const auto& id:service->order) selection->addItem(service->entries[id]->config["label"].toString(),id);
     selection->setCurrentIndex(service->order.indexOf(service->selected));
@@ -1195,8 +1201,15 @@ void PreviewWindow::createCard(Entry& e) {
         e.view->inspectionChanged=[this,id](const QJsonObject& state,bool persist) { service->inspectionChanged(id,state,persist); };
     }
     for (auto* object:card->findChildren<QWidget*>()) {
+        object->setMouseTracking(true);
         object->setProperty("previewId",id); object->installEventFilter(this);
     }
+    // Embedded OpenGL windows receive their own enter/move events, bypassing
+    // the widget container. Route those through the same hover target path.
+    if (auto* object=dynamic_cast<QObject*>(e.view)) {
+        object->setProperty("previewId",id); object->installEventFilter(this);
+    }
+    card->setMouseTracking(true);
     card->setProperty("previewId",id); card->installEventFilter(this);
     card->setSurface(widget);
     widget->setToolTip(e.config["kind"].toString()=="video"?"Space / double click to pause · Shift+Left / Right seek · Home restart · M mute":
@@ -1218,9 +1231,32 @@ void PreviewWindow::selectCard(const QString& id) {
     const auto result=service->request({{"method","select"},{"id",id}});
     if (!result["ok"].toBool()) reportError(result["error"].toString());
 }
+void PreviewWindow::hoverCard(const QString& id,const QPoint& position,bool explicitInput) {
+    if (!isActiveWindow() || QApplication::activePopupWidget() || QApplication::activeModalWidget() ||
+        QGuiApplication::mouseButtons()!=Qt::NoButton) return;
+    // Layout/paging can send Enter without moving the mouse. Preserve an
+    // explicit keyboard/CLI target until real pointer movement or wheel input.
+    if (!explicitInput && position==hoverPosition && id!=service->selected) return;
+    const auto entry=service->entries.value(id);
+    if (!entry || !entry->active || !entry->surface || !entry->surface->isVisible()) return;
+    selectCard(id);
+    hoverPosition=position;
+    // Playback keys are handled by the native video surface. Move keyboard
+    // focus as well as the menu target so a previously focused video cannot
+    // consume another preview's M shortcut.
+    if (service->selected==id) entry->surface->setFocus(Qt::MouseFocusReason);
+}
 bool PreviewWindow::eventFilter(QObject* object,QEvent* event) {
     const auto id=object->property("previewId").toString();
-    if (!id.isEmpty() && event->type()==QEvent::MouseButtonPress) selectCard(id);
+    if (!id.isEmpty()) {
+        if (event->type()==QEvent::Enter) hoverCard(id,static_cast<QEnterEvent*>(event)->globalPosition().toPoint());
+        else if (event->type()==QEvent::MouseMove) hoverCard(id,static_cast<QMouseEvent*>(event)->globalPosition().toPoint());
+        else if (event->type()==QEvent::Wheel) hoverCard(id,static_cast<QWheelEvent*>(event)->globalPosition().toPoint(),true);
+        else if (event->type()==QEvent::MouseButtonPress) {
+            hoverPosition=static_cast<QMouseEvent*>(event)->globalPosition().toPoint();
+            selectCard(id);
+        }
+    }
     if (!id.isEmpty() && event->type()==QEvent::ContextMenu) {
         auto* context=static_cast<QContextMenuEvent*>(event); selectCard(id);
         QMenu menu(this); populatePreviewMenu(&menu,id,true); menu.exec(context->globalPos()); return true;

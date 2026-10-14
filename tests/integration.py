@@ -1044,7 +1044,7 @@ class PreviewIntegration(unittest.TestCase):
         client.rpc({"method":"close_all"}); client.rpc({"method":"reopen"})
         self.assertEqual(client.rpc({"method":"list"})["selected"],"reopen-middle")
 
-    @unittest.skipUnless(GPU and os.environ.get("QT_QPA_PLATFORM")!="wayland","Native grid selection, image persistence and screenshots")
+    @unittest.skipUnless(GPU and os.environ.get("QT_QPA_PLATFORM")!="wayland","Native grid hover, image persistence and screenshots")
     def test_37_active_grid_image_shortcuts_and_screenshots(self):
         for key in ("grid-first","grid-second","grid-third"): self.add(key,settings={"background":"dark"})
         client.rpc({"method":"layout","layout":"grid"}); self.show()
@@ -1053,7 +1053,8 @@ class PreviewIntegration(unittest.TestCase):
         try:
             time.sleep(.2); view=row("grid-second")["viewport"]; x=view["x"]+view["width"]//2; y=view["y"]+view["height"]//2
             loads={id:row(id)["metrics"]["loads"] for id in ("grid-first","grid-second","grid-third")}
-            input.click(x,y); eventually(lambda:client.rpc({"method":"list"})["selected"]=="grid-second")
+            input.motion(x,y); input.x.XFlush(input.display)
+            eventually(lambda:client.rpc({"method":"list"})["selected"]=="grid-second")
             time.sleep(.2); view=row("grid-second")["viewport"]; x=view["x"]+view["width"]//2; y=view["y"]+view["height"]//2
             for id,count in loads.items(): self.assertEqual(row(id)["metrics"]["loads"],count)
             self.assertTrue(row("grid-second")["selected"])
@@ -1184,5 +1185,101 @@ int main(int argc,char** argv) {
         client.rpc({"method":"compare","ids":["pair-one","pair-two"]})
         client.rpc({"method":"remove","id":"pair-one"})
         self.assertEqual(client.rpc({"method":"list"})["comparison"],[])
+
+    @unittest.skipUnless(GPU and os.environ.get("QT_QPA_PLATFORM")!="wayland","Native hover targeting across model, image and video surfaces")
+    def test_40_hover_targets_shortcuts_menus_and_native_focus(self):
+        obj=self.root/"hover-cube.obj"
+        subprocess.run([sys.executable,str(ROOT/"examples/generate_cube.py"),str(obj)],check=True,capture_output=True)
+        for id in ("hover-one","hover-two"):
+            client.rpc({"method":"add","entry":{"id":id,"path":str(obj),"settings":{"edges":False,"triangles":True}}})
+        self.add("hover-image")
+        clip=self.root/"hover-clip.mp4"; video(clip,duration=12)
+        client.rpc({"method":"add","entry":{"id":"hover-video","path":str(clip),"settings":{"paused":True,"muted":True}}})
+        client.rpc({"method":"layout","layout":"grid"}); self.show()
+        ids=("hover-one","hover-two","hover-image","hover-video")
+        eventually(lambda:all(row(id).get("metrics",{}).get("loads",0)>0 and row(id)["metrics"]["renders"]>0 for id in ids))
+        loads={id:row(id)["metrics"]["loads"] for id in ids}
+        input=XInput()
+        def point(id,overlay=None):
+            area=row(id)["overlays"][overlay] if overlay else row(id)["viewport"]
+            return area["x"]+area["width"]//2,area["y"]+area["height"]//2
+        def hover(id,overlay=None):
+            input.motion(*point(id,overlay)); input.x.XFlush(input.display)
+            eventually(lambda:client.rpc({"method":"list"})["selected"]==id)
+            time.sleep(.1) # Native focus delivery follows the target update.
+        try:
+            hover("hover-one"); input.press("e")
+            eventually(lambda:row("hover-one")["settings"]["edges"])
+            self.assertFalse(row("hover-two")["settings"]["edges"])
+            hover("hover-two"); input.press("m")
+            eventually(lambda:not row("hover-two")["settings"]["triangles"])
+            self.assertTrue(row("hover-one")["settings"]["triangles"])
+            camera=row("hover-one")["metrics"]["camera"]
+            input.press("7")
+            eventually(lambda:abs(row("hover-two")["metrics"]["camera"]["position"][0]-row("hover-two")["metrics"]["camera"]["focal"][0])<1e-6)
+            self.assertEqual(row("hover-one")["metrics"]["camera"],camera)
+            input.chord("Control_L","r")
+            eventually(lambda:row("hover-two")["metrics"]["loads"]>loads["hover-two"])
+            self.assertEqual(row("hover-one")["metrics"]["loads"],loads["hover-one"])
+            loads["hover-two"]=row("hover-two")["metrics"]["loads"]
+
+            # Hovering a native video takes its keyboard focus without a click.
+            hover("hover-video"); input.press("space")
+            eventually(lambda:not row("hover-video")["metrics"]["paused"])
+            input.press("space"); eventually(lambda:row("hover-video")["metrics"]["paused"])
+            input.press("m"); eventually(lambda:not row("hover-video")["metrics"]["muted"])
+            input.press("m"); eventually(lambda:row("hover-video")["metrics"]["muted"])
+            # The previously focused video must not consume a model's M key.
+            hover("hover-one","name"); input.press("m")
+            eventually(lambda:not row("hover-one")["settings"]["triangles"])
+            self.assertTrue(row("hover-video")["metrics"]["muted"])
+            hover("hover-image"); input.scroll(*point("hover-image"))
+            eventually(lambda:row("hover-image")["metrics"]["image_view"]["zoom"]>1)
+            input.press("f"); eventually(lambda:row("hover-image")["metrics"]["image_view"]["zoom"]==1)
+            input.press("m"); time.sleep(.1)
+            self.assertTrue(row("hover-video")["metrics"]["muted"])
+
+            # Moving behind an open menu cannot retarget its commands.
+            hover("hover-two"); input.shortcut("v")
+            eventually(lambda:client.rpc({"method":"list"})["options_open"])
+            input.motion(*point("hover-image")); input.x.XFlush(input.display); time.sleep(.15)
+            self.assertEqual(client.rpc({"method":"list"})["selected"],"hover-two")
+            input.press("Escape")
+            hover("hover-two")
+            # A drag stays owned by its origin even while crossing another card.
+            input.xt.XTestFakeButtonEvent(input.display,1,1,0)
+            input.motion(*point("hover-image")); input.x.XFlush(input.display); time.sleep(.15)
+            self.assertEqual(client.rpc({"method":"list"})["selected"],"hover-two")
+            input.xt.XTestFakeButtonEvent(input.display,1,0,0); input.x.XFlush(input.display)
+
+            # Failed hover saves preserve the old target; moving inside the
+            # same card retries once state storage is writable again.
+            hover("hover-one")
+            registry=self.root/"state/previews.json"; backup=registry.with_suffix(".backup")
+            registry.rename(backup); registry.mkdir()
+            try:
+                input.motion(*point("hover-two")); input.x.XFlush(input.display); time.sleep(.15)
+                self.assertEqual(client.rpc({"method":"list"})["selected"],"hover-one")
+            finally: registry.rmdir(); backup.replace(registry)
+            x,y=point("hover-two"); input.motion(x+5,y); input.x.XFlush(input.display)
+            eventually(lambda:client.rpc({"method":"list"})["selected"]=="hover-two")
+            for id,count in loads.items(): self.assertEqual(row(id)["metrics"]["loads"],count)
+            # Explicit selection wins over a stationary pointer until it moves.
+            client.rpc({"method":"select","id":"hover-one"}); input.press("e")
+            eventually(lambda:not row("hover-one")["settings"]["edges"])
+            self.assertFalse(row("hover-two")["settings"]["edges"])
+            input.motion(x+10,y); input.x.XFlush(input.display)
+            eventually(lambda:client.rpc({"method":"list"})["selected"]=="hover-two")
+            # Returning to the exact same point after using the selector/menu
+            # area must still activate the preview, without an extra wiggle.
+            input.motion(900,10); input.x.XFlush(input.display); time.sleep(.1)
+            client.rpc({"method":"select","id":"hover-one"})
+            input.motion(x+10,y); input.x.XFlush(input.display)
+            eventually(lambda:client.rpc({"method":"list"})["selected"]=="hover-two")
+            # Menus/toolbar space retain the last target for keyboard-only use.
+            input.motion(900,10); input.x.XFlush(input.display); time.sleep(.1)
+            input.press("e"); eventually(lambda:row("hover-two")["settings"]["edges"])
+            self.assertFalse(row("hover-one")["settings"]["edges"])
+        finally: input.close()
 
 if __name__ == "__main__": unittest.main(verbosity=2)

@@ -21,8 +21,14 @@ replacement is explicit, files may not exist yet. Window creation is deliberate
 through `gui` / `show`. Closing hides the window and releases every visible entry;
 `stop` / `quit` exits the server. Private version-1 state uses QSaveFile and retains
 invalid/corrupt state with an error. Session diagnostics are separate from specs.
-Failed selection saves retain the previous selection and active views; toolbar
-and keyboard navigation report the failure without terminating the service.
+Failed selection saves retain the previous selection and active views; hover,
+toolbar and keyboard navigation report the failure without terminating the service.
+In the active window, hovering a visible preview updates the same saved selection
+and recent-preview history used by clicks and keyboard navigation. No explicit
+selection highlight is drawn. Popups/dialogs and ongoing drags keep their target;
+leaving the cards retains the last target as the keyboard/menu fallback.
+Reflow under a stationary mouse preserves explicit keyboard/CLI selection until
+the next pointer movement, scroll or click.
 Transient save/settings errors show the status bar even in compact mode.
 Model/material registrations optionally retain a validated per-preview `camera`
 object (position/focal/up vectors, angle and parallel_span). Camera state stays

@@ -6,6 +6,7 @@
 #include <QMainWindow>
 #include <QMap>
 #include <QProcess>
+#include <QPoint>
 #include <QTimer>
 #include <memory>
 
@@ -57,6 +58,7 @@ private:
     void cameraViews(QMenu*,const QString& id);
     void saveScreenshot(const QString& id, bool clipboard=false, bool wholeWindow=false);
     void selectCard(const QString& id);
+    void hoverCard(const QString& id, const QPoint& position, bool explicitInput=false);
     void setupMenus(QToolButton* openButton);
     void populateSettings(QMenu*,const QString&,const QJsonObject&,const std::function<void(QJsonObject)>&);
     QAction *closeAction, *reopenAction, *saveAction, *copyAction;
@@ -74,6 +76,8 @@ private:
     QComboBox* density;
     QCheckBox* compactButton;
     QToolButton* closeAllButton;
+    QPoint hoverPosition;
+    QString hoverTarget;
 };
 
 class Service final : public QObject {

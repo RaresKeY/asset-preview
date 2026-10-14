@@ -89,8 +89,9 @@ keeping the window, files and remembered settings.
 The **⋯** menu provides display options, including clay/textured shading,
 lighting, grid, axes, projection and Y/Z-up. Videos loop and start muted.
 3D camera angle, pan and zoom are saved per preview across switching and restarts.
-Image zoom and pan are saved too. Click a grid card to make it active; the title
-border marks the selection. **Ctrl+W** closes it; **Ctrl+Shift+T** reopens the
+Image zoom and pan are saved too. Point at a preview to target its shortcuts and
+menus, with no selection highlight. Outside the previews, the last active one
+stays the target. **Ctrl+W** closes it; **Ctrl+Shift+T** reopens the
 last closed preview with its settings and view (within the current session).
 
 **View → Camera Views** offers front/right/top/isometric with **1 / 3 / 7 / 9**;

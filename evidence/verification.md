@@ -1,5 +1,22 @@
 # Verification — October 5, 2026
 
+## Hover targeting — October 14, 2026
+
+The release build and `git diff --check` pass. The final functional lane passes
+24 tests with 13 hardware skips; all 37 hardware tests pass. Native mouse input
+targets 3D, image and video shortcuts without a click, including overlays,
+camera presets, reload, fit, screenshots, close/reopen and video playback keys.
+Open menus and ongoing drags retain their target. Explicit keyboard/CLI selection
+survives reflow beneath a stationary mouse; subsequent movement resumes hover.
+Failed hover saves preserve the old target and existing loaded views.
+
+Matched 540×380, 1000×720 and 1600×1000 window captures show identical card-title
+styling across targets, with no selected tint/border change. Mixed grids and
+comparison use NVIDIA GeForce RTX 2080 Ti/PCIe/SSE2 inside Gamescope headless.
+The [hover review](ui/hover-review.md) records scope, checks and remaining limits.
+The shortcut's checkout build was redeployed with a graceful restart, preserving
+all six registrations, selection, layout, comparison state and preferences.
+
 ## Desktop controls — October 14, 2026
 
 The host release build and `git diff --check` pass. `tools/test.sh functional`
