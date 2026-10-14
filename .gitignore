@@ -5,3 +5,5 @@
 /evidence/video/server.log
 
 /release/
+/captures/*
+!/captures/.gitkeep

@@ -24,14 +24,28 @@ invalid/corrupt state with an error. Session diagnostics are separate from specs
 Failed selection saves retain the previous selection and active views; toolbar
 and keyboard navigation report the failure without terminating the service.
 Transient save/settings errors show the status bar even in compact mode.
+Model/material registrations optionally retain a validated per-preview `camera`
+object (position/focal/up vectors, angle and parallel_span). Camera state stays
+separate from remembered defaults; legacy entries use the initial fitted view.
+Images optionally retain validated `image_view` zoom and normalized pan, also
+separate from defaults. Same-kind reconnections retain both inspection types.
 Removing the selected preview returns to the most recently selected surviving
 preview in this service session. Without selection history, it selects the
 previous neighbor, or the next neighbor when closing the first entry. Removing
 another preview preserves selection. History has one entry per surviving ID,
 is cleared by Close all, and is not persisted. Failed removal saves preserve
 the registry, selection, history and live views.
+The session also retains at most 32 closed configurations for `reopen`, including
+Close all removals. Reopening restores the original list position and selects
+the preview only after a successful save; failure retains the closed record.
+Records whose ID was registered again are skipped to preserve current work.
+History is configuration only and does not survive service restarts.
 Grid size (2/3/4) and compact mode are optional version-1 fields with backward
 compatible defaults; partial layout requests merge and validate before saving.
+Optional `comparison` (empty or two distinct model/material IDs) and `camera_sync`
+fields are also version-1 state. `compare` sets or ends the pair; existing layout
+remains the return layout. Invalid IDs/flags are rejected. Selecting a preview
+outside the pair, replacing it with another kind, or closing it ends comparison.
 Every display/playback setting change also updates remembered defaults, persisted
 in the optional version-1 `preferences` object. Image, video and shared model/material
 (`3d`) groups retain all setting keys independently. New registrations inherit the
@@ -90,4 +104,4 @@ background jobs and descendants left behind after normal generator completion.
 Packaged desktop launchers set the canonical reverse-DNS desktop identity;
 source-checkout launchers keep their existing desktop entry identity.
 
-The `defaults` request accepts `group` (`image`, `video`, `3d`) and a validated `settings` patch. It saves remembered values atomically without changing existing entries; failed saves restore preferences. The top Settings menu uses this path independently of per-preview changes.
+The `defaults` request accepts `group` (`image`, `video`, `3d`) and a validated `settings` patch. It saves remembered values atomically without changing existing entries; failed saves restore preferences. The Settings menu uses this path independently of View > Preview Options.

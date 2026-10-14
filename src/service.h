@@ -10,9 +10,10 @@
 #include <memory>
 
 class QMenu;
+class QAction;
+class QShortcut;
 class QLabel;
 class QComboBox;
-class QPushButton;
 class QGridLayout;
 class QFrame;
 class QCheckBox;
@@ -42,25 +43,37 @@ public:
     void arrange(const QStringList& ids);
     void createCard(Entry& entry);
     void removeCard(Entry& entry);
+    void reportError(const QString& error);
 protected:
     void closeEvent(QCloseEvent*) override;
     void changeEvent(QEvent*) override;
     void dragEnterEvent(QDragEnterEvent*) override;
     void dropEvent(QDropEvent*) override;
+    void resizeEvent(QResizeEvent*) override;
+    bool eventFilter(QObject*, QEvent*) override;
 private:
     void options(const QString& id);
+    void populatePreviewMenu(QMenu*, const QString& id, bool context);
+    void cameraViews(QMenu*,const QString& id);
+    void saveScreenshot(const QString& id, bool clipboard=false, bool wholeWindow=false);
+    void selectCard(const QString& id);
+    void setupMenus(QToolButton* openButton);
     void populateSettings(QMenu*,const QString&,const QJsonObject&,const std::function<void(QJsonObject)>&);
-    void reportError(const QString& error);
+    QAction *closeAction, *reopenAction, *saveAction, *copyAction;
+    QAction* fitAction;
+    QList<QAction*> modelActions;
+    QList<QShortcut*> modelShortcuts;
+    QCheckBox* syncButton;
     Service* service;
     QWidget* canvas;
     QGridLayout* grid;
     QLabel* position;
-    QComboBox* selection;
-    QPushButton* previous;
-    QPushButton* next;
+    QComboBox* selection=nullptr;
+    QToolButton* previous;
+    QToolButton* next;
     QComboBox* density;
     QCheckBox* compactButton;
-    QPushButton* closeAllButton;
+    QToolButton* closeAllButton;
 };
 
 class Service final : public QObject {
@@ -73,8 +86,13 @@ public:
     void reconcile();
     QJsonObject navigate(int delta);
     void save();
+    void inspectionChanged(const QString& id,const QJsonObject& state,bool persist);
+    void syncCamera(const QString& id);
     int pageSize() const { return layout=="grid" ? gridSize*gridSize : 1; }
     QStringList order;
+    QStringList comparison;
+    bool cameraSync=true;
+    bool syncingCamera=false;
     QMap<QString, std::shared_ptr<Entry>> entries;
     QString selected, layout = "single", socketPath, statePath;
     int gridSize = 2;
@@ -96,6 +114,8 @@ private:
     QJsonObject describe(const Entry&) const;
     QJsonObject preferences;
     QStringList selectionHistory;
+    struct ClosedEntry { QJsonObject config; int index; };
+    QList<ClosedEntry> closedEntries;
     QLocalServer server;
     QFileSystemWatcher watcher;
     QTimer debounce;

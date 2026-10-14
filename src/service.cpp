@@ -18,12 +18,21 @@
 #include <QLocale>
 #include <QMimeData>
 #include <QMenu>
+#include <cmath>
 #include <QMenuBar>
+#include <QActionGroup>
+#include <QClipboard>
+#include <QContextMenuEvent>
+#include <QDateTime>
+#include <QDesktopServices>
+#include <QMessageBox>
+#include <QStandardPaths>
+#include <QStyle>
+#include <QToolBar>
 #include <QInputDialog>
 #include <QResizeEvent>
 #include <QShowEvent>
 #include <QToolButton>
-#include <QPushButton>
 #include <QPainter>
 #include <QRegularExpression>
 #include <QSaveFile>
@@ -63,6 +72,12 @@ bool videoPath(const QString& path) {
 QString absolute(const QString& path) { return QDir::cleanPath(QFileInfo(path).absoluteFilePath()); }
 QByteArray readSmall(const QString& path) { QFile f(path); return f.open(QIODevice::ReadOnly) ? f.read(4*1024*1024) : QByteArray{}; }
 QString preferenceGroup(const QString& kind) { return kind=="model" || kind=="material" ? "3d" : kind; }
+QString captureDirectory() {
+    QDir root(QCoreApplication::applicationDirPath()); root.cdUp();
+    if (root.exists("CMakeLists.txt") && root.exists("bin/asset-preview")) return root.filePath("captures");
+    const auto pictures=QStandardPaths::writableLocation(QStandardPaths::PicturesLocation);
+    return QDir(pictures.isEmpty()?QDir::homePath()+"/Pictures":pictures).filePath("Asset Preview");
+}
 
 class PreviewCard final : public QFrame {
 public:
@@ -78,7 +93,7 @@ public:
             "QToolButton {color:#e8edf3;background:transparent;border:1px solid transparent;border-radius:3px;padding:2px;}"
             "QToolButton:hover {background:#394453;} QToolButton:pressed {background:#485566;}"
             "QToolButton:focus {border-color:#82d9c8;}";
-        header->setStyleSheet(style);
+        header->setStyleSheet(style+"QFrame#viewOverlay[activePreview=true] {border-color:#667582;border-left:2px solid #667582;}");
         auto* row=new QHBoxLayout(header); row->setContentsMargins(7,1,7,1); row->setSpacing(0);
         name=new QLabel(title,header); name->setTextFormat(Qt::PlainText); name->setToolTip(title+"\n"+path);
         name->setSizePolicy(QSizePolicy::Ignored,QSizePolicy::Preferred);
@@ -87,10 +102,12 @@ public:
         controls->setStyleSheet(style);
         auto* buttons=new QHBoxLayout(controls); buttons->setContentsMargins(3,1,3,1); buttons->setSpacing(3);
         fit=new QToolButton(controls); fit->setText("Fit"); fit->setToolTip("Fit camera / image (also double click)");
+        reset=new QToolButton(controls); reset->setText("Reset"); reset->setToolTip("Reset camera angle, pan and zoom");
+        reset->setAccessibleName("Reset camera"); reset->hide();
         options=new QToolButton(controls); options->setText("⋯"); options->setToolTip("Preview options");
         options->setAccessibleName("Preview options");
         remove=new QToolButton(controls); remove->setText("×"); remove->setToolTip("Remove this preview");
-        for (auto* button:{fit,options,remove}) { button->setFixedSize(32,28); button->setFocusPolicy(Qt::StrongFocus); buttons->addWidget(button); }
+        for (auto* button:{fit,reset,options,remove}) { button->setFixedSize(button==reset?50:32,28); button->setFocusPolicy(Qt::StrongFocus); buttons->addWidget(button); }
         footer=new QLabel(this); footer->setTextFormat(Qt::PlainText); footer->setAttribute(Qt::WA_NativeWindow);
         footer->setTextInteractionFlags(Qt::TextSelectableByMouse);
         footer->setStyleSheet("color:#e8edf3;background:#20262e;border:1px solid #414b57;border-radius:3px;padding:2px 5px;");
@@ -98,6 +115,12 @@ public:
         triangles->setStyleSheet(footer->styleSheet()); triangles->setAccessibleName("Triangle count"); triangles->hide();
     }
     void setSurface(QWidget* surface) { content->addWidget(surface); }
+    void setSelected(bool selected) {
+        if (header->property("activePreview").toBool()==selected) return;
+        header->setProperty("activePreview",selected);
+        header->style()->unpolish(header); header->style()->polish(header); header->update();
+        setAccessibleName((selected?"Active preview: ":"Preview: ")+fullTitle);
+    }
     void setCompact(bool value) {
         compact=value;
         updateStatus(); place();
@@ -130,7 +153,8 @@ public:
         for (auto* widget: {static_cast<QWidget*>(header),static_cast<QWidget*>(controls),static_cast<QWidget*>(footer),static_cast<QWidget*>(triangles)})
             if (widget->isVisible()) painter.drawPixmap(widget->mapTo(window,QPoint()),widget->grab());
     }
-    QToolButton *fit, *options, *remove;
+    QToolButton *fit, *reset, *options, *remove;
+    bool model=false;
     QLabel* footer;
 protected:
     void resizeEvent(QResizeEvent* event) override { QFrame::resizeEvent(event); place(); }
@@ -141,8 +165,9 @@ private:
     void place() {
         name->ensurePolished(); footer->ensurePolished(); triangles->ensurePolished(); controls->ensurePolished();
         const int inset=compact?4:6;
-        const bool dense=compact || width()<240;
+        const bool dense=compact || width()<300;
         fit->setVisible(!dense); remove->setVisible(!dense);
+        reset->setVisible(model && !dense);
         const int headerHeight=compact?30:34;
         const int controlWidth=controls->sizeHint().width();
         controls->setGeometry(width()-inset-controlWidth,inset,controlWidth,headerHeight);
@@ -226,6 +251,17 @@ bool Service::start(QString& error) {
         if (doc.object().contains("compact") && !doc.object()["compact"].isBool()) { error="Invalid saved compact mode"; return false; }
         compact=doc.object()["compact"].toBool(false);
         selected=doc.object()["selected"].toString();
+        if (doc.object().contains("comparison")) {
+            if (!doc.object()["comparison"].isArray()) { error="Invalid saved comparison"; return false; }
+            for (const auto& id:doc.object()["comparison"].toArray()) {
+                const auto entry=entries.value(id.toString());
+                if (!id.isString() || !entry || (entry->config["kind"]!="model" && entry->config["kind"]!="material") || comparison.contains(id.toString())) { error="Invalid saved comparison preview"; return false; }
+                comparison.append(id.toString());
+            }
+            if (!comparison.isEmpty() && comparison.size()!=2) { error="Comparison requires two previews"; return false; }
+        }
+        if (doc.object().contains("camera_sync") && !doc.object()["camera_sync"].isBool()) { error="Invalid saved camera sync"; return false; }
+        cameraSync=doc.object()["camera_sync"].toBool(true);
     }
     if (!entries.contains(selected)) selected=order.value(0);
     QLocalServer::removeServer(socketPath);
@@ -238,7 +274,8 @@ void Service::save() {
     QSaveFile file(statePath + "/previews.json");
     if (!file.open(QIODevice::WriteOnly)) throw std::runtime_error(file.errorString().toStdString());
     file.setPermissions(QFileDevice::ReadOwner|QFileDevice::WriteOwner);
-    auto data=QJsonDocument(QJsonObject{{"version",1},{"entries",rows},{"selected",selected},{"layout",layout},{"grid_size",gridSize},{"compact",compact},{"preferences",preferences}}).toJson();
+    auto data=QJsonDocument(QJsonObject{{"version",1},{"entries",rows},{"selected",selected},{"layout",layout},{"grid_size",gridSize},{"compact",compact},{"preferences",preferences},
+        {"comparison",QJsonArray::fromStringList(comparison)},{"camera_sync",cameraSync}}).toJson();
     if (file.write(data) != data.size() || !file.commit()) throw std::runtime_error("Cannot save preview registry");
 }
 QString Service::validate(QJsonObject& c, bool restore) {
@@ -252,6 +289,30 @@ QString Service::validate(QJsonObject& c, bool restore) {
     if (kind != "image" && kind != "model" && kind != "material" && kind != "video") return "Kind must be image, model, material or video";
     if (!restore && kind!="video" && QFileInfo(path).size() > 256*1024*1024) return "Preview file exceeds 256 MiB";
     c["kind"]=kind;
+    if (c.contains("image_view")) {
+        if (kind!="image" || !c["image_view"].isObject()) return "image_view requires an image preview object";
+        const auto view=c["image_view"].toObject(); const double zoom=view["zoom"].toDouble(-1);
+        const auto pan=view["pan"].toArray();
+        if (zoom<.05 || zoom>32 || pan.size()!=2) return "Invalid image view";
+        for (const auto& value:pan) if (!value.isDouble() || !std::isfinite(value.toDouble()) || std::abs(value.toDouble())>1e6) return "Invalid image pan";
+    }
+    if (c.contains("camera")) {
+        if ((kind!="model" && kind!="material") || !c["camera"].isObject()) return "camera requires a 3D preview object";
+        const auto camera=c["camera"].toObject();
+        for (const auto& key:{"position","focal","up"}) {
+            const auto values=camera[key].toArray();
+            if (values.size()!=3) return "Camera vectors must contain three numbers";
+            for (const auto& value:values) if (!value.isDouble() || !std::isfinite(value.toDouble()) || std::abs(value.toDouble())>1e12) return "Invalid camera vector";
+        }
+        const double angle=camera["angle"].toDouble(-1), span=camera["parallel_span"].toDouble(-1);
+        if (!std::isfinite(angle) || angle<=0 || angle>=180 || !std::isfinite(span) || span<=0 || span>1e12) return "Invalid camera scale";
+        double distance=0, upLength=0;
+        for (int i=0;i<3;++i) {
+            const double d=camera["position"].toArray()[i].toDouble()-camera["focal"].toArray()[i].toDouble();
+            distance+=d*d; const double u=camera["up"].toArray()[i].toDouble(); upLength+=u*u;
+        }
+        if (distance<1e-18 || upLength<1e-18) return "Degenerate camera";
+    }
     QString id=c["id"].toString();
     if (id.isEmpty()) id=QUuid::createUuid().toString(QUuid::Id128).left(12);
     if (!QRegularExpression("^[A-Za-z0-9_-]{1,64}$").match(id).hasMatch()) return "ID must use letters, digits, underscores or dashes (max 64)";
@@ -296,6 +357,7 @@ QString Service::validate(QJsonObject& c, bool restore) {
     return {};
 }
 QJsonObject Service::add(QJsonObject config, bool restore) {
+    const auto oldComparison=comparison;
     const QString error=validate(config,restore);
     if (!error.isEmpty()) return failure(error);
     const QString id=config["id"].toString();
@@ -308,6 +370,8 @@ QJsonObject Service::add(QJsonObject config, bool restore) {
         // Reconnecting the same asset keeps its inspection choices. Explicit
         // registration options still win over remembered preferences.
         if (existing && old["kind"]==config["kind"]) {
+            if (!config.contains("camera") && old.contains("camera")) config["camera"]=old["camera"];
+            if (!config.contains("image_view") && old.contains("image_view")) config["image_view"]=old["image_view"];
             const auto previous=old["settings"].toObject();
             for (auto i=previous.begin();i!=previous.end();++i) settings[i.key()]=i.value();
         }
@@ -319,10 +383,12 @@ QJsonObject Service::add(QJsonObject config, bool restore) {
     }
     if (!prior) { prior=std::make_shared<Entry>(); entries[id]=prior; order.append(id); }
     prior->config=config;
+    if (comparison.contains(id) && config["kind"]!="model" && config["kind"]!="material") comparison.clear();
     if (selected.isEmpty()) selected=id;
     if (!restore) {
         try { save(); }
         catch (const std::exception& e) {
+            comparison=oldComparison;
             if (existing) prior->config=old;
             else { entries.remove(id); order.removeAll(id); if (selected==id) selected=order.value(0); }
             return failure(e.what());
@@ -334,6 +400,7 @@ QJsonObject Service::add(QJsonObject config, bool restore) {
 }
 QJsonObject Service::describe(const Entry& e) const {
     QJsonObject result=e.config;
+    result["selected"]=e.config["id"].toString()==selected;
     result["active"]=e.active; result["status"]=e.status;
     result["builds"]=e.builds; result["revisions"]=e.revisions;
     result["building"]=bool(e.process && e.process->state()!=QProcess::NotRunning);
@@ -346,6 +413,12 @@ QJsonObject Service::describe(const Entry& e) const {
     if (e.optionsButton && window) {
         const auto p=e.optionsButton->mapTo(window.get(),QPoint());
         result["controls"]=QJsonObject{{"options",QJsonObject{{"x",p.x()},{"y",p.y()},{"width",e.optionsButton->width()},{"height",e.optionsButton->height()}}}};
+        const auto* reset=static_cast<PreviewCard*>(e.card)->reset;
+        const auto resetPosition=reset->mapTo(window.get(),QPoint());
+        auto controls=result["controls"].toObject();
+        controls["reset"]=QJsonObject{{"x",resetPosition.x()},{"y",resetPosition.y()},
+            {"width",reset->width()},{"height",reset->height()},{"visible",reset->isVisible()}};
+        result["controls"]=controls;
         result["status_visible"]=e.statusLabel->isVisible();
         result["overlays"]=static_cast<PreviewCard*>(e.card)->overlays(window.get());
     }
@@ -361,7 +434,8 @@ QJsonObject Service::request(const QJsonObject& r) {
             return success({{"entries",rows},{"selected",selected},{"layout",layout},{"active",active},{"grid_size",gridSize},{"compact",compact},
                 {"window_visible",bool(window && window->isVisible())},{"watched_files",watcher.files().size()},
                 {"watched_directories",watcher.directories().size()},{"pid",qint64(QCoreApplication::applicationPid())},
-                {"platform",QGuiApplication::platformName()},{"options_open",bool(QApplication::activePopupWidget())},{"preferences",preferences}});
+                 {"platform",QGuiApplication::platformName()},{"options_open",bool(QApplication::activePopupWidget())},{"preferences",preferences},
+                 {"comparison",QJsonArray::fromStringList(comparison)},{"camera_sync",cameraSync},{"closed_count",closedEntries.size()}});
         }
         if (method=="defaults") {
             const auto group=r["group"].toString();
@@ -377,10 +451,49 @@ QJsonObject Service::request(const QJsonObject& r) {
             return success();
         }
         if (method=="add") return add(r["entry"].toObject());
+        if (method=="reopen") {
+            if (closedEntries.isEmpty()) return failure("No closed previews to reopen");
+            if (entries.size()>=256) return failure("Preview limit reached (256)");
+            auto closed=closedEntries.last(); auto config=closed.config;
+            const auto invalid=validate(config,true); if (!invalid.isEmpty()) return failure(invalid);
+            const auto reopenId=config["id"].toString();
+            if (entries.contains(reopenId)) { closedEntries.removeLast(); return request(r); }
+            const auto oldOrder=order; const auto oldSelected=selected; const auto oldComparison=comparison;
+            auto entry=std::make_shared<Entry>(); entry->config=config; entries[reopenId]=entry;
+            order.insert(std::clamp(closed.index,0,int(order.size())),reopenId); selected=reopenId; comparison.clear();
+            try { save(); } catch (...) { entries.remove(reopenId); order=oldOrder; selected=oldSelected; comparison=oldComparison; throw; }
+            closedEntries.removeLast(); selectionHistory.removeAll(reopenId);
+            if (!oldSelected.isEmpty()) { selectionHistory.removeAll(oldSelected); selectionHistory.append(oldSelected); }
+            reconcile(); return success({{"id",reopenId}});
+        }
+        if (method=="compare") {
+            QStringList ids=comparison;
+            if (r.contains("ids")) {
+                if (!r["ids"].isArray()) return failure("Comparison IDs must be an array");
+                ids.clear();
+                for (const auto& value:r["ids"].toArray()) {
+                    const auto entry=entries.value(value.toString());
+                    if (!value.isString() || !entry || (entry->config["kind"]!="model" && entry->config["kind"]!="material") || ids.contains(value.toString())) return failure("Comparison requires distinct 3D previews");
+                    ids.append(value.toString());
+                }
+                if (!ids.isEmpty() && ids.size()!=2) return failure("Comparison requires two previews");
+            }
+            if (r.contains("camera_sync") && !r["camera_sync"].isBool()) return failure("camera_sync must be boolean");
+            const auto oldIds=comparison; const auto oldSelected=selected; const bool oldSync=cameraSync;
+            comparison=ids; cameraSync=r["camera_sync"].toBool(cameraSync);
+            if (!ids.isEmpty() && !ids.contains(selected)) selected=ids.first();
+            try { save(); } catch (...) { comparison=oldIds; selected=oldSelected; cameraSync=oldSync; throw; }
+            reconcile(); if (cameraSync) syncCamera(selected);
+            return success();
+        }
         if (method=="close_all") {
             const auto previousOrder=order; const auto previousSelected=selected;
-            order.clear(); selected.clear();
-            try { save(); } catch (...) { order=previousOrder; selected=previousSelected; throw; }
+            const auto oldComparison=comparison;
+            order.clear(); selected.clear(); comparison.clear();
+            try { save(); } catch (...) { order=previousOrder; selected=previousSelected; comparison=oldComparison; throw; }
+            for (const auto& id:previousOrder) if (id!=previousSelected) closedEntries.append({entries[id]->config,int(previousOrder.indexOf(id))});
+            if (entries.contains(previousSelected)) closedEntries.append({entries[previousSelected]->config,int(previousOrder.indexOf(previousSelected))});
+            while (closedEntries.size()>32) closedEntries.removeFirst();
             selectionHistory.clear();
             // Persist first so failed saves leave running previews intact.
             for (const auto& id:previousOrder) deactivate(id);
@@ -400,8 +513,10 @@ QJsonObject Service::request(const QJsonObject& r) {
             if (r.contains("grid_size") && (!r["grid_size"].isDouble() || r["grid_size"].toDouble()!=size || size<2 || size>4)) return failure("Grid size must be 2, 3 or 4");
             if (r.contains("compact") && !r["compact"].isBool()) return failure("compact must be boolean");
             const auto previous=layout; const auto previousSize=gridSize; const auto previousCompact=compact;
+            const auto oldComparison=comparison;
             layout=next; gridSize=size; compact=r["compact"].toBool(compact);
-            try { save(); } catch (...) { layout=previous; gridSize=previousSize; compact=previousCompact; throw; }
+            if (r.contains("layout") || r.contains("grid_size")) comparison.clear();
+            try { save(); } catch (...) { layout=previous; gridSize=previousSize; compact=previousCompact; comparison=oldComparison; throw; }
             reconcile(); return success();
         }
         if (method=="capture") {
@@ -417,6 +532,8 @@ QJsonObject Service::request(const QJsonObject& r) {
                 }
             }
             for (const auto& e:entries) if (e->active && e->card) static_cast<PreviewCard*>(e->card)->compose(painter,window.get());
+            if (auto* popup=QApplication::activePopupWidget())
+                painter.drawPixmap(popup->mapToGlobal(QPoint())-window->mapToGlobal(QPoint()),popup->grab());
             painter.end();
             if (!capture.save(path,"PNG")) return failure("Cannot save capture");
             return success();
@@ -425,8 +542,10 @@ QJsonObject Service::request(const QJsonObject& r) {
         auto e=entries[id];
         if (method=="remove") {
             const auto previousOrder=order; const auto previousSelected=selected;
+            const auto oldComparison=comparison;
             const int index=order.indexOf(id);
             entries.remove(id); order.removeAll(id);
+            if (comparison.contains(id)) comparison.clear();
             if (selected==id) {
                 selected.clear();
                 for (auto it=selectionHistory.crbegin();it!=selectionHistory.crend();++it)
@@ -434,8 +553,9 @@ QJsonObject Service::request(const QJsonObject& r) {
                 if (selected.isEmpty()) selected=order.value(std::max(0,index-1));
             }
             try { save(); } catch (...) {
-                entries[id]=e; order=previousOrder; selected=previousSelected; throw;
+                entries[id]=e; order=previousOrder; selected=previousSelected; comparison=oldComparison; throw;
             }
+            closedEntries.append({e->config,index}); if (closedEntries.size()>32) closedEntries.removeFirst();
             selectionHistory.removeAll(id);
             selectionHistory.removeAll(selected);
             // Keep live views intact until the removal has been persisted.
@@ -443,16 +563,29 @@ QJsonObject Service::request(const QJsonObject& r) {
             reconcile(); return success();
         }
         if (method=="select") {
+            if (selected==id) return success();
             const auto previous=selected; selected=id;
-            try { save(); } catch (...) { selected=previous; throw; }
+            const auto oldComparison=comparison;
+            if (!comparison.isEmpty() && !comparison.contains(id)) comparison.clear();
+            try { save(); } catch (...) { selected=previous; comparison=oldComparison; throw; }
             if (previous!=id && !previous.isEmpty()) {
                 selectionHistory.removeAll(previous);
                 selectionHistory.append(previous);
                 selectionHistory.removeAll(id);
             }
-            reconcile(); return success();
+            // A visible card only needs its selection state updated.
+            // Retain its existing layout and native input focus.
+            if (e->active && comparison==oldComparison && window) window->navigation();
+            else reconcile();
+            return success();
         }
         if (method=="reload") { if (e->active) { if (!e->config["command"].toArray().isEmpty()) build(id); else reload(id); } return success(); }
+        if (method=="camera_view") {
+            const auto view=r["view"].toString();
+            if (!e->view || (e->config["kind"]!="model" && e->config["kind"]!="material")) return failure("Camera views require a visible 3D preview");
+            if (!QSet<QString>{"front","back","left","right","top","bottom","isometric"}.contains(view)) return failure("Invalid camera view");
+            e->view->cameraView(view); return success();
+        }
         if (method=="seek") {
             if (e->config["kind"].toString()!="video" || !e->view) return failure("Seek requires a visible video");
             if (!r["seconds"].isDouble() || r["seconds"].toDouble()<0) return failure("Seek requires nonnegative seconds");
@@ -682,6 +815,40 @@ void Service::build(const QString& id) {
         p->start("/usr/bin/flatpak-spawn",arguments);
     } else p->start(args[0].toString(),arguments);
 }
+void Service::syncCamera(const QString& id) {
+    if (!cameraSync || comparison.size()!=2 || !comparison.contains(id) || syncingCamera) return;
+    const auto source=entries.value(id), target=entries.value(comparison[id==comparison[0]?1:0]);
+    if (!source || !target || !source->view || !target->view) return;
+    auto camera=source->view->cameraState(); const auto home=source->view->cameraHome(), targetHome=target->view->cameraHome();
+    if (camera.isEmpty() || home.isEmpty() || targetHome.isEmpty() || target->view->cameraState().isEmpty()) return;
+    syncingCamera=true;
+    const auto settings=source->config["settings"].toObject(); auto targetSettings=target->config["settings"].toObject();
+    for (const auto& key:{"orthographic","up_axis","lock_horizon"}) if (settings.contains(key)) targetSettings[key]=settings[key]; else targetSettings.remove(key);
+    if (targetSettings!=target->config["settings"].toObject()) { target->config["settings"]=targetSettings; target->view->settings(target->config); }
+    auto radius=[](const QJsonObject& c) { double value=0; const auto p=c["position"].toArray(), f=c["focal"].toArray();
+        for (int i=0;i<3;++i) value+=std::pow(p[i].toDouble()-f[i].toDouble(),2);
+        return std::sqrt(value); };
+    const double ratio=radius(targetHome)/std::max(1e-9,radius(home));
+    const auto center=home["focal"].toArray(), targetCenter=targetHome["focal"].toArray();
+    for (const auto& key:{"position","focal"}) {
+        const auto values=camera[key].toArray(); QJsonArray moved;
+        for (int i=0;i<3;++i) moved.append(targetCenter[i].toDouble()+(values[i].toDouble()-center[i].toDouble())*ratio);
+        camera[key]=moved;
+    }
+    camera["parallel_span"]=camera["parallel_span"].toDouble()*ratio;
+    target->config["camera"]=camera; target->view->setCameraState(camera);
+    syncingCamera=false;
+}
+void Service::inspectionChanged(const QString& id,const QJsonObject& state,bool persist) {
+    const auto entry=entries.value(id); if (!entry || !entry->active || state.isEmpty()) return;
+    const auto key=entry->config["kind"].toString()=="image"?"image_view":"camera";
+    entry->config[key]=state;
+    if (key==QString("camera")) syncCamera(id);
+    if (persist) {
+        try { save(); }
+        catch (const std::exception& error) { if (window) window->reportError(QString::fromUtf8(error.what())); }
+    }
+}
 void Service::activate(const QString& id) {
     auto e=entries[id]; if (e->active) return;
     e->active=true; e->stamps.clear(); ++e->token;
@@ -702,8 +869,9 @@ void Service::reconcile() {
     for (const auto& e:entries) wasActive|=e->active;
     QStringList visible;
     if (window && window->isVisible() && !window->isMinimized() && !order.isEmpty()) {
-        int i=std::max(0,int(order.indexOf(selected)));
-        const int count=pageSize(); visible=order.mid((i/count)*count,count);
+        if (!comparison.isEmpty()) visible=comparison;
+        else { int i=std::max(0,int(order.indexOf(selected)));
+            const int count=pageSize(); visible=order.mid((i/count)*count,count); }
     }
     for (const auto& id:order) if (!visible.contains(id)) deactivate(id);
     for (const auto& id:visible) activate(id);
@@ -714,6 +882,7 @@ void Service::reconcile() {
 #endif
 }
 QJsonObject Service::navigate(int delta) {
+    if (!comparison.isEmpty()) return success();
     if (order.isEmpty()) return success();
     int index=std::max(0,int(order.indexOf(selected)));
     if (layout=="grid") {
@@ -729,49 +898,151 @@ QJsonObject Service::navigate(int delta) {
     return request({{"method","select"},{"id",order[index]}});
 }
 
-PreviewWindow::PreviewWindow(Service* s) : service(s) {
-    setWindowTitle("Asset Preview"); setWindowIcon(QIcon(QStringLiteral(":/icon.svg")));
-    setMinimumSize(540,380); resize(1000,720); setAcceptDrops(true);
-    auto* settingsMenu=menuBar()->addMenu("&Settings");
+void PreviewWindow::setupMenus(QToolButton* openButton) {
     menuBar()->setNativeMenuBar(false);
-    connect(settingsMenu,&QMenu::aboutToShow,this,[this,settingsMenu] {
-        settingsMenu->clear();
-        auto* current=settingsMenu->addMenu("Current &preview");
+    auto invoke=[this](QJsonObject command) {
+        const auto result=service->request(command);
+        if (!result["ok"].toBool()) reportError(result["error"].toString());
+    };
+    auto command=[this](QJsonObject request) {
+        canvas->setFocus(Qt::OtherFocusReason);
+        const auto result=service->request(request);
+        activateWindow();
+        if (!result["ok"].toBool()) reportError(result["error"].toString());
         const auto entry=service->entries.value(service->selected);
-        current->setEnabled(bool(entry));
-        if (entry) {
-            const auto id=service->selected;
-            populateSettings(current,entry->config["kind"].toString(),entry->config["settings"].toObject(),[this,id](QJsonObject patch) {
-                const auto result=service->request({{"method","settings"},{"id",id},{"settings",patch}});
-                if (!result["ok"].toBool()) reportError(result["error"].toString());
-            });
+        if (entry && entry->surface) entry->surface->setFocus(Qt::OtherFocusReason);
+    };
+    auto action=[this](QMenu* menu,const QString& label,const QString& icon,const QKeySequence& shortcut,const std::function<void()>& run) {
+        auto* item=menu->addAction(QIcon::fromTheme(icon),label); item->setShortcut(shortcut); item->setAutoRepeat(false);
+        addAction(item); connect(item,&QAction::triggered,this,run); return item;
+    };
+    auto* file=menuBar()->addMenu("&File");
+    action(file,"&Open Assets…","document-open",QKeySequence::Open,[openButton] { openButton->click(); });
+    file->addSeparator();
+    saveAction=action(file,"Save &Screenshot","document-save",QKeySequence("Ctrl+Shift+S"),[this] { saveScreenshot(service->selected); });
+    copyAction=action(file,"&Copy Screenshot","edit-copy",QKeySequence("Ctrl+Shift+C"),[this] { saveScreenshot(service->selected,true); });
+    action(file,"Save Window Screenshot","document-save-as",{},[this] { saveScreenshot(service->selected,false,true); });
+    action(file,"Open Screenshot Folder","folder-pictures",{},[this] {
+        const auto directory=captureDirectory();
+        if (!QDir().mkpath(directory)) { reportError("Cannot create screenshot folder: "+directory); return; }
+        if (!QDesktopServices::openUrl(QUrl::fromLocalFile(directory))) reportError("Cannot open screenshot folder: "+directory);
+    });
+    file->addSeparator();
+    closeAction=action(file,"&Close Preview","window-close",QKeySequence::Close,[this,command] { command({{"method","remove"},{"id",service->selected}}); });
+    reopenAction=action(file,"&Reopen Closed Preview","edit-undo",QKeySequence("Ctrl+Shift+T"),[command] { command({{"method","reopen"}}); });
+    auto* closeAllAction=action(file,"Close &All Previews","window-close",{},[this] { closeAllButton->click(); });
+    connect(file,&QMenu::aboutToShow,this,[this,closeAllAction] { closeAllAction->setEnabled(!service->order.isEmpty()); });
+    file->addSeparator();
+    action(file,"&Quit","application-exit",QKeySequence::Quit,[invoke] { invoke({{"method","quit"}}); });
+
+    auto* view=menuBar()->addMenu("&View");
+    fitAction=action(view,"&Fit View","zoom-fit-best",QKeySequence("F"),[this] {
+        const auto entry=service->entries.value(service->selected); if (entry && entry->view) entry->view->fit();
+    });
+    modelActions.append(action(view,"&Reset Camera","view-refresh",QKeySequence("Ctrl+Home"),[this] {
+        const auto entry=service->entries.value(service->selected); if (entry && entry->view) entry->view->resetView();
+    }));
+    auto* camera=view->addMenu("Camera &Views");
+    const QStringList names{"Front","Back","Right","Left","Top","Bottom","Isometric"};
+    const QStringList values{"front","back","right","left","top","bottom","isometric"};
+    const QStringList keys{"1","Ctrl+1","3","Ctrl+3","7","Ctrl+7","9"};
+    for (int i=0;i<names.size();++i) {
+        auto* item=action(camera,names[i],"",QKeySequence(keys[i]),[this,invoke,value=values[i]] { invoke({{"method","camera_view"},{"id",service->selected},{"view",value}}); });
+        const int digit=keys[i].right(1).toInt(); const bool ctrl=keys[i].startsWith("Ctrl");
+        item->setShortcuts({QKeySequence(keys[i]),QKeySequence(int(Qt::KeypadModifier)|(ctrl?int(Qt::ControlModifier):0)|int(Qt::Key_0+digit))});
+        modelActions.append(item);
+    }
+    auto* current=view->addMenu("Preview &Options");
+    connect(current,&QMenu::aboutToShow,this,[this,current] { current->clear(); populatePreviewMenu(current,service->selected,false); });
+    view->addSeparator();
+    auto* layoutMenu=view->addMenu("&Layout");
+    auto* layoutGroup=new QActionGroup(layoutMenu); layoutGroup->setExclusive(true);
+    for (int i=0;i<4;++i) {
+        auto* item=layoutMenu->addAction(i==0?"Single Preview":QString("%1 × %1 Grid").arg(i+1));
+        item->setCheckable(true); item->setData(i); layoutGroup->addAction(item);
+        connect(item,&QAction::triggered,this,[invoke,i] {
+            QJsonObject patch{{"method","layout"},{"layout",i==0?"single":"grid"}};
+            if (i>0) patch["grid_size"]=i+1;
+            invoke(patch);
+        });
+    }
+    connect(layoutMenu,&QMenu::aboutToShow,this,[this,layoutGroup] {
+        const int index=service->layout=="single"?0:service->gridSize-1;
+        for (auto* item:layoutGroup->actions()) item->setChecked(service->comparison.isEmpty() && item->data().toInt()==index);
+    });
+    auto* compact=view->addAction("&Compact Mode"); compact->setCheckable(true);
+    connect(compact,&QAction::triggered,this,[invoke](bool checked) { invoke({{"method","layout"},{"compact",checked}}); });
+    connect(view,&QMenu::aboutToShow,this,[this,current,compact] { current->setEnabled(!service->selected.isEmpty()); compact->setChecked(service->compact); });
+    auto* compare=view->addMenu("&Compare With");
+    connect(compare,&QMenu::aboutToShow,this,[this,compare,invoke] {
+        compare->clear(); const auto source=service->entries.value(service->selected);
+        if (!source || (source->config["kind"]!="model" && source->config["kind"]!="material")) { compare->addAction("Select a 3D preview first")->setEnabled(false); return; }
+        for (const auto& id:service->order) {
+            const auto entry=service->entries[id]; if (id==service->selected || (entry->config["kind"]!="model" && entry->config["kind"]!="material")) continue;
+            auto* item=compare->addAction(entry->config["label"].toString());
+            connect(item,&QAction::triggered,this,[this,id,invoke] { invoke({{"method","compare"},{"ids",QJsonArray{service->selected,id}},{"camera_sync",true}}); });
         }
-        settingsMenu->addSeparator();
-        settingsMenu->addAction("Defaults for new previews")->setEnabled(false);
+        if (compare->isEmpty()) compare->addAction("Open another 3D preview to compare")->setEnabled(false);
+    });
+    auto* sync=view->addAction("&Sync Comparison Cameras"); sync->setCheckable(true);
+    connect(sync,&QAction::triggered,this,[invoke](bool enabled) { invoke({{"method","compare"},{"camera_sync",enabled}}); });
+    auto* end=action(view,"&End Comparison","",{},[invoke] { invoke({{"method","compare"},{"ids",QJsonArray{}}}); });
+    connect(view,&QMenu::aboutToShow,this,[this,sync,end] { sync->setEnabled(!service->comparison.isEmpty()); sync->setChecked(service->cameraSync); end->setEnabled(!service->comparison.isEmpty()); });
+
+    auto* go=menuBar()->addMenu("&Go");
+    auto* previousAction=go->addAction(QIcon::fromTheme("go-previous"),"&Previous\tLeft");
+    auto* nextAction=go->addAction(QIcon::fromTheme("go-next"),"&Next\tRight");
+    connect(previousAction,&QAction::triggered,previous,&QToolButton::click); connect(nextAction,&QAction::triggered,next,&QToolButton::click);
+    connect(go,&QMenu::aboutToShow,this,[this,previousAction,nextAction] { previousAction->setEnabled(previous->isEnabled()); nextAction->setEnabled(next->isEnabled()); });
+    auto* reloadAction=action(go,"&Reload / Rebuild","view-refresh",QKeySequence("Ctrl+R"),[this,invoke] { if (!service->selected.isEmpty()) invoke({{"method","reload"},{"id",service->selected}}); });
+    connect(go,&QMenu::aboutToShow,this,[this,reloadAction] { reloadAction->setEnabled(!service->selected.isEmpty()); });
+
+    auto* settings=menuBar()->addMenu("&Settings");
+    connect(settings,&QMenu::aboutToShow,this,[this,settings] {
+        settings->clear(); settings->addSection("Defaults for New Previews");
         for (const auto& group:QStringList{"image","video","3d"}) {
-            auto* defaults=settingsMenu->addMenu(group=="3d"?"&3D / materials":group=="image"?"&Images":"&Videos");
+            auto* defaults=settings->addMenu(group=="3d"?"&3D / Materials":group=="image"?"&Images":"&Videos");
             populateSettings(defaults,group=="3d"?"material":group,service->preferences.value(group).toObject(),[this,group](QJsonObject patch) {
                 const auto result=service->request({{"method","defaults"},{"group",group},{"settings",patch}});
                 if (!result["ok"].toBool()) reportError(result["error"].toString());
             });
         }
     });
+    auto* help=menuBar()->addMenu("&Help");
+    action(help,"&Keyboard Shortcuts","help-contents",QKeySequence::HelpContents,[this] {
+        QMessageBox::information(this,"Keyboard Shortcuts","Open assets: Ctrl+O\nClose preview: Ctrl+W\nReopen closed preview: Ctrl+Shift+T\nPrevious / next: Left / Right\nFit view: F\nReset camera: Ctrl+Home\nEdges: E · Triangle count: M (3D)\nCamera: 1 front · 3 right · 7 top · 9 isometric\nCtrl+1 / 3 / 7: opposite view · Numpad supported\nSave screenshot: Ctrl+Shift+S\nCopy screenshot: Ctrl+Shift+C\nReload / rebuild: Ctrl+R\nVideo: Space pause · M mute · Home restart\nVideo seek: Shift+Left / Right");
+    });
+    action(help,"&About Asset Preview","help-about",{},[this] { QMessageBox::about(this,"About Asset Preview","Asset Preview\nLive images, models, videos and baked materials.\nMIT licensed. Dependencies retain their own licenses."); });
+}
+
+PreviewWindow::PreviewWindow(Service* s) : service(s) {
+    setWindowTitle("Asset Preview"); setWindowIcon(QIcon(QStringLiteral(":/icon.svg")));
+    setMinimumSize(540,380); resize(1000,720); setAcceptDrops(true);
     auto* central=new QWidget; auto* vertical=new QVBoxLayout(central); vertical->setContentsMargins(8,6,8,6); vertical->setSpacing(6);
-    auto* addButton=new QPushButton("Add files"); addButton->setMinimumHeight(32);
-    closeAllButton=new QPushButton("Close all"); closeAllButton->setMinimumHeight(32);
+    auto* addButton=new QToolButton; addButton->setText("Open…"); addButton->setMinimumHeight(32);
+    addButton->setIcon(QIcon::fromTheme("document-open",style()->standardIcon(QStyle::SP_DialogOpenButton)));
+    addButton->setToolButtonStyle(Qt::ToolButtonTextBesideIcon); addButton->setAutoRaise(true);
+    closeAllButton=new QToolButton; closeAllButton->setText("Close All"); closeAllButton->setMinimumHeight(32); closeAllButton->setAutoRaise(true);
     closeAllButton->setObjectName("closeAll"); closeAllButton->setToolTip("Close all previews and stop their generators; keep files and remembered settings");
     auto* controls=new QHBoxLayout;
-    previous=new QPushButton("←"); next=new QPushButton("→"); previous->setFixedSize(32,32); next->setFixedSize(32,32);
+    previous=new QToolButton; next=new QToolButton; previous->setFixedSize(32,32); next->setFixedSize(32,32);
+    previous->setIcon(QIcon::fromTheme("go-previous",style()->standardIcon(QStyle::SP_ArrowLeft)));
+    next->setIcon(QIcon::fromTheme("go-next",style()->standardIcon(QStyle::SP_ArrowRight)));
+    previous->setAutoRaise(true); next->setAutoRaise(true);
+    previous->setAccessibleName("Previous preview or page"); next->setAccessibleName("Next preview or page");
     previous->setToolTip("Previous preview / page (Left)"); next->setToolTip("Next preview / page (Right)");
     selection=new QComboBox; selection->setMinimumHeight(32); selection->setSizePolicy(QSizePolicy::Expanding,QSizePolicy::Fixed);
     selection->setSizeAdjustPolicy(QComboBox::AdjustToMinimumContentsLengthWithIcon); selection->setMinimumContentsLength(3);
     density=new QComboBox; density->addItems({"Single","2×2","3×3","4×4"}); density->setMinimumHeight(32);
     density->setToolTip("Visible previews per page: 1, 4, 9 or 16");
     compactButton=new QCheckBox("Compact"); compactButton->setToolTip("Tight spacing; keep names and options inside views; show only busy/error status");
+    syncButton=new QCheckBox("Sync camera"); syncButton->setToolTip("Link orbit, pan and zoom in both comparison views"); syncButton->hide();
     position=new QLabel; position->setMinimumWidth(65); position->setAlignment(Qt::AlignRight|Qt::AlignVCenter);
     controls->addWidget(previous); controls->addWidget(selection,1); controls->addWidget(next); controls->addWidget(position);
-    controls->addWidget(density); controls->addWidget(compactButton); controls->addWidget(addButton); controls->addWidget(closeAllButton);
-    vertical->addLayout(controls);
+    controls->addWidget(density); controls->addWidget(compactButton); controls->addWidget(syncButton); controls->addWidget(addButton); controls->addWidget(closeAllButton);
+    auto* toolbar=new QToolBar("Preview Toolbar",this); toolbar->setObjectName("previewToolbar"); toolbar->setMovable(false);
+    auto* toolbarControls=new QWidget; toolbarControls->setLayout(controls); controls->setContentsMargins(4,2,4,2);
+    toolbarControls->setSizePolicy(QSizePolicy::Expanding,QSizePolicy::Fixed); toolbar->addWidget(toolbarControls); addToolBar(toolbar);
     canvas=new QWidget; canvas->setFocusPolicy(Qt::StrongFocus);
     grid=new QGridLayout(canvas); grid->setContentsMargins(0,0,0,0); grid->setSpacing(6);
     vertical->addWidget(canvas,1); setCentralWidget(central);
@@ -779,11 +1050,11 @@ PreviewWindow::PreviewWindow(Service* s) : service(s) {
     connect(statusBar(),&QStatusBar::messageChanged,this,[this](const QString& message) {
         if (message.isEmpty()) statusBar()->setVisible(!service->compact);
     });
-    connect(addButton,&QPushButton::clicked,this,[this] {
+    connect(addButton,&QToolButton::clicked,this,[this] {
         for (const auto& path:QFileDialog::getOpenFileNames(this,"Add asset previews",QDir::homePath(),"Assets (*.png *.jpg *.jpeg *.webp *.bmp *.svg *.glb *.gltf *.obj *.stl *.ply *.fbx *.mp4 *.m4v *.mov *.mkv *.webm *.avi *.ogv *.mpg *.mpeg *.wmv *.gif);;All files (*)"))
             service->request({{"method","add"},{"entry",QJsonObject{{"path",path}}}});
     });
-    connect(closeAllButton,&QPushButton::clicked,this,[this] {
+    connect(closeAllButton,&QToolButton::clicked,this,[this] {
         const auto result=service->request({{"method","close_all"}});
         if (!result["ok"].toBool()) reportError(result["error"].toString());
     });
@@ -793,6 +1064,7 @@ PreviewWindow::PreviewWindow(Service* s) : service(s) {
         service->request(request);
     });
     connect(compactButton,&QCheckBox::toggled,this,[this](bool value) { service->request({{"method","layout"},{"compact",value}}); });
+    connect(syncButton,&QCheckBox::toggled,this,[this](bool value) { service->request({{"method","compare"},{"camera_sync",value}}); });
     auto navigate=[this](int delta) {
         if (!(delta<0?previous:next)->isEnabled()) return;
         // Move focus before destroying a native view so the next key still
@@ -804,8 +1076,8 @@ PreviewWindow::PreviewWindow(Service* s) : service(s) {
         if (entry && entry->surface) entry->surface->setFocus(Qt::OtherFocusReason);
         if (!result["ok"].toBool()) reportError(result["error"].toString());
     };
-    connect(previous,&QPushButton::clicked,this,[navigate] { navigate(-1); });
-    connect(next,&QPushButton::clicked,this,[navigate] { navigate(1); });
+    connect(previous,&QToolButton::clicked,this,[navigate] { navigate(-1); });
+    connect(next,&QToolButton::clicked,this,[navigate] { navigate(1); });
     connect(selection,&QComboBox::activated,this,[this](int index) { service->request({{"method","select"},{"id",selection->itemData(index).toString()}}); });
     auto* left=new QShortcut(this); left->setKeys({QKeySequence("Left"),QKeySequence("Alt+Left")});
     connect(left,&QShortcut::activated,this,[navigate] { navigate(-1); });
@@ -813,6 +1085,7 @@ PreviewWindow::PreviewWindow(Service* s) : service(s) {
     connect(right,&QShortcut::activated,this,[navigate] { navigate(1); });
     for (const auto& binding : {std::pair{"E","edges"},std::pair{"M","triangles"}}) {
         auto* shortcut=new QShortcut(QKeySequence(binding.first),this);
+        modelShortcuts.append(shortcut);
         shortcut->setAutoRepeat(false);
         connect(shortcut,&QShortcut::activated,this,[this,key=QString(binding.second)] {
             const auto entry=service->entries.value(service->selected);
@@ -825,6 +1098,7 @@ PreviewWindow::PreviewWindow(Service* s) : service(s) {
             if (!result["ok"].toBool()) reportError(result["error"].toString());
         });
     }
+    setupMenus(addButton);
     QSettings settings(service->statePath+"/window.ini",QSettings::IniFormat);
     restoreGeometry(settings.value("geometry").toByteArray());
 }
@@ -837,8 +1111,22 @@ void PreviewWindow::navigation() {
     previous->setEnabled(n>0 && i/count>0);
     next->setEnabled(n>0 && (i/count+1)*count<n);
     closeAllButton->setEnabled(n>0);
+    closeAction->setEnabled(n>0); reopenAction->setEnabled(!service->closedEntries.isEmpty());
+    const auto selected=service->entries.value(service->selected);
+    const bool ready=selected && selected->active && selected->view && selected->view->metrics()["loads"].toInt()>0;
+    saveAction->setEnabled(ready);
+    copyAction->setEnabled(saveAction->isEnabled());
+    const bool model=ready && (selected->config["kind"]=="model" || selected->config["kind"]=="material");
+    fitAction->setEnabled(ready && selected->config["kind"]!="video");
+    for (auto* item:modelActions) item->setEnabled(model);
+    for (auto* item:modelShortcuts) item->setEnabled(model);
+    for (const auto& id:service->order) if (service->entries[id]->card)
+        static_cast<PreviewCard*>(service->entries[id]->card)->setSelected(id==service->selected);
     QSignalBlocker densityBlock(density), compactBlock(compactButton);
     density->setCurrentIndex(service->layout=="single"?0:service->gridSize-1);
+    density->setEnabled(service->comparison.isEmpty());
+    { QSignalBlocker blocker(syncButton); syncButton->setVisible(!service->comparison.isEmpty()); syncButton->setChecked(service->cameraSync); }
+    if (!service->comparison.isEmpty()) { previous->setEnabled(false); next->setEnabled(false); position->setText("Compare"); return; }
     compactButton->setChecked(service->compact);
     position->setText(n==0?"0 / 0":service->layout=="single"?QString("%1 / %2").arg(i+1).arg(n):QString("%1–%2 / %3").arg((i/count)*count+1).arg(std::min((i/count+1)*count,n)).arg(n));
 }
@@ -854,7 +1142,7 @@ void PreviewWindow::arrange(const QStringList& ids) {
         empty->setProperty("empty",true); empty->setAlignment(Qt::AlignCenter); empty->setWordWrap(true);
         grid->addWidget(empty,0,0); grid->setRowStretch(0,1); grid->setColumnStretch(0,1);
     } else {
-        for (int i=0;i<ids.size();++i) { const int cols=service->layout=="grid"?std::min(service->gridSize,int(ids.size())):1;
+        for (int i=0;i<ids.size();++i) { const int cols=!service->comparison.isEmpty()?2:service->layout=="grid"?std::min(service->gridSize,int(ids.size())):1;
             static_cast<PreviewCard*>(service->entries[ids[i]]->card)->setCompact(service->compact);
             grid->addWidget(service->entries[ids[i]]->card,i/cols,i%cols); grid->setRowStretch(i/cols,1); grid->setColumnStretch(i%cols,1); }
     }
@@ -862,6 +1150,7 @@ void PreviewWindow::arrange(const QStringList& ids) {
 void PreviewWindow::createCard(Entry& e) {
     const QString id=e.config["id"].toString();
     auto* card=new PreviewCard(canvas,e.config["label"].toString(),e.config["path"].toString());
+    card->model=e.config["kind"].toString()=="model" || e.config["kind"].toString()=="material";
     e.card=card; e.statusLabel=card->footer; e.optionsButton=card->options;
     service->status(e,e.status);
     QWidget* widget=nullptr;
@@ -881,11 +1170,16 @@ void PreviewWindow::createCard(Entry& e) {
             }
             if (e->process && e->process->state()!=QProcess::NotRunning) { service->status(*e,e->status); return; }
             service->status(*e,ok?(video?"Live · video ready":"Live · model ready"):"Waiting · "+error);
+            navigation();
+            if (ok && !video && !service->comparison.isEmpty() && !service->syncingCamera) {
+                service->syncCamera(service->selected);
+                try { service->save(); } catch (const std::exception& error) { reportError(QString::fromUtf8(error.what())); }
+            }
         };
         try {
             const auto handle=video?createVideo(e.config,e.card,std::move(loaded),[this,id](QJsonObject patch) {
                 service->request({{"method","settings"},{"id",id},{"settings",patch}});
-            }):createModel(e.config,e.card,std::move(loaded));
+            }):createModel(e.config,e.card,std::move(loaded),[this,id](const QJsonObject& state,bool persist) { service->inspectionChanged(id,state,persist); });
             e.view=handle.view; widget=handle.surface;
         } catch (const std::exception& error) {
             e.status=QString(video?"Video backend unavailable · ":"3D backend unavailable · ")+QString::fromUtf8(error.what());
@@ -896,6 +1190,14 @@ void PreviewWindow::createCard(Entry& e) {
         }
     }
     e.surface=widget;
+    if (e.view) {
+        e.view->activated=[this,id] { selectCard(id); };
+        e.view->inspectionChanged=[this,id](const QJsonObject& state,bool persist) { service->inspectionChanged(id,state,persist); };
+    }
+    for (auto* object:card->findChildren<QWidget*>()) {
+        object->setProperty("previewId",id); object->installEventFilter(this);
+    }
+    card->setProperty("previewId",id); card->installEventFilter(this);
     card->setSurface(widget);
     widget->setToolTip(e.config["kind"].toString()=="video"?"Space / double click to pause · Shift+Left / Right seek · Home restart · M mute":
         e.config["kind"].toString()=="image"?"Scroll to zoom · drag to pan · double click to fit":"Drag to orbit · right / middle drag to pan · scroll to zoom · double click to fit · E edges / lines · M triangle count");
@@ -905,35 +1207,100 @@ void PreviewWindow::createCard(Entry& e) {
         else e->view->fit();
     });
     connect(card->options,&QToolButton::clicked,this,[this,id] { options(id); });
+    connect(card->reset,&QToolButton::clicked,this,[this,id] {
+        const auto entry=service->entries.value(id); if (entry && entry->view) entry->view->resetView();
+    });
     connect(card->remove,&QToolButton::clicked,this,[this,id] { service->request({{"method","remove"},{"id",id}}); });
 }
 void PreviewWindow::removeCard(Entry& e) { if (e.card) { grid->removeWidget(e.card); delete e.card; } }
+void PreviewWindow::selectCard(const QString& id) {
+    if (id==service->selected || !service->entries.contains(id)) return;
+    const auto result=service->request({{"method","select"},{"id",id}});
+    if (!result["ok"].toBool()) reportError(result["error"].toString());
+}
+bool PreviewWindow::eventFilter(QObject* object,QEvent* event) {
+    const auto id=object->property("previewId").toString();
+    if (!id.isEmpty() && event->type()==QEvent::MouseButtonPress) selectCard(id);
+    if (!id.isEmpty() && event->type()==QEvent::ContextMenu) {
+        auto* context=static_cast<QContextMenuEvent*>(event); selectCard(id);
+        QMenu menu(this); populatePreviewMenu(&menu,id,true); menu.exec(context->globalPos()); return true;
+    }
+    return QMainWindow::eventFilter(object,event);
+}
 void PreviewWindow::reportError(const QString& error) {
     statusBar()->setVisible(true);
     statusBar()->showMessage(error,5000);
 }
-void PreviewWindow::options(const QString& id) {
-    auto e=service->entries.value(id); if (!e) return;
-    QMenu menu(this); const auto settings=e->config["settings"].toObject();
-    menu.addAction(e->config["label"].toString())->setEnabled(false);
-    if (e->config["kind"].toString()!="video") connect(menu.addAction("Fit view"),&QAction::triggered,this,[e] { if (e->view) e->view->fit(); });
-    connect(menu.addAction("Reload / rebuild"),&QAction::triggered,this,[this,id] { service->request({{"method","reload"},{"id",id}}); });
-    menu.addSeparator();
-    auto patch=[this,id](QJsonObject fields) {
-        auto result=service->request({{"method","settings"},{"id",id},{"settings",fields}});
-        if (!result["ok"].toBool()) reportError(result["error"].toString());
-    };
-    populateSettings(&menu,e->config["kind"].toString(),settings,patch);
-    if (e->config["kind"].toString()=="video") {
-        connect(menu.addAction("Restart · Home"),&QAction::triggered,this,[this,id] { service->request({{"method","seek"},{"id",id},{"seconds",0}}); });
-        for (int delta:{-5,5}) connect(menu.addAction(delta<0?"Back 5 seconds · Shift+Left":"Forward 5 seconds · Shift+Right"),&QAction::triggered,this,[this,id,delta] {
-            const auto e=service->entries.value(id); if (!e || !e->view) return;
-            service->request({{"method","seek"},{"id",id},{"seconds",std::max(0.0,e->view->metrics()["position"].toDouble()+delta)}});
+void PreviewWindow::saveScreenshot(const QString& id,bool clipboard,bool wholeWindow) {
+    const auto entry=service->entries.value(id);
+    if (!wholeWindow && (!entry || !entry->view || !entry->active)) { reportError("Open a preview before taking a screenshot."); return; }
+    QImage capture;
+    if (wholeWindow) {
+        capture=grab().toImage(); QPainter painter(&capture);
+        for (const auto& item:service->entries) if (item->active && item->view && item->config["kind"]!="image")
+            painter.drawImage(QRect(item->surface->mapTo(this,QPoint()),item->surface->size()),item->view->snapshot());
+        for (const auto& item:service->entries) if (item->active && item->card) static_cast<PreviewCard*>(item->card)->compose(painter,this);
+    } else capture=entry->view->snapshot();
+    if (capture.isNull()) { reportError("This preview is not ready for a screenshot."); return; }
+    if (clipboard) { QGuiApplication::clipboard()->setImage(capture); statusBar()->showMessage("Screenshot copied to clipboard",4000); return; }
+    const auto directory=captureDirectory();
+    if (!QDir().mkpath(directory)) { reportError("Cannot create screenshot folder: "+directory); return; }
+    const auto filename=QString("%1-%2-%3.png").arg(wholeWindow?"window":id,QDateTime::currentDateTime().toString("yyyyMMdd-HHmmss-zzz"),QUuid::createUuid().toString(QUuid::Id128).left(6));
+    QFile file(QDir(directory).filePath(filename));
+    if (!file.open(QIODevice::WriteOnly|QIODevice::NewOnly)) { reportError(file.errorString()); return; }
+    if (!capture.save(&file,"PNG")) { file.remove(); reportError("Cannot save screenshot."); return; }
+    statusBar()->showMessage("Screenshot saved: "+file.fileName(),7000);
+}
+void PreviewWindow::cameraViews(QMenu* menu,const QString& id) {
+    const QList<std::pair<QString,QString>> views{{"Front","front"},{"Back","back"},{"Right","right"},{"Left","left"},{"Top","top"},{"Bottom","bottom"},{"Isometric","isometric"}};
+    const QStringList keys{"1","Ctrl+1","3","Ctrl+3","7","Ctrl+7","9"};
+    for (int i=0;i<views.size();++i) {
+        auto* action=menu->addAction(views[i].first+"\t"+keys[i]);
+        connect(action,&QAction::triggered,this,[this,id,view=views[i].second] {
+            const auto result=service->request({{"method","camera_view"},{"id",id},{"view",view}});
+            if (!result["ok"].toBool()) reportError(result["error"].toString());
         });
     }
-    menu.addSeparator();
-    connect(menu.addAction("Remove preview"),&QAction::triggered,this,[this,id] { service->request({{"method","remove"},{"id",id}}); });
-    menu.exec(e->optionsButton->mapToGlobal(QPoint(0,e->optionsButton->height())));
+}
+void PreviewWindow::populatePreviewMenu(QMenu* menu,const QString& id,bool context) {
+    const auto entry=service->entries.value(id); if (!entry) return;
+    const auto kind=entry->config["kind"].toString();
+    auto action=[&](const QString& text,const QString& icon,const std::function<void()>& fn) {
+        auto* result=menu->addAction(QIcon::fromTheme(icon),text); connect(result,&QAction::triggered,this,fn); return result;
+    };
+    if (kind!="video") action("&Fit View\tF","zoom-fit-best",[entry] { if (entry->view) entry->view->fit(); });
+    if (kind=="model" || kind=="material") {
+        action("&Reset Camera\tCtrl+Home","view-refresh",[entry] { if (entry->view) entry->view->resetView(); });
+        cameraViews(menu->addMenu("Camera &Views"),id);
+    }
+    menu->addSeparator();
+    auto patch=[this,id](QJsonObject fields) {
+        const auto result=service->request({{"method","settings"},{"id",id},{"settings",fields}});
+        if (!result["ok"].toBool()) reportError(result["error"].toString());
+    };
+    populateSettings(menu,kind,entry->config["settings"].toObject(),patch);
+    if (kind=="video") {
+        menu->addSeparator();
+        action("Restart\tHome","media-skip-backward",[this,id] { service->request({{"method","seek"},{"id",id},{"seconds",0}}); });
+        for (int delta:{-5,5}) action(delta<0?"Back 5 Seconds\tShift+Left":"Forward 5 Seconds\tShift+Right","media-seek-forward",[this,id,delta] {
+            const auto entry=service->entries.value(id); if (entry && entry->view)
+                service->request({{"method","seek"},{"id",id},{"seconds",std::max(0.0,entry->view->metrics()["position"].toDouble()+delta)}});
+        });
+    }
+    if (context) {
+        menu->addSeparator();
+        action("Save &Screenshot\tCtrl+Shift+S","document-save",[this,id] { saveScreenshot(id); });
+        action("Copy Screenshot\tCtrl+Shift+C","edit-copy",[this,id] { saveScreenshot(id,true); });
+        action("&Reload / Rebuild\tCtrl+R","view-refresh",[this,id] { service->request({{"method","reload"},{"id",id}}); });
+        menu->addSeparator();
+        action("&Close Preview\tCtrl+W","window-close",[this,id] { service->request({{"method","remove"},{"id",id}}); });
+    }
+}
+void PreviewWindow::options(const QString& id) {
+    const auto entry=service->entries.value(id); if (!entry) return;
+    selectCard(id);
+    QMenu menu(this); populatePreviewMenu(&menu,id,true);
+    menu.exec(entry->optionsButton->mapToGlobal(QPoint(0,entry->optionsButton->height())));
 }
 void PreviewWindow::populateSettings(QMenu* menu,const QString& kind,const QJsonObject& settings,
     const std::function<void(QJsonObject)>& patch) {
@@ -957,17 +1324,18 @@ void PreviewWindow::populateSettings(QMenu* menu,const QString& kind,const QJson
             connect(action,&QAction::triggered,this,[patch,key,value=values[i]] { patch({{key,value}}); });
         }
     };
-    if (kind=="image") toggle("Pixel filtering","nearest");
+    if (kind=="image") toggle("&Pixel Filtering","nearest");
     else if (kind=="video") {
-        toggle("&Paused · Space","paused"); toggle("&Muted · M","muted",true); toggle("&Loop","loop",true);
+        toggle("&Paused\tSpace","paused"); toggle("&Muted\tM","muted",true); toggle("&Loop","loop",true);
 
     }
     else {
-        toggle("Show triangle &count · M","triangles",true);
-        toggle("Show &materials","materials",true);
-        toggle("Show &textures","textures",true)->setEnabled(settings["materials"].toBool(true));
+        menu->addSection("Display");
+        toggle("Show Triangle &Count\tM","triangles",true);
+        toggle("Show &Materials","materials",true);
+        toggle("Show &Textures","textures",true)->setEnabled(settings["materials"].toBool(true));
         toggle("Lock &horizon","lock_horizon",true);
-        toggle("Ground grid","grid",true); toggle("Axis indicator","axes"); toggle("Show edges / lines · E","edges"); toggle("Orthographic camera","orthographic");
+        toggle("Ground Grid","grid",true); toggle("Axis Indicator","axes"); toggle("Show Edges / Lines\tE","edges"); toggle("Orthographic Camera","orthographic");
         choice("Floor / up axis","up_axis",{"Y up · XZ floor","Z up · XY floor"},{"y","z"},"y");
         choice("Lighting","lighting",{"Studio · HDRI + light kit","F3D light kit"},{"studio","lightkit"},"studio");
         number("Light intensity","light",1,5);
@@ -977,7 +1345,16 @@ void PreviewWindow::populateSettings(QMenu* menu,const QString& kind,const QJson
             number("Metallic (without ORM map)","metallic",0,1);
         }
     }
+    menu->addSeparator();
     choice("Background","background",kind=="image"?QStringList{"Dark","Light","Checker"}:QStringList{"Dark","Light"},kind=="image"?QStringList{"dark","light","checker"}:QStringList{"dark","light"},kind=="image"?"checker":"dark");
+}
+void PreviewWindow::resizeEvent(QResizeEvent* e) {
+    QMainWindow::resizeEvent(e);
+    if (!selection) return;
+    closeAllButton->setVisible(width()>=780);
+    position->setVisible(width()>=700);
+    compactButton->setVisible(width()>=640);
+    syncButton->setText(width()<760?"Sync":"Sync camera");
 }
 void PreviewWindow::closeEvent(QCloseEvent* event) {
     QSettings settings(service->statePath+"/window.ini",QSettings::IniFormat); settings.setValue("geometry",saveGeometry());

@@ -15,16 +15,39 @@ The video container forwards playback keys when Qt retains widget focus instead
 of handing it to the native video window.
 Only those entries own decoded content, GPU engines and running generators.
 Hidden/minimized/closed windows activate none. Unchanged visible entries are retained
-when unrelated registrations change. Navigation destroys prior off-page views; camera
-state persists during reload, but not across unloading.
+when unrelated registrations change. Navigation destroys prior off-page views;
+camera angle, focal point/pan, view angle and orthographic scale persist per
+model/material across reloads, unloading, same-kind reconnections and restarts.
+Completed drags and scroll/fit/reset input save camera state without idle polling.
+Image zoom and pan also persist per preview; pan uses viewport-relative offsets
+so restored views behave consistently after resizing.
+
+Clicking a visible card or its content selects it without reloading the page.
+A muted title border marks the active card; menus, shortcuts and the selector
+follow that selection. Ctrl+W closes it and Ctrl+Shift+T reopens the latest closed
+preview with its position, display options and inspection state. Closed entries
+retain configuration only; no decoded content or generator is kept running.
+
+View > Camera Views supports front/back/right/left/top/bottom/isometric, with
+1/3/7/9 and Ctrl+1/3/7 shortcuts including the numpad. Presets retain focal point
+and distance. Exact top/bottom views survive reload; horizon-locked dragging
+still clamps pitch when orbit resumes. F fits; Ctrl+Home resets the camera.
+
+View > Compare With activates exactly two model/material previews side by side.
+Sync camera links orbit, pan, zoom and camera presets in either direction, with
+translation and distance scaled around each scene's square-fit reference center.
+Projection and up-axis/horizon conventions follow the source camera. Sync can be
+disabled for independent views. Comparison and sync preference survive restart;
+closing a compared preview or choosing a normal layout ends comparison.
 
 Cards allocate the full surface to content, with separate native overlays:
-text-width title at top left, fit/options/remove at top right, text-width status
+text-width title at top left, fit/reset/options/remove at top right for 3D views, text-width status
 below the title, and a triangle count at bottom left for loaded 3D views. The
 single global toolbar owns navigation, grid size, compact mode and Close all. Compact reduces
 margins/gaps, puts fit/remove in the options menu and hides steady Live status;
 waiting/errors/building and enabled triangle counts stay visible. Narrow cards
-also move fit/remove into the menu. Long title/status text elides within the card.
+also move fit/reset/remove into the menu. Fit preserves angle and fits the bounds;
+Reset restores the initial three-quarter angle, framing and zoom. Long title/status text elides within the card.
 Elided titles retain full title/path tooltips. Only overlays intercept pointer
 input; central content remains available for orbit/pan. Captures composite their
 small native overlays after model GPU readback, with no recurring copy loop.
@@ -45,9 +68,10 @@ evaluate native Godot or Material Maker source. Models load on the OpenGL GUI th
 arbitrary-scene memory and import latency are not bounded by the file-size cap.
 
 Scroll zoom anchors images at the pointer, respecting the existing zoom limits.
-Model/material scroll zoom anchors the pointer on the camera's focal plane,
-preserving orientation in perspective and orthographic modes. Orthographic zoom
-changes parallel scale; perspective zoom changes camera distance.
+Model/material scroll zoom preserves the camera's focal point and orientation,
+independent of pointer position. Orthographic zoom changes parallel scale;
+perspective zoom changes camera distance. Orbit dragging also preserves the
+focal point, including after a pan. Explicit pan, fit and reset can change it.
 
 Turntable orbit defaults to Y-up / XZ floor and a locked horizon. Yaw rotates
 around world up; pitch clamps to ±88.2 degrees, preventing pole flips. Vertical
@@ -104,6 +128,9 @@ Verification: functional tests cover watcher/lifecycle invariants. The Gamescope
 headless hardware lane adds real F3D model/MTL/material-map refresh, hardware renderer
 identity, idle paints and captured appearance. [Evidence](../evidence/verification.md)
 records actual verification and remaining limits.
+The isolated XTest input fixture uses X11 core input (`QT_XCB_NO_XI2=1`), since
+its synthetic wheel buttons are dropped on this Qt/XInput2 path. Production
+retains the normal device input path. Wheel tests assert actual zoom changes.
 Camera tests measure horizon roll through native input and pole limits, reload
 retention and Z-up. Native overlay clicks open/toggle the real popup. Functional
 checks verify grid paging, compact busy/error visibility and restart persistence.
@@ -157,4 +184,19 @@ configs/scripts, online URL helpers, external media references, automatic audio
 sidecars and subtitles are disabled. Common video extensions and animated GIF
 route automatically; explicit `kind=video` handles other installed-codec formats.
 
-The native top Settings menu exposes current-preview controls and independent image, video and shared 3D/material defaults, even with an empty registry. It shares controls with card options, including edges/lines, grid, axes, camera, lighting, background, playback, filtering and material sample options. Numeric dialogs accept light intensity 0–5 and roughness/metallic 0–1; sample scalar controls describe their no-ORM scope. Checker background is offered only for images.
+Native File, View, Go, Settings and Help menus use the desktop Qt style, theme
+icons, standard shortcut labels and disabled actions where applicable. A native
+toolbar retains navigation, selection, density and compact controls; secondary
+controls move to menus in small windows. View > Preview Options and card popups
+share display controls. Settings owns independent image/video/3D defaults for
+new previews. Numeric dialogs accept light intensity 0–5 and roughness/metallic
+0–1; sample scalar controls describe their no-ORM scope. Checker is image-only.
+
+File and card popups expose Save Screenshot (Ctrl+Shift+S) and Copy Screenshot
+(Ctrl+Shift+C); File also saves the whole window and opens the capture folder.
+Preview screenshots contain the displayed content. Window screenshots composite
+native surfaces and card overlays. Saves are explicit PNG exports with unique
+timestamped names. Source-checkout saves go exclusively to `captures/` in the
+repository, ignored except for its tracked sentinel; installed releases use the
+user's Pictures/Asset Preview directory. There is no debug capture toggle or
+automatic capture timer. Clipboard copies do not create files.

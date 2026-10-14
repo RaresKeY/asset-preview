@@ -160,12 +160,19 @@ bool ModelView::load(QString& error) {
             nextTriangles=preview::sourceTriangles(config["path"].toString());
         }
         auto& window = next->getWindow();
+        const auto saved=engine?cameraState():config["camera"].toObject();
+        // A square fit gives comparison a stable scale independent of each
+        // card's viewport aspect ratio and when it was first opened.
+        window.setSize(1024,1024);
+        window.getCamera().azimuth(30).elevation(20).resetToBounds();
+        referenceCamera=window.getCamera().getState();
         window.setSize(std::max(1, int(width()*devicePixelRatioF())), std::max(1, int(height()*devicePixelRatioF())));
-        if (engine) window.getCamera().setState(engine->getWindow().getCamera().getState());
-        else { window.getCamera().azimuth(30).elevation(20).resetToBounds(); }
+        window.getCamera().resetToBounds();
+        defaultCamera=window.getCamera().getState();
         engine = std::move(next);
+        if (!saved.isEmpty()) restoreCamera(saved);
         triangles=nextTriangles;
-        if (config["settings"].toObject()["lock_horizon"].toBool(true)) orbit(0,0);
+        if (saved.isEmpty() && config["settings"].toObject()["lock_horizon"].toBool(true)) orbit(0,0);
         ++loads;
         return true;
     } catch (const std::exception& e) { error = QString::fromUtf8(e.what()); return false; }
@@ -188,21 +195,87 @@ void ModelView::settings(const QJsonObject& cfg) {
         makeCurrent();
         if (reloadScene) { QString error; const bool ok = load(error); if (loaded) loaded(ok, error); }
         else applyOptions(*engine);
-        if (next["lock_horizon"].toBool(true)) orbit(0,0);
+        if (next["lock_horizon"].toBool(true) && (old["lock_horizon"]!=next["lock_horizon"] || old["up_axis"]!=next["up_axis"])) orbit(0,0);
         doneCurrent(); update();
+        rememberCamera();
     }
 }
 void ModelView::fit() {
-    if (engine) { makeCurrent(); engine->getWindow().getCamera().resetToBounds(); if (config["settings"].toObject()["lock_horizon"].toBool(true)) orbit(0,0); doneCurrent(); update(); }
+    if (engine) { makeCurrent(); engine->getWindow().getCamera().resetToBounds(); doneCurrent(); update(); }
+    rememberCamera();
+}
+double ModelView::parallelSpan() const {
+    auto& window=engine->getWindow();
+    auto display=window.getDisplayFromWorld(window.getCamera().getFocalPoint());
+    display[1]=0; const auto bottom=window.getWorldFromDisplay(display);
+    display[1]=height()*devicePixelRatioF(); const auto top=window.getWorldFromDisplay(display);
+    return std::sqrt(std::pow(top[0]-bottom[0],2)+std::pow(top[1]-bottom[1],2)+std::pow(top[2]-bottom[2],2));
+}
+QJsonObject ModelView::cameraState() const {
+    if (!engine) return {};
+    const auto c=engine->getWindow().getCamera().getState();
+    return {{"position",QJsonArray{c.position[0],c.position[1],c.position[2]}},
+        {"focal",QJsonArray{c.focalPoint[0],c.focalPoint[1],c.focalPoint[2]}},
+        {"up",QJsonArray{c.viewUp[0],c.viewUp[1],c.viewUp[2]}},
+        {"angle",c.viewAngle},{"parallel_span",parallelSpan()}};
+}
+void ModelView::restoreCamera(const QJsonObject& saved) {
+    auto& camera=engine->getWindow().getCamera();
+    auto state=camera.getState();
+    const auto p=saved["position"].toArray(), f=saved["focal"].toArray(), u=saved["up"].toArray();
+    for (int i=0;i<3;++i) { state.position[i]=p[i].toDouble(); state.focalPoint[i]=f[i].toDouble(); state.viewUp[i]=u[i].toDouble(); }
+    state.viewAngle=saved["angle"].toDouble(30); camera.setState(state);
+    const double span=saved["parallel_span"].toDouble();
+    if (config["settings"].toObject()["orthographic"].toBool() && span>0) camera.zoom(parallelSpan()/span);
+}
+QJsonObject ModelView::cameraHome() const {
+    const auto& c=referenceCamera;
+    return {{"position",QJsonArray{c.position[0],c.position[1],c.position[2]}},
+        {"focal",QJsonArray{c.focalPoint[0],c.focalPoint[1],c.focalPoint[2]}}};
+}
+void ModelView::setCameraState(const QJsonObject& state) {
+    config["camera"]=state;
+    if (!engine) return;
+    makeCurrent(); restoreCamera(state); doneCurrent(); update();
+}
+void ModelView::cameraView(const QString& view) {
+    if (!engine) return;
+    makeCurrent();
+    auto& camera=engine->getWindow().getCamera();
+    auto state=camera.getState();
+    double distance=0; for (int i=0;i<3;++i) distance+=std::pow(state.position[i]-state.focalPoint[i],2);
+    distance=std::sqrt(distance);
+    const bool zUp=config["settings"].toObject()["up_axis"].toString("y")=="z";
+    const int vertical=zUp?2:1, forward=zUp?1:2;
+    f3d::vector3_t direction{0,0,0}; state.viewUp=worldUp();
+    if (view=="front") direction[forward]=zUp?-1:1;
+    else if (view=="back") direction[forward]=zUp?1:-1;
+    else if (view=="right") direction[0]=1;
+    else if (view=="left") direction[0]=-1;
+    else if (view=="top" || view=="bottom") {
+        direction[vertical]=view=="top"?1:-1;
+        state.viewUp={0,0,0}; state.viewUp[forward]=zUp?1:-1;
+    } else { direction[0]=1/std::sqrt(3.0); direction[vertical]=1/std::sqrt(3.0); direction[forward]=(zUp?-1:1)/std::sqrt(3.0); }
+    for (int i=0;i<3;++i) state.position[i]=state.focalPoint[i]+direction[i]*distance;
+    camera.setState(state); doneCurrent(); update(); rememberCamera();
+}
+void ModelView::rememberCamera(bool persist) {
+    const auto saved=cameraState();
+    if (!saved.isEmpty()) { config["camera"]=saved; if (inspectionChanged) inspectionChanged(saved,persist); }
+}
+void ModelView::resetView() {
+    if (!engine) return;
+    makeCurrent();
+    auto& camera=engine->getWindow().getCamera();
+    camera.setState(defaultCamera).resetToBounds();
+    if (config["settings"].toObject()["lock_horizon"].toBool(true)) orbit(0,0);
+    doneCurrent(); update(); rememberCamera();
 }
 QJsonObject ModelView::metrics() const {
     QJsonObject result{{"loads", loads}, {"renders", renders}, {"engine", bool(engine)}, {"renderer", renderer}};
     result["triangles"]=engine && triangles ? QJsonValue(*triangles) : QJsonValue(QJsonValue::Null);
     if (engine) {
-        const auto c=engine->getWindow().getCamera().getState();
-        result["camera"]=QJsonObject{{"position",QJsonArray{c.position[0],c.position[1],c.position[2]}},
-            {"focal",QJsonArray{c.focalPoint[0],c.focalPoint[1],c.focalPoint[2]}},
-            {"up",QJsonArray{c.viewUp[0],c.viewUp[1],c.viewUp[2]}}};
+        result["camera"]=cameraState();
         result["lighting"]=config["settings"].toObject()["lighting"].toString("studio");
         result["lights"]=engine->getScene().getLightCount();
     }
@@ -264,30 +337,16 @@ QImage ModelView::snapshot() {
 void ModelView::wheelEvent(QWheelEvent* e) {
     if (engine) {
         makeCurrent();
-        auto& window=engine->getWindow();
-        auto& camera=window.getCamera();
-        // F3D display coordinates are physical pixels with a bottom-left origin.
-        const double scale=devicePixelRatioF();
-        auto display=window.getDisplayFromWorld(camera.getFocalPoint());
-        display[0]=e->position().x()*scale;
-        display[1]=(height()-e->position().y())*scale;
-        const auto anchor=window.getWorldFromDisplay(display);
+        auto& camera=engine->getWindow().getCamera();
         const double factor=std::pow(1.0015,e->angleDelta().y());
         if (config["settings"].toObject()["orthographic"].toBool()) camera.zoom(factor);
         else camera.dolly(factor);
-        display[2]=window.getDisplayFromWorld(camera.getFocalPoint())[2];
-        const auto moved=window.getWorldFromDisplay(display);
-        auto state=camera.getState();
-        for (int i=0;i<3;++i) {
-            state.position[i]+=anchor[i]-moved[i];
-            state.focalPoint[i]+=anchor[i]-moved[i];
-        }
-        camera.setState(state);
         doneCurrent(); update();
     }
-    e->accept();
+    rememberCamera(); e->accept();
 }
-void ModelView::mousePressEvent(QMouseEvent* e) { last=e->position(); requestActivate(); }
+void ModelView::mouseReleaseEvent(QMouseEvent* e) { rememberCamera(); e->accept(); }
+void ModelView::mousePressEvent(QMouseEvent* e) { last=e->position(); if (activated) activated(); requestActivate(); }
 void ModelView::mouseMoveEvent(QMouseEvent* e) {
     if (!engine || e->buttons() == Qt::NoButton) { last=e->position(); return; }
     const QPointF d=e->position()-last; last=e->position();
@@ -299,13 +358,14 @@ void ModelView::mouseMoveEvent(QMouseEvent* e) {
     } else if (config["settings"].toObject()["lock_horizon"].toBool(true)) {
         orbit(-d.x()*.4*std::numbers::pi/180,d.y()*.4*std::numbers::pi/180);
     } else { c.azimuth(-d.x()*.4).elevation(d.y()*.4); }
-    doneCurrent(); update();
+    doneCurrent(); update(); rememberCamera(false);
 }
 void ModelView::mouseDoubleClickEvent(QMouseEvent*) { fit(); }
 
-extern "C" Q_DECL_EXPORT ModelHandle asset_preview_create_model(QJsonObject config, QWidget* parent, LoadedCallback loaded) {
+extern "C" Q_DECL_EXPORT ModelHandle asset_preview_create_model(QJsonObject config, QWidget* parent, LoadedCallback loaded, InspectionCallback changed) {
     auto* model=new ModelView(std::move(config));
     model->loaded=std::move(loaded);
+    model->inspectionChanged=std::move(changed);
     auto* surface=QWidget::createWindowContainer(model,parent);
     surface->setFocusPolicy(Qt::StrongFocus);
     return {surface,model};

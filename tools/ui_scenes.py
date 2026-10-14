@@ -52,6 +52,18 @@ def main():
                 client.rpc({"method":"settings","id":"model","settings":{"textures":False}}); capture("no-textures")
                 client.rpc({"method":"settings","id":"model","settings":{"materials":False}}); capture("clay")
                 client.rpc({"method":"settings","id":"model","settings":{"materials":True,"textures":True,"lighting":"lightkit"}}); capture("light-kit")
+                client.rpc({"method":"compare","ids":["model","material"],"camera_sync":True})
+                helpers.eventually(lambda:helpers.row("material").get("metrics",{}).get("engine"))
+                capture("comparison",1000,720); capture("minimum-comparison",540,380)
+                capture("comparison-large",1600,1000)
+                input.shortcut("f"); time.sleep(.2); capture("file-menu",1000,720); input.press("Escape")
+                input.shortcut("v"); time.sleep(.2); capture("view-menu"); input.press("Escape")
+                control=helpers.row("model")["controls"]["options"]
+                input.click(control["x"]+control["width"]//2,control["y"]+control["height"]//2)
+                time.sleep(.2); capture("preview-menu"); input.press("Escape")
+                client.rpc({"method":"compare","ids":[]})
+                client.rpc({"method":"layout","layout":"grid","grid_size":2,"compact":False})
+                capture("minimum-grid",540,380)
             report["renderer"]=helpers.row("model")["metrics"]["renderer"]
             assert not any(token in report["renderer"].lower() for token in ("llvmpipe","softpipe","software","unknown"))
             if args.phase=="after":

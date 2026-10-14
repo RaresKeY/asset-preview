@@ -8,6 +8,7 @@ import importlib.util
 import json
 import math
 import os
+import shlex
 from pathlib import Path
 import socket
 import struct
@@ -137,6 +138,10 @@ class XInput:
         self.key("Alt_L",1); self.key(key,1); self.key(key,0); self.key("Alt_L",0); self.x.XFlush(self.display)
     def press(self,key):
         self.key(key,1); self.key(key,0); self.x.XFlush(self.display)
+    def chord(self,*keys):
+        for key in keys: self.key(key,1)
+        for key in reversed(keys): self.key(key,0)
+        self.x.XFlush(self.display)
     def motion(self,x,y):
         ox=ctypes.c_int(); oy=ctypes.c_int(); child=ctypes.c_ulong()
         self.x.XTranslateCoordinates(self.display,self.window,self.root,0,0,ctypes.byref(ox),ctypes.byref(oy),ctypes.byref(child))
@@ -164,6 +169,9 @@ class PreviewIntegration(unittest.TestCase):
         cls.root = Path(cls.temp.name)
         os.environ["ASSET_PREVIEW_RUNTIME_DIR"] = str(cls.root / "runtime")
         os.environ["ASSET_PREVIEW_STATE_DIR"] = str(cls.root / "state")
+        # XTest's legacy wheel buttons are dropped by this Qt/XInput2 path.
+        # Use native X11 core input in the isolated fixture; production keeps XI2.
+        if GPU: os.environ["QT_XCB_NO_XI2"]="1"
         if not GPU: os.environ["QT_QPA_PLATFORM"] = "offscreen"
         # Several real CLI processes racing to start must all use one daemon.
         with concurrent.futures.ThreadPoolExecutor(max_workers=6) as pool:
@@ -403,7 +411,7 @@ class PreviewIntegration(unittest.TestCase):
         finally: input.close()
 
     @unittest.skipUnless(GPU and os.environ.get("QT_QPA_PLATFORM")!="wayland","Hardware Gamescope X11 input lane")
-    def test_25_pointer_zoom_camera(self):
+    def test_25_zoom_and_orbit_preserve_focal_point(self):
         obj=self.root/"zoom-cube.obj"
         subprocess.run([sys.executable,str(ROOT/"examples/generate_cube.py"),str(obj)],check=True,capture_output=True)
         client.rpc({"method":"add","entry":{"id":"zoom","path":str(obj)}})
@@ -414,25 +422,44 @@ class PreviewIntegration(unittest.TestCase):
         input=XInput()
         try:
             for orthographic in (False,True):
-                client.rpc({"method":"settings","id":"zoom","settings":{"orthographic":orthographic}})
-                time.sleep(.2)
-                view=row("zoom")["viewport"]
-                x=view["x"]+view["width"]*3//4; y=view["y"]+view["height"]//3
-                input.click(x,y); time.sleep(.1)
-                before=row("zoom")["metrics"]["camera"]
-                input.scroll(x,y)
-                eventually(lambda:math.dist(before["focal"],row("zoom")["metrics"]["camera"]["focal"])>1e-5)
-                after=row("zoom")["metrics"]["camera"]
-                distance=math.dist(before["position"],before["focal"])
-                new_distance=math.dist(after["position"],after["focal"])
-                if orthographic: self.assertAlmostEqual(distance,new_distance,places=6)
-                else: self.assertLess(new_distance,distance)
-                for a,b in zip(before["up"],after["up"]): self.assertAlmostEqual(a,b,places=12)
-                input.scroll(x,y,False)
-                eventually(lambda:math.dist(before["focal"],row("zoom")["metrics"]["camera"]["focal"])<1e-6)
-                restored=row("zoom")["metrics"]["camera"]
-                for key in ("position","focal","up"):
-                    for a,b in zip(before[key],restored[key]): self.assertAlmostEqual(a,b,places=6)
+                for lock_horizon in (True,False):
+                    with self.subTest(orthographic=orthographic,lock_horizon=lock_horizon):
+                        client.rpc({"method":"settings","id":"zoom","settings":{"orthographic":orthographic,"lock_horizon":lock_horizon}})
+                        time.sleep(.5)
+                        view=row("zoom")["viewport"]
+                        x=view["x"]+view["width"]*3//4; y=view["y"]+view["height"]//3
+                        before_pan=row("zoom")["metrics"]["camera"]
+                        input.key("Shift_L",1); input.drag(x,y,20,15); input.key("Shift_L",0); input.x.XFlush(input.display)
+                        eventually(lambda:math.dist(before_pan["focal"],row("zoom")["metrics"]["camera"]["focal"])>1e-5)
+                        before=row("zoom")["metrics"]["camera"]
+                        input.scroll(x,y)
+                        def zoom_changed():
+                            current=row("zoom")["metrics"]["camera"]
+                            return abs(before["parallel_span"]-current["parallel_span"])>1e-5 if orthographic else math.dist(before["position"],current["position"])>1e-5
+                        eventually(zoom_changed)
+                        after=row("zoom")["metrics"]["camera"]
+                        self.assertEqual(before["focal"],after["focal"])
+                        distance=math.dist(before["position"],before["focal"])
+                        new_distance=math.dist(after["position"],after["focal"])
+                        if orthographic:
+                            self.assertEqual(before["position"],after["position"])
+                            self.assertLess(after["parallel_span"],before["parallel_span"])
+                        else: self.assertLess(new_distance,distance)
+                        for a,b in zip(before["up"],after["up"]): self.assertAlmostEqual(a,b,places=12)
+                        input.scroll(x,y,False)
+                        def zoom_restored():
+                            current=row("zoom")["metrics"]["camera"]
+                            return abs(before["parallel_span"]-current["parallel_span"])<1e-6 if orthographic else math.dist(before["position"],current["position"])<1e-6
+                        eventually(zoom_restored)
+                        restored=row("zoom")["metrics"]["camera"]
+                        for key in ("position","focal","up"):
+                            for a,b in zip(before[key],restored[key]): self.assertAlmostEqual(a,b,places=6)
+                        # Orbit the panned view without triggering double-click Fit.
+                        time.sleep(.5); input.drag(x,y,45,20)
+                        eventually(lambda:math.dist(restored["position"],row("zoom")["metrics"]["camera"]["position"])>1e-5)
+                        orbited=row("zoom")["metrics"]["camera"]
+                        self.assertEqual(restored["focal"],orbited["focal"])
+                        self.assertAlmostEqual(math.dist(orbited["position"],orbited["focal"]),distance,places=6)
         finally: input.close()
 
     @unittest.skipUnless(GPU and os.environ.get("QT_QPA_PLATFORM")!="wayland","Hardware Gamescope X11 input lane")
@@ -455,6 +482,7 @@ class PreviewIntegration(unittest.TestCase):
             renders=row("zoom-image")["metrics"]["renders"]
             input.click(x,y); time.sleep(.1); input.scroll(x,y)
             eventually(lambda:row("zoom-image")["metrics"]["renders"]>renders)
+            eventually(lambda:row("zoom-image")["metrics"]["image_view"]["zoom"]>1)
             time.sleep(.1)
             capture.unlink()
             client.rpc({"method":"capture","path":str(capture)})
@@ -515,14 +543,14 @@ class PreviewIntegration(unittest.TestCase):
         self.add("menu-image"); self.show()
         input=XInput()
         try:
-            input.shortcut("s")
+            input.shortcut("v")
             eventually(lambda:client.rpc({"method":"list"})["options_open"])
-            input.press("p"); time.sleep(.2)
-            input.press("Return")
+            input.press("o"); time.sleep(.2)
+            input.press("p")
             eventually(lambda:row("menu-image")["settings"].get("nearest") is True)
             input.shortcut("s"); time.sleep(.2)
             input.press("i"); time.sleep(.2)
-            input.press("Return")
+            input.press("p")
             eventually(lambda:client.rpc({"method":"list"})["preferences"]["image"].get("nearest") is False)
             self.assertTrue(row("menu-image")["settings"]["nearest"])
             self.add("menu-new")
@@ -810,7 +838,7 @@ class PreviewIntegration(unittest.TestCase):
         self.assertTrue(row("clip")["metrics"]["engine"])
         video(asset,"color=c=blue:size=320x180:rate=12")
         eventually(lambda:row("clip")["metrics"]["loads"]>good,timeout=20)
-        client.rpc({"method":"add","entry":{"id":"clip-grid","path":str(asset)}})
+        client.rpc({"method":"add","entry":{"id":"clip-grid","path":str(asset),"settings":{"paused":False}}})
         client.rpc({"method":"layout","layout":"grid","compact":True})
         eventually(lambda:row("clip-grid").get("metrics",{}).get("loads",0)==1)
         second=row("clip-grid")["metrics"]["renders"]
@@ -932,5 +960,229 @@ class PreviewIntegration(unittest.TestCase):
         finally: registry.rmdir(); backup.replace(registry)
         client.rpc({"method":"remove","id":"close-current"})
         self.assertEqual(client.rpc({"method":"list"})["selected"],"close-before")
+
+    @unittest.skipUnless(GPU and os.environ.get("QT_QPA_PLATFORM")!="wayland","Hardware camera persistence and reset")
+    def test_34_camera_persistence_and_reset(self):
+        obj=self.root/"saved-camera.obj"
+        subprocess.run([sys.executable,str(ROOT/"examples/generate_cube.py"),str(obj)],check=True,capture_output=True)
+        client.rpc({"method":"add","entry":{"id":"camera","path":str(obj)}})
+        self.add("camera-other"); self.show()
+        eventually(lambda:row("camera").get("metrics",{}).get("engine"))
+        renderer=row("camera")["metrics"]["renderer"]
+        self.assertFalse(any(s in renderer.lower() for s in ("llvmpipe","softpipe","software","unknown")),renderer)
+        def check(saved):
+            actual=row("camera")["metrics"]["camera"]
+            for key in ("position","focal","up"):
+                for a,b in zip(saved[key],actual[key]): self.assertAlmostEqual(a,b,places=6)
+            if "parallel_span" in saved:
+                self.assertAlmostEqual(saved["parallel_span"],actual["parallel_span"],places=6)
+        for ortho in (False,True):
+            client.rpc({"method":"settings","id":"camera","settings":{"orthographic":ortho}})
+            time.sleep(.2)
+            baseline_input=XInput()
+            try:
+                reset=row("camera")["controls"]["reset"]
+                baseline_input.click(reset["x"]+reset["width"]//2,reset["y"]+reset["height"]//2)
+                time.sleep(.2)
+            finally: baseline_input.close()
+            initial=row("camera")["metrics"]["camera"]
+            input=XInput()
+            try:
+                view=row("camera")["viewport"]; x=view["x"]+view["width"]//2; y=view["y"]+view["height"]//2
+                input.drag(x,y,60,35)
+                eventually(lambda:bool(row("camera").get("camera")))
+                input.key("Shift_L",1); input.drag(x,y,35,20); input.key("Shift_L",0); input.x.XFlush(input.display)
+                time.sleep(.1); input.scroll(x,y)
+                eventually(lambda:math.dist(initial["position"],row("camera")["camera"]["position"])>1e-4)
+                time.sleep(.1); saved=row("camera")["camera"]
+            finally: input.close()
+            client.rpc({"method":"select","id":"camera-other"})
+            client.rpc({"method":"select","id":"camera"})
+            eventually(lambda:row("camera").get("metrics",{}).get("engine")); check(saved)
+            self.assertAlmostEqual(row("camera")["camera"]["parallel_span"],saved["parallel_span"],places=6)
+            client.rpc({"method":"add","entry":{"id":"camera","path":str(obj),"label":"Reconnected camera"}})
+            eventually(lambda:row("camera").get("metrics",{}).get("engine")); check(saved)
+            client.rpc({"method":"quit"}); eventually(lambda:not client.running()); client.start(); self.show()
+            eventually(lambda:row("camera").get("metrics",{}).get("engine")); check(saved)
+            input=XInput()
+            try:
+                time.sleep(.2); reset=row("camera")["controls"]["reset"]
+                self.assertTrue(reset["visible"])
+                input.click(reset["x"]+reset["width"]//2,reset["y"]+reset["height"]//2)
+                eventually(lambda:math.dist(initial["position"],row("camera")["metrics"]["camera"]["position"])<1e-6)
+                check(initial)
+            finally: input.close()
+
+    def test_35_camera_validation_and_default_isolation(self):
+        camera={"position":[3,2,5],"focal":[0,0,0],"up":[0,1,0],"angle":30,"parallel_span":4}
+        client.rpc({"method":"add","entry":{"id":"saved","path":str(self.root/"missing.obj"),"camera":camera}})
+        self.assertEqual(row("saved")["camera"],camera)
+        client.rpc({"method":"add","entry":{"id":"saved","path":str(self.root/"missing.obj")}})
+        self.assertEqual(row("saved")["camera"],camera)
+        client.rpc({"method":"add","entry":{"id":"fresh","path":str(self.root/"fresh.obj")}})
+        self.assertNotIn("camera",row("fresh"))
+        for bad in ({},dict(camera,up=[0,0,0]),dict(camera,position=[0,0,0]),dict(camera,parallel_span=-1),dict(camera,angle=180)):
+            with self.assertRaises(RuntimeError):
+                client.rpc({"method":"add","entry":{"id":"bad-camera","path":str(self.root/"bad.obj"),"camera":bad}})
+
+    def test_36_reopen_restores_position_settings_and_save_failure(self):
+        for key in ("reopen-first","reopen-middle","reopen-last"): self.add(key)
+        client.rpc({"method":"select","id":"reopen-middle"})
+        client.rpc({"method":"settings","id":"reopen-middle","settings":{"nearest":True}})
+        client.rpc({"method":"remove","id":"reopen-middle"})
+        registry=self.root/"state/previews.json"; backup=registry.with_suffix(".backup")
+        registry.rename(backup); registry.mkdir()
+        try:
+            with self.assertRaises(RuntimeError): client.rpc({"method":"reopen"})
+            self.assertNotIn("reopen-middle",[e["id"] for e in client.rpc({"method":"list"})["entries"]])
+        finally: registry.rmdir(); backup.replace(registry)
+        client.rpc({"method":"reopen"})
+        state=client.rpc({"method":"list"})
+        self.assertEqual([e["id"] for e in state["entries"]],["reopen-first","reopen-middle","reopen-last"])
+        self.assertEqual(state["selected"],"reopen-middle")
+        self.assertTrue(row("reopen-middle")["settings"]["nearest"])
+        client.rpc({"method":"close_all"}); client.rpc({"method":"reopen"})
+        self.assertEqual(client.rpc({"method":"list"})["selected"],"reopen-middle")
+
+    @unittest.skipUnless(GPU and os.environ.get("QT_QPA_PLATFORM")!="wayland","Native grid selection, image persistence and screenshots")
+    def test_37_active_grid_image_shortcuts_and_screenshots(self):
+        for key in ("grid-first","grid-second","grid-third"): self.add(key,settings={"background":"dark"})
+        client.rpc({"method":"layout","layout":"grid"}); self.show()
+        eventually(lambda:row("grid-second").get("metrics",{}).get("loads"))
+        input=XInput(); saved_files=[]
+        try:
+            time.sleep(.2); view=row("grid-second")["viewport"]; x=view["x"]+view["width"]//2; y=view["y"]+view["height"]//2
+            loads={id:row(id)["metrics"]["loads"] for id in ("grid-first","grid-second","grid-third")}
+            input.click(x,y); eventually(lambda:client.rpc({"method":"list"})["selected"]=="grid-second")
+            time.sleep(.2); view=row("grid-second")["viewport"]; x=view["x"]+view["width"]//2; y=view["y"]+view["height"]//2
+            for id,count in loads.items(): self.assertEqual(row(id)["metrics"]["loads"],count)
+            self.assertTrue(row("grid-second")["selected"])
+            input.motion(x+40,y); input.x.XFlush(input.display); time.sleep(.1)
+            input.scroll(x+40,y); time.sleep(.5)
+            self.assertGreater(row("grid-second")["metrics"]["image_view"]["zoom"],1,msg=str(row("grid-second")))
+            input.drag(x,y,45,20)
+            eventually(lambda:row("grid-second").get("image_view",{}).get("zoom",1)>1)
+            time.sleep(.1); saved=row("grid-second")["image_view"]
+            input.chord("Control_L","w")
+            eventually(lambda:not any(e["id"]=="grid-second" for e in client.rpc({"method":"list"})["entries"]))
+            input.chord("Control_L","Shift_L","t")
+            eventually(lambda:client.rpc({"method":"list"})["selected"]=="grid-second")
+            self.assertEqual(row("grid-second")["metrics"]["image_view"],saved)
+            client.rpc({"method":"hide"}); self.show()
+            eventually(lambda:row("grid-second").get("metrics",{}).get("loads"))
+            self.assertEqual(row("grid-second")["metrics"]["image_view"],saved)
+            captures=ROOT/"captures"; before=set(captures.glob("grid-second-*.png"))
+            input.chord("Control_L","Shift_L","s")
+            saved_files=list(eventually(lambda:set(captures.glob("grid-second-*.png"))-before))
+            self.assertEqual(saved_files[0].read_bytes()[:8],b"\x89PNG\r\n\x1a\n")
+            input.chord("Control_L","Shift_L","c")
+            time.sleep(.1); self.assertEqual(set(captures.glob("grid-second-*.png"))-before,set(saved_files))
+            # A second Qt process actually retrieves the copied image, proving
+            # clipboard ownership and transfer rather than just the key binding.
+            probe_source=self.root/"clipboard-reader.cpp"; probe=self.root/"clipboard-reader"
+            probe_source.write_text(r'''#include <QApplication>
+#include <QClipboard>
+#include <QImage>
+#include <QTimer>
+#include <cstdio>
+int main(int argc,char** argv) {
+    QApplication app(argc,argv);
+    QTimer::singleShot(0,[&] {
+        const auto image=app.clipboard()->image();
+        if (image.isNull()) { app.exit(1); return; }
+        std::printf("%d %d\n",image.width(),image.height()); app.exit(0);
+    });
+    return app.exec();
+}
+''')
+            qt_flags=shlex.split(subprocess.run(["pkg-config","--cflags","--libs","Qt6Widgets"],check=True,capture_output=True,text=True).stdout)
+            subprocess.run(["c++","-std=c++20","-fPIC",str(probe_source),"-o",str(probe),*qt_flags],check=True,capture_output=True)
+            copied=subprocess.run([str(probe)],check=True,capture_output=True,text=True,timeout=10)
+            copied_size=list(map(int,copied.stdout.split()))
+            self.assertEqual(len(copied_size),2); self.assertTrue(all(value>0 for value in copied_size))
+            client.rpc({"method":"quit"}); eventually(lambda:not client.running()); client.start(); self.show()
+            eventually(lambda:row("grid-second").get("metrics",{}).get("loads"))
+            self.assertEqual(row("grid-second")["metrics"]["image_view"],saved)
+        finally:
+            input.close()
+            for path in saved_files: path.unlink(missing_ok=True)
+
+    @unittest.skipUnless(GPU and os.environ.get("QT_QPA_PLATFORM")!="wayland","Hardware comparison camera sync and presets")
+    def test_38_comparison_sync_and_camera_views(self):
+        obj=self.root/"compare-cube.obj"
+        subprocess.run([sys.executable,str(ROOT/"examples/generate_cube.py"),str(obj)],check=True,capture_output=True)
+        big=self.root/"compare-big.obj"
+        big.write_text("\n".join("v "+" ".join(str(float(v)*2) for v in line.split()[1:]) if line.startswith("v ") else line for line in obj.read_text().splitlines()))
+        for id,path in (("compare-one",obj),("compare-two",big)):
+            client.rpc({"method":"add","entry":{"id":id,"path":str(path)}})
+        self.add("compare-hidden"); self.show()
+        client.rpc({"method":"compare","ids":["compare-one","compare-two"]})
+        eventually(lambda:all(row(id).get("metrics",{}).get("engine") for id in ("compare-one","compare-two")))
+        self.assertFalse(row("compare-hidden")["active"])
+        renderer=row("compare-one")["metrics"]["renderer"]
+        self.assertFalse(any(s in renderer.lower() for s in ("llvmpipe","softpipe","software","unknown")),renderer)
+        input=XInput()
+        try:
+            time.sleep(.2); view=row("compare-one")["viewport"]; x=view["x"]+view["width"]//2; y=view["y"]+view["height"]//2
+            before=row("compare-two")["metrics"]["camera"]
+            input.drag(x,y,70,20)
+            eventually(lambda:math.dist(before["position"],row("compare-two")["metrics"]["camera"]["position"])>1e-4)
+            a=row("compare-one")["metrics"]["camera"]; b=row("compare-two")["metrics"]["camera"]
+            for p,q in zip(a["position"],b["position"]): self.assertAlmostEqual(p*2,q,places=5)
+            time.sleep(.5)
+            input.key("Shift_L",1); input.drag(x,y,30,25); input.key("Shift_L",0); input.x.XFlush(input.display)
+            eventually(lambda:math.dist(a["focal"],row("compare-one")["metrics"]["camera"]["focal"])>1e-4)
+            time.sleep(.1); before_zoom=row("compare-one")["metrics"]["camera"]
+            peer_before_zoom=row("compare-two")["metrics"]["camera"]
+            input.scroll(x+20,y); time.sleep(.1)
+            a=row("compare-one")["metrics"]["camera"]; b=row("compare-two")["metrics"]["camera"]
+            self.assertLess(math.dist(a["position"],a["focal"]),math.dist(before_zoom["position"],before_zoom["focal"]))
+            self.assertEqual(before_zoom["focal"],a["focal"])
+            self.assertEqual(peer_before_zoom["focal"],b["focal"])
+            for key in ("position","focal"):
+                for p,q in zip(a[key],b[key]): self.assertAlmostEqual(p*2,q,places=5)
+            input.press("7"); time.sleep(.1)
+            a=row("compare-one")["metrics"]["camera"]
+            self.assertAlmostEqual(a["position"][0],a["focal"][0],places=6)
+            self.assertAlmostEqual(a["position"][2],a["focal"][2],places=6)
+            self.assertGreater(a["position"][1],a["focal"][1])
+            client.rpc({"method":"reload","id":"compare-one"})
+            eventually(lambda:row("compare-one")["metrics"]["loads"]>1)
+            self.assertAlmostEqual(row("compare-one")["metrics"]["camera"]["position"][0],a["position"][0],places=6)
+            client.rpc({"method":"compare","camera_sync":False})
+            before=row("compare-two")["metrics"]["camera"]
+            input.press("1"); time.sleep(.1)
+            self.assertEqual(row("compare-two")["metrics"]["camera"],before)
+            client.rpc({"method":"compare","camera_sync":True})
+            time.sleep(.5); view=row("compare-two")["viewport"]
+            input.drag(view["x"]+view["width"]//2,view["y"]+view["height"]//2,35,15)
+            eventually(lambda:client.rpc({"method":"list"})["selected"]=="compare-two")
+            time.sleep(.1)
+            a=row("compare-one")["metrics"]["camera"]; b=row("compare-two")["metrics"]["camera"]
+            for p,q in zip(a["position"],b["position"]): self.assertAlmostEqual(p*2,q,places=5)
+            client.rpc({"method":"quit"}); eventually(lambda:not client.running()); client.start(); self.show()
+            eventually(lambda:all(row(id).get("metrics",{}).get("engine") for id in ("compare-one","compare-two")))
+            self.assertEqual(client.rpc({"method":"list"})["comparison"],["compare-one","compare-two"])
+            client.rpc({"method":"hide"}); self.assertEqual(client.rpc({"method":"list"})["active"],0)
+        finally: input.close()
+
+    def test_39_comparison_validation_and_failure_preserves_state(self):
+        for id in ("pair-one","pair-two"):
+            client.rpc({"method":"add","entry":{"id":id,"path":str(self.root/(id+".obj"))}})
+        self.add("pair-image")
+        client.rpc({"method":"compare","ids":["pair-one","pair-two"]})
+        for bad in ({"ids":["pair-one"]},{"ids":["pair-one","pair-one"]},{"ids":["pair-one","pair-image"]},{"camera_sync":"yes"}):
+            with self.assertRaises(RuntimeError): client.rpc({"method":"compare",**bad})
+        registry=self.root/"state/previews.json"; backup=registry.with_suffix(".backup")
+        registry.rename(backup); registry.mkdir()
+        try:
+            with self.assertRaises(RuntimeError): client.rpc({"method":"compare","ids":[]})
+            self.assertEqual(client.rpc({"method":"list"})["comparison"],["pair-one","pair-two"])
+        finally: registry.rmdir(); backup.replace(registry)
+        client.rpc({"method":"select","id":"pair-image"})
+        self.assertEqual(client.rpc({"method":"list"})["comparison"],[])
+        client.rpc({"method":"compare","ids":["pair-one","pair-two"]})
+        client.rpc({"method":"remove","id":"pair-one"})
+        self.assertEqual(client.rpc({"method":"list"})["comparison"],[])
 
 if __name__ == "__main__": unittest.main(verbosity=2)

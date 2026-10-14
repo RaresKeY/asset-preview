@@ -82,12 +82,26 @@ keeping the window, files and remembered settings.
 
 | Preview | Controls |
 |---|---|
-| Image | Wheel zoom, drag pan, fit, pixel filtering, checker/dark/light background |
-| Model | Drag orbit, right/middle/Shift drag pan, wheel zoom, double-click fit |
+| Image | Wheel zoom toward pointer, drag pan, fit, pixel filtering, checker/dark/light background |
+| Model | Drag orbit, right/middle/Shift drag pan, wheel zoom around the existing focal point, double-click/Fit to frame, Reset for default camera, E edges, M triangle count |
 | Video | Space/double-click pause, Shift+Left/Right seek, Home restart, M mute |
 
 The **⋯** menu provides display options, including clay/textured shading,
 lighting, grid, axes, projection and Y/Z-up. Videos loop and start muted.
+3D camera angle, pan and zoom are saved per preview across switching and restarts.
+Image zoom and pan are saved too. Click a grid card to make it active; the title
+border marks the selection. **Ctrl+W** closes it; **Ctrl+Shift+T** reopens the
+last closed preview with its settings and view (within the current session).
+
+**View → Camera Views** offers front/right/top/isometric with **1 / 3 / 7 / 9**;
+Ctrl+1/3/7 gives the opposite view. Numpad keys also work. **F** fits and
+**Ctrl+Home** resets the camera. **View → Compare With** opens two 3D previews
+side by side; **Sync camera** links orbit, pan and zoom around each model.
+
+**File → Save Screenshot** (**Ctrl+Shift+S**) saves the current preview;
+**Copy Screenshot** (**Ctrl+Shift+C**) copies it. File also saves the entire
+window. Checkout captures go to `captures/` (ignored by Git); installed releases
+save to **Pictures/Asset Preview**. Screenshots use unique PNG filenames.
 Left/Right navigates previews or pages, matching the toolbar arrows;
 Alt+Left/Right also works. Compact mode reduces spacing and
 hides steady live status; waiting, building and errors remain visible.

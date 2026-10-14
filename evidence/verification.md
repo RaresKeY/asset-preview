@@ -1,5 +1,33 @@
 # Verification — October 5, 2026
 
+## Desktop controls — October 14, 2026
+
+The host release build and `git diff --check` pass. `tools/test.sh functional`
+passes 24 tests with 12 hardware skips; `tools/test.sh gpu` passes all 36 tests.
+Final-build focused reruns pass native menu interaction, active-card selection,
+image-view persistence, Ctrl+W/Ctrl+Shift+T, screenshot saving and clipboard image
+retrieval by a second Qt process, and bidirectional comparison camera sync.
+Regression coverage includes video mute after navigation, paused/live playback,
+model camera reload/restart preservation, and visible-only resource ownership.
+The final focal-point correction passes all 36 hardware tests again: off-center
+3D wheel zoom and orbit retain the panned focal point in perspective and
+orthographic projections, with horizon lock both on and off. Linked comparison
+zoom preserves both focal points; image wheel zoom still anchors at the pointer.
+The video grid fixture explicitly requests playback instead of assuming a
+remembered paused preference will be absent.
+
+Gamescope headless visual scenes report NVIDIA GeForce RTX 2080 Ti/PCIe/SSE2.
+Matched before/after checks cover normal and small grids; additional checks cover
+540×380, 1000×720 and 1600×1000 windows, compact 3×3/4×4 grids, comparison,
+empty/waiting states, and native File/View/card popups. Desktop-native Breeze Dark
+and the default Qt style were inspected. Captures stay in task-local `/tmp` proof
+folders; generated screenshot fixtures are removed from the repo's `captures/`.
+No distribution artifacts were rebuilt or published for this local UI change.
+The desktop shortcut's checkout build was redeployed with a graceful service
+restart; the saved registry, selection, layout and preferences were retained.
+
+## Original verification
+
 Release build on the owning CachyOS workstation, Qt 6.11.2 and F3D 3.5.0.
 Automated visuals stayed inside Gamescope's headless backend. The loaded view
 reported **NVIDIA GeForce RTX 2080 Ti/PCIe/SSE2**, using Qt `xcb` through XWayland.

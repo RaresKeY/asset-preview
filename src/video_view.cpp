@@ -215,11 +215,12 @@ void VideoView::paintGL() {
 QImage VideoView::snapshot() {
     makeCurrent(); paintGL(); QImage image=grabFramebuffer(); doneCurrent(); return image;
 }
-void VideoView::mousePressEvent(QMouseEvent* e) { if (focusSurface) focusSurface(); requestActivate(); e->accept(); }
+void VideoView::mousePressEvent(QMouseEvent* e) { if (activated) activated(); if (focusSurface) focusSurface(); requestActivate(); e->accept(); }
 void VideoView::mouseDoubleClickEvent(QMouseEvent* e) { change({{"paused",!config["settings"].toObject()["paused"].toBool()}}); e->accept(); }
 bool VideoView::eventFilter(QObject* watched, QEvent* e) {
     // After programmatic focus, Qt can send keys to the widget container
     // instead of the native child. Forward only this video's playback keys.
+    if (e->type()==QEvent::ShortcutOverride && playbackKey(static_cast<QKeyEvent*>(e))) { e->accept(); return true; }
     if (e->type()==QEvent::KeyPress && playbackKey(static_cast<QKeyEvent*>(e))) {
         keyPressEvent(static_cast<QKeyEvent*>(e)); return true;
     }

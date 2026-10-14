@@ -89,3 +89,26 @@ publication, not merely when a load command is accepted.
 
 
 Defaults can be edited without a registered preview: `{"method":"defaults","group":"3d","settings":{"edges":true}}`. Groups are `image`, `video`, and `3d`; settings use the existing validation and persist for future registrations without modifying existing entries.
+
+Model/material entries retain a per-preview `camera` object after camera input.
+It contains three-number `position`, `focal` and `up` vectors, a view `angle` in
+degrees, and a positive `parallel_span` for orthographic zoom. These values also
+appear in `metrics.camera`. Same-kind registrations retain this state unless
+an explicit camera is supplied; camera state does not become a shared default.
+The card's Reset button restores the initial fitted camera and saves it.
+
+Image entries retain `image_view`: `{"zoom":1.5,"pan":[0.1,-0.05]}`. Zoom is
+bounded to 0.05–32; pan offsets are fractions of the viewport width and height.
+`metrics.image_view` reports the current state. Same-kind reconnections retain it.
+
+`reopen` restores the latest closed preview in this service session, including
+its list position and inspection state. At most 32 configurations are retained;
+an already re-registered ID is skipped. `list.closed_count` reports the count.
+Entry `selected` identifies the active card independently of decoded `active`.
+
+`{"method":"compare","ids":["before","after"],"camera_sync":true}` displays
+two model/material previews with linked orbit, pan and zoom. Use `ids:[]` to
+end comparison, or omit `ids` to toggle `camera_sync` on the current pair.
+`list.comparison` and `list.camera_sync` report the saved comparison state.
+`{"method":"camera_view","id":"before","view":"front"}` changes a visible
+3D camera; supported views are front, back, left, right, top, bottom, isometric.
