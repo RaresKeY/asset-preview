@@ -127,6 +127,7 @@ def parser() -> argparse.ArgumentParser:
     add.add_argument("--id", help="Stable ID; reusing it updates that registration")
     add.add_argument("--label")
     add.add_argument("--kind", choices=["auto", "image", "model", "video"], default="auto")
+    add.add_argument("--settings", help="Explicit JSON inspection options; preserve remembered defaults")
     add.add_argument("--watch", action="append", default=[], metavar="SOURCE", help="Additional input/dependency file (repeatable)")
     add.add_argument("--cwd", default=os.getcwd(), help="Working directory for explicit generator")
     add.add_argument("--timeout", type=int, default=120)
@@ -145,6 +146,9 @@ def parser() -> argparse.ArgumentParser:
     layout.add_argument("mode", choices=["single", "grid"])
     layout.add_argument("--size", type=int, choices=[2, 3, 4], help="Grid rows/columns: 4, 9 or 16 previews per page")
     layout.add_argument("--compact", action=argparse.BooleanOptionalAction, default=None, help="Tight spacing and in-view controls")
+    defaults = sub.add_parser("defaults", help="Update remembered options without changing registered previews")
+    defaults.add_argument("group", choices=["image", "video", "3d"])
+    defaults.add_argument("value", help="JSON object")
     settings = sub.add_parser("settings", help="Update per-preview options with a JSON object")
     settings.add_argument("id"); settings.add_argument("value", help='For example: {"grid":false,"light":1.2}')
     seek = sub.add_parser("seek", help="Seek a visible video to seconds from the start")
@@ -194,10 +198,16 @@ def main() -> int:
         if action == "material":
             entry["maps"] = {key: path(getattr(args, key)) for key in ("normal", "orm") if getattr(args, key)}
             if args.shape is not None: entry["settings"] = {"shape": args.shape}
+        if action == "add" and args.settings is not None:
+            entry["settings"] = json.loads(args.settings)
+            if not isinstance(entry["settings"], dict): raise RuntimeError("--settings requires a JSON object")
         request = {"method": "add", "entry": entry}
     if action in {"select", "remove", "reload", "settings", "seek"}: request["id"] = args.id
     if action == "seek": request["seconds"] = args.seconds
     if action == "settings": request["settings"] = json.loads(args.value)
+    if action == "defaults":
+        request.update(group=args.group, settings=json.loads(args.value))
+        if not isinstance(request["settings"], dict): raise RuntimeError("defaults requires a JSON object")
     if action == "layout":
         request["layout"] = args.mode
         if args.size is not None: request["grid_size"] = args.size
