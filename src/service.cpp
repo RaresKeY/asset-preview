@@ -1,4 +1,5 @@
 #include "service.h"
+#include "model_frame.h"
 #include <QProcessEnvironment>
 #include <QApplication>
 #include <QCheckBox>
@@ -341,11 +342,14 @@ QString Service::validate(QJsonObject& c, bool restore) {
     if (c.contains("maps") && !c.value("maps").isObject()) return "maps must be an object";
     if (c.contains("settings") && !c.value("settings").isObject()) return "settings must be an object";
     auto settings=c.value("settings").toObject();
-    const QSet<QString> known{"grid","axes","edges","orthographic","nearest","light","background","shape","roughness","metallic","materials","textures","lock_horizon","up_axis","lighting","paused","muted","loop","triangles"};
+    const QSet<QString> known{"grid","axes","edges","orthographic","nearest","light","background","shape","roughness","metallic","materials","textures","lock_horizon","up_axis","front_axis","lighting","paused","muted","loop","triangles"};
     for (auto i=settings.begin();i!=settings.end();++i) {
         if (!known.contains(i.key())) return "Unknown setting: " + i.key();
         if (i.key()=="background") { if (!QSet<QString>{"dark","light","checker"}.contains(i.value().toString())) return "Invalid background"; }
         else if (i.key()=="shape") { if (!QSet<QString>{"sphere","cube","plane"}.contains(i.value().toString())) return "Invalid material shape"; }
+        else if (i.key()=="front_axis") {
+            if (kind!="model" || !QSet<QString>{"+x","-x","+y","-y","+z","-z"}.contains(i.value().toString())) return "Front axis requires a model and signed x, y or z";
+        }
         else if (i.key()=="up_axis") { if (!QSet<QString>{"y","z"}.contains(i.value().toString())) return "Up axis must be y or z"; }
         else if (i.key()=="lighting") { if (!QSet<QString>{"studio","lightkit"}.contains(i.value().toString())) return "Lighting must be studio or lightkit"; }
         else if (i.key()=="light" || i.key()=="roughness" || i.key()=="metallic") {
@@ -353,6 +357,8 @@ QString Service::validate(QJsonObject& c, bool restore) {
         } else if (!i.value().isBool()) return "Boolean setting required: " + i.key();
     }
     if (c.contains("timeout") && (!c.value("timeout").isDouble() || c.value("timeout").toDouble()<1 || c.value("timeout").toDouble()>3600)) return "Timeout must be 1–3600 seconds";
+    const auto front=settings.value("front_axis").toString();
+    if (!front.isEmpty() && front.back()==settings.value("up_axis").toString("y").back()) return "Front axis must be perpendicular to up axis";
     c["command"]=command.toArray(); c["maps"]=maps; c["settings"]=settings;
     c["timeout"]=c.value("timeout").toDouble(120);
     return {};
@@ -379,6 +385,7 @@ QJsonObject Service::add(QJsonObject config, bool restore) {
         const auto explicitSettings=config["settings"].toObject();
         for (auto i=explicitSettings.begin();i!=explicitSettings.end();++i) settings[i.key()]=i.value();
         config["settings"]=settings;
+        if (existing && preview::frameChanged(old["settings"].toObject(),settings)) config.remove("camera");
         const auto invalid=validate(config);
         if (!invalid.isEmpty()) return failure(invalid);
     }
@@ -444,6 +451,7 @@ QJsonObject Service::request(const QJsonObject& r) {
             if (!r["settings"].isObject()) return failure("settings must be an object");
             auto remembered=preferences.value(group).toObject();
             const auto patch=r["settings"].toObject();
+            if (patch.contains("front_axis")) return failure("Front axis is a per-model source setting");
             for (auto i=patch.begin();i!=patch.end();++i) remembered[i.key()]=i.value();
             QJsonObject config{{"path",statePath+"/preference-validation"},{"kind",group=="3d"?"model":group},{"settings",remembered}};
             const auto error=validate(config); if (!error.isEmpty()) return failure(error);
@@ -599,11 +607,13 @@ QJsonObject Service::request(const QJsonObject& r) {
             for (auto i=patch.begin();i!=patch.end();++i) settings[i.key()]=i.value();
             config["settings"]=settings; QString error=validate(config);
             if (!error.isEmpty()) return failure(error);
-            const auto old=e->config; e->config=config;
+            const auto old=e->config;
+            if (preview::frameChanged(old["settings"].toObject(),settings)) config.remove("camera");
+            e->config=config;
             const auto previousPreferences=preferences;
             const auto group=preferenceGroup(config["kind"].toString());
             auto remembered=preferences.value(group).toObject();
-            for (auto i=patch.begin();i!=patch.end();++i) remembered[i.key()]=i.value();
+            for (auto i=patch.begin();i!=patch.end();++i) if (i.key()!="front_axis") remembered[i.key()]=i.value();
             preferences[group]=remembered;
             try { save(); } catch (...) { e->config=old; preferences=previousPreferences; throw; }
             if (e->view) e->view->settings(config);
@@ -824,7 +834,7 @@ void Service::syncCamera(const QString& id) {
     if (camera.isEmpty() || home.isEmpty() || targetHome.isEmpty() || target->view->cameraState().isEmpty()) return;
     syncingCamera=true;
     const auto settings=source->config["settings"].toObject(); auto targetSettings=target->config["settings"].toObject();
-    for (const auto& key:{"orthographic","up_axis","lock_horizon"}) if (settings.contains(key)) targetSettings[key]=settings[key]; else targetSettings.remove(key);
+    for (const auto& key:{"orthographic","up_axis","front_axis","lock_horizon"}) if (settings.contains(key)) targetSettings[key]=settings[key]; else targetSettings.remove(key);
     if (targetSettings!=target->config["settings"].toObject()) { target->config["settings"]=targetSettings; target->view->settings(target->config); }
     auto radius=[](const QJsonObject& c) { double value=0; const auto p=c["position"].toArray(), f=c["focal"].toArray();
         for (int i=0;i<3;++i) value+=std::pow(p[i].toDouble()-f[i].toDouble(),2);

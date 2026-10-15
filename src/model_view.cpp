@@ -1,4 +1,5 @@
 #include "model_view.h"
+#include "model_frame.h"
 #include "triangle_counts.h"
 #include <QFileInfo>
 #include <QImageReader>
@@ -160,11 +161,17 @@ bool ModelView::load(QString& error) {
             nextTriangles=preview::sourceTriangles(config["path"].toString());
         }
         auto& window = next->getWindow();
-        const auto saved=engine?cameraState():config["camera"].toObject();
+        const auto saved=resetCameraFrame?QJsonObject{}:(engine?cameraState():config["camera"].toObject());
         // A square fit gives comparison a stable scale independent of each
         // card's viewport aspect ratio and when it was first opened.
         window.setSize(1024,1024);
-        window.getCamera().azimuth(30).elevation(20).resetToBounds();
+        if (config["settings"].toObject().contains("front_axis")) {
+            const preview::ModelFrame frame(config["settings"].toObject());
+            auto state=window.getCamera().getState();
+            const auto direction=frame.direction("isometric");
+            for(int i=0;i<3;++i) { state.position[i]=state.focalPoint[i]+direction[i]; state.viewUp[i]=frame.up[i]; }
+            window.getCamera().setState(state).resetToBounds();
+        } else window.getCamera().azimuth(30).elevation(20).resetToBounds();
         referenceCamera=window.getCamera().getState();
         window.setSize(std::max(1, int(width()*devicePixelRatioF())), std::max(1, int(height()*devicePixelRatioF())));
         window.getCamera().resetToBounds();
@@ -173,18 +180,21 @@ bool ModelView::load(QString& error) {
         if (!saved.isEmpty()) restoreCamera(saved);
         triangles=nextTriangles;
         if (saved.isEmpty() && config["settings"].toObject()["lock_horizon"].toBool(true)) orbit(0,0);
+        resetCameraFrame=false;
         ++loads;
         return true;
     } catch (const std::exception& e) { error = QString::fromUtf8(e.what()); return false; }
 }
 bool ModelView::reload(const QJsonObject& cfg, QString& error) {
+    resetCameraFrame=preview::frameChanged(config["settings"].toObject(),cfg["settings"].toObject());
     config = cfg;
     if (!initialized) return true;
     makeCurrent(); bool ok = load(error); doneCurrent(); update(); return ok;
 }
 void ModelView::settings(const QJsonObject& cfg) {
     const auto old=config["settings"].toObject(), next=cfg["settings"].toObject();
-    const bool reloadScene = next["shape"] != old["shape"] || next["up_axis"] != old["up_axis"] ||
+    resetCameraFrame=preview::frameChanged(old,next);
+    const bool reloadScene = resetCameraFrame || next["shape"] != old["shape"] || next["up_axis"] != old["up_axis"] ||
         next["materials"].toBool(true) != old["materials"].toBool(true) ||
         next["textures"].toBool(true) != old["textures"].toBool(true);
     config = cfg;
@@ -245,17 +255,10 @@ void ModelView::cameraView(const QString& view) {
     auto state=camera.getState();
     double distance=0; for (int i=0;i<3;++i) distance+=std::pow(state.position[i]-state.focalPoint[i],2);
     distance=std::sqrt(distance);
-    const bool zUp=config["settings"].toObject()["up_axis"].toString("y")=="z";
-    const int vertical=zUp?2:1, forward=zUp?1:2;
-    f3d::vector3_t direction{0,0,0}; state.viewUp=worldUp();
-    if (view=="front") direction[forward]=zUp?-1:1;
-    else if (view=="back") direction[forward]=zUp?1:-1;
-    else if (view=="right") direction[0]=1;
-    else if (view=="left") direction[0]=-1;
-    else if (view=="top" || view=="bottom") {
-        direction[vertical]=view=="top"?1:-1;
-        state.viewUp={0,0,0}; state.viewUp[forward]=zUp?1:-1;
-    } else { direction[0]=1/std::sqrt(3.0); direction[vertical]=1/std::sqrt(3.0); direction[forward]=(zUp?-1:1)/std::sqrt(3.0); }
+    const preview::ModelFrame frame(config["settings"].toObject());
+    const auto direction=frame.direction(view);
+    const auto up=(view=="top" || view=="bottom")?-frame.front:frame.up;
+    for(int i=0;i<3;++i) state.viewUp[i]=up[i];
     for (int i=0;i<3;++i) state.position[i]=state.focalPoint[i]+direction[i]*distance;
     camera.setState(state); doneCurrent(); update(); rememberCamera();
 }

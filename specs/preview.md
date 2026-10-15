@@ -18,6 +18,13 @@ Hidden/minimized/closed windows activate none. Unchanged visible entries are ret
 when unrelated registrations change. Navigation destroys prior off-page views;
 camera angle, focal point/pan, view angle and orthographic scale persist per
 model/material across reloads, unloading, same-kind reconnections and restarts.
+Models may declare `settings.front_axis` as `+x`, `-x`, `+y`, `-y`, `+z` or
+`-z`, perpendicular to `up_axis` (default y). This source convention drives the
+initial three-quarter angle, Reset and cardinal views; top uses the opposite
+front as screen up. Omitting it preserves legacy camera angles and presets.
+Changing the effective up/front frame discards stale persisted inspection cameras;
+material/texture changes and same-frame reconnections preserve them. Front axis
+is per-model and is not remembered as a preference for unrelated new previews.
 Completed drags and scroll/fit/reset input save camera state without idle polling.
 Image zoom and pan also persist per preview; pan uses viewport-relative offsets
 so restored views behave consistently after resizing.

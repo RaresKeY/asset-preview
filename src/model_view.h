@@ -44,6 +44,7 @@ private:
     QString renderer;
     QPointF last;
     bool initialized = false;
+    bool resetCameraFrame = false;
     int loads = 0, renders = 0;
     std::optional<qint64> triangles;
 };
