@@ -132,3 +132,13 @@ when visual evidence is needed; it requires a visible window and refuses overwri
 Keep useful live connections during iteration. `remove <id>` unregisters only
 that preview and preserves files. Avoid global `hide`/`stop`/`close-all` during task
 cleanup because they affect other connected work.
+
+For a producer with a known export frame, use `add ... --settings
+'{"up_axis":"y","materials":true,"textures":true}'` to declare its model view
+atomically. Preserve other inspection choices. Source Z-up does not imply the
+export is Z-up: Asset Workshop reference-modeling GLBs convert to Y-up/-Z-front.
+Wrong remembered axes or clay mode can make a valid model appear tipped and
+untextured. Inspect saved settings and source export conventions before blaming
+geometry/material loss. `defaults 3d JSON` changes only future remembered defaults;
+existing entries need their own requested correction. See
+`docs/source-model-settings.md` for the public CLI and preservation test.
