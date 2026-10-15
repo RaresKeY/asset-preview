@@ -10,7 +10,7 @@ loader=importlib.machinery.SourceFileLoader('client',str(root/'bin/asset-preview
 import tempfile
 fixture=tempfile.TemporaryDirectory(prefix='preview-frame-')
 out=Path(os.environ.get('ASSET_PREVIEW_FRAME_PROOF',fixture.name));out.mkdir(exist_ok=True)
-os.environ['ASSET_PREVIEW_RUNTIME_DIR']=str(out/'runtime');os.environ['ASSET_PREVIEW_STATE_DIR']=str(out/'state')
+os.environ['ASSET_PREVIEW_RUNTIME_DIR']=str(Path(fixture.name)/'runtime');os.environ['ASSET_PREVIEW_STATE_DIR']=str(Path(fixture.name)/'state')
 def rpc(**r):return c.rpc(r)
 def row():return rpc(method='list')['entries'][0]
 def wait():
