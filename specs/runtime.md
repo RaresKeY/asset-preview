@@ -166,3 +166,7 @@ a second runtime. This is the existing C++/Qt preview application, without an
 invented separate lab chooser. The same private same-user singleton and
 visibility/close lifecycle above apply to Playpad launches. Keep the current
 root SVG and source artwork unchanged.
+
+## Playpad runtime acceptance, 2026-10-17
+
+Two root no-argument launches from an unrelated cwd with detached stdin showed the prepared native viewer in 2.013 and 0.538 seconds. An isolated synthetic GLB exercised Ctrl+W removal, actual window-close handling, hidden/unloaded state and reopening. The viewer reported NVIDIA GeForce RTX 2080 Ti/PCIe/SSE2. The owned service and socket were removed afterward. Screenshots and runtime-results.json are local compliance evidence. No dependency setup ran.
