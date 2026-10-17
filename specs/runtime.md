@@ -1,10 +1,16 @@
 # Runtime and connections
 
-Source ownership: `src/main.cpp`, `src/service.{h,cpp}`, `bin/asset-preview`,
+The optional `inspect` and `annotations` requests, persistent review references,
+offline review reads and visible-only inspection ownership are defined in
+[3D inspection and reviews](inspection.md). Review JSON is separate from the
+preview registry and generator inputs; comments do not rebuild models.
+
+Source ownership: `src/main.cpp`, `src/service.{h,cpp}`, `src/theme.h`, `bin/asset-preview`,
 `fish/`, `skills/asset-preview/`, `tools/install.py`, `play.sh`, `icon.svg`. See [protocol](../docs/protocol.md)
 for concrete request/configuration fields and limits.
-The CLI accepts video registrations and absolute seek for active videos; playback
-preferences are boolean paused/muted/loop settings in the existing registry.
+The CLI accepts audio/video registrations and seek for active media or model
+animation. Media uses paused/muted/loop preferences. Model animation transport,
+clip and speed are per-registration settings; see [Animations](animations.md).
 
 A Qt service and optional single GUI window share one native process. A standard
 library client starts it once under a private startup flock, waits for socket
@@ -18,7 +24,22 @@ embedding is currently unsupported; ping/list expose the actual Qt platform.
 
 Registration is independent of window focus and selected preview. IDs are stable,
 replacement is explicit, files may not exist yet. Window creation is deliberate
-through `gui` / `show`. Closing hides the window and releases every visible entry;
+through `gui` / `show`. A fully validated and merged identical registration is
+idempotent while hidden, or while its healthy visible publication and watched
+inputs are unchanged and complete resource coverage is established. Unknown or
+incomplete model/texture discovery retains refresh behavior. A proven unchanged
+registration does not save, rebuild the view or restart a running
+generator. Changed/missing outputs, dependencies, inputs and failed candidates
+retain the replacement/retry path. Explicit Reload remains a force refresh.
+Closing hides the window and releases every visible entry;
+Repeated GUI requests preserve maximized/fullscreen state and valid desktop placement.
+F11 toggles fullscreen for the layout; a video's double click/fullscreen control
+temporarily expands only that preview. Esc exits. The transient presentation and
+exit-notice lifecycle are owned by [Preview lifecycle](preview.md).
+Normal windows are fitted within one screen's available area (including frame
+decorations), choosing the largest overlap or the primary screen for stale
+offscreen positions; oversized windows shrink to fit. A deferred check handles
+X11 decoration placement after mapping. Minimizing is cleared when opening.
 `stop` / `quit` exits the server. Private version-1 state uses QSaveFile and retains
 invalid/corrupt state with an error. Session diagnostics are separate from specs.
 Failed selection saves retain the previous selection and active views; hover,
@@ -52,10 +73,11 @@ Optional `comparison` (empty or two distinct model/material IDs) and `camera_syn
 fields are also version-1 state. `compare` sets or ends the pair; existing layout
 remains the return layout. Invalid IDs/flags are rejected. Selecting a preview
 outside the pair, replacing it with another kind, or closing it ends comparison.
-Every display/playback setting change also updates remembered defaults, persisted
-in the optional version-1 `preferences` object. Image, video and shared model/material
+Display/media setting changes also update remembered defaults, persisted
+in the optional version-1 `preferences` object. Image, audio, video and shared model/material
 (`3d`) groups retain all setting keys independently. New registrations inherit the
-appropriate group's last values; explicit registration options override them without
+appropriate group's last values; model animation transport remains per registration.
+Explicit registration options override them without
 changing defaults. Same-kind reconnections retain their existing inspection settings
 before applying explicit overrides. Restored entries retain their saved configuration;
 legacy registries without preferences start with no remembered defaults. Material CLI
@@ -86,11 +108,12 @@ starting a server. `play.sh` delegates to the same GUI entrypoint for Playpad di
 The skill's canonical source/UI metadata is versioned in `skills/asset-preview/`;
 installation links it into `${CODEX_HOME:-~/.codex}/skills/asset-preview` without
 changing unrelated skills or invocation policy. Automatic skill selection is enabled.
-The skill covers images, videos, exported models and baked materials. It uses one
+The skill covers images, audio/music, videos, exported models/scenes, modular
+assets, rigged animation and baked materials. It uses one
 stable registration per view and ordinary output watching during iteration;
 reconnection replaces configuration, so agents retain explicit generator inputs
 and user settings. It distinguishes visible-only generation and asynchronous
-video publication from registration, and routes detailed options to the protocol.
+audio/video publication from registration, and routes detailed options to the protocol.
 
 Verification: `tools/test.sh functional` exercises the real daemon, concurrent
 startup, permissions, schema failures, save replacement/recovery, bounded lifetime,
@@ -110,4 +133,36 @@ background jobs and descendants left behind after normal generator completion.
 Packaged desktop launchers set the canonical reverse-DNS desktop identity;
 source-checkout launchers keep their existing desktop entry identity.
 
-The `defaults` request accepts `group` (`image`, `video`, `3d`) and a validated `settings` patch. It saves remembered values atomically without changing existing entries; failed saves restore preferences. The Settings menu uses this path independently of View > Preview Options.
+The `defaults` request accepts `group` (`image`, `audio`, `video`, `3d`) and a validated `settings` patch. It saves remembered values atomically without changing existing entries; failed saves restore preferences. The Settings menu uses this path independently of View > Preview Options.
+
+Settings > Theme offers mutually exclusive Auto, Dark and Light choices. The
+optional version-1 registry field `theme` accepts only `auto`, `dark` or `light`;
+legacy registries default to Auto. Invalid saved choices fail startup while
+preserving the file. A `theme` request without `mode` reads the current choice;
+with a valid `mode` it saves atomically before applying the palette. Failed saves
+retain both the previous choice and appearance, and menu errors remain visible.
+Theme responses and `list` expose `theme` and `effective_theme` (`dark` or `light`).
+The theme survives Close all, empty registries and service restarts. It is
+independent of per-preview backgrounds and remembered display defaults.
+
+Dark and Light use application palette roles with the existing native Qt widget
+style, including selection, tooltips, placeholders and disabled foregrounds.
+Auto clears application palette overrides so Qt uses the current platform colors
+and continues following system changes. Qt's separate tooltip palette is synced
+on a theme choice and before showing a forced-theme tooltip, without polling.
+Theme changes repaint widgets without
+reconciling previews, importing models, restarting generators or creating timers.
+`tools/test.sh theme` verifies role contrast, Auto reset, legacy state, persistence,
+validation and save rollback. `tools/test.sh theme-gpu` adds native menu input,
+ordinary F3D reload/camera/idle checks and inspection panel captures in both themes.
+
+## Playpad native tool entry
+
+The root `play.sh` resolves its own root and switches to that cwd before the
+existing `gui` command. `--check` verifies the prepared executable without
+starting the service. Missing native builds require explicit `tools/build.sh`;
+normal launch never builds, syncs dependencies, generates fixtures or creates
+a second runtime. This is the existing C++/Qt preview application, without an
+invented separate lab chooser. The same private same-user singleton and
+visibility/close lifecycle above apply to Playpad launches. Keep the current
+root SVG and source artwork unchanged.
