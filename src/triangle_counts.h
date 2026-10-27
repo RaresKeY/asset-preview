@@ -1,4 +1,5 @@
 #pragma once
+#include "dependency_metadata.h"
 #include <QFile>
 #include <QFileInfo>
 #include <QJsonArray>
@@ -7,6 +8,7 @@
 #include <QSet>
 #include <QtEndian>
 #include <algorithm>
+#include <cstring>
 #include <limits>
 #include <optional>
 
@@ -68,18 +70,13 @@ inline std::optional<qint64> gltfTriangles(const QJsonObject& document) {
 
 inline std::optional<qint64> sourceTriangles(const QString& path) {
     QFile file(path);
-    if (!file.open(QIODevice::ReadOnly)) return {};
     const auto suffix=QFileInfo(path).suffix().toLower();
+    if (!file.open(suffix=="glb" ? QIODevice::ReadOnly|QIODevice::Unbuffered : QIODevice::ReadOnly)) return {};
     constexpr qint64 MaxJson=16*1024*1024;
     if (suffix=="glb" || suffix=="gltf") {
         QByteArray json;
         if (suffix=="glb") {
-            const auto header=file.read(20);
-            if (header.size()!=20 || header.first(4)!="glTF" || qFromLittleEndian<quint32>(header.constData()+4)!=2 ||
-                qFromLittleEndian<quint32>(header.constData()+8)!=file.size() || header.mid(16,4)!="JSON") return {};
-            const auto length=qFromLittleEndian<quint32>(header.constData()+12);
-            if (length>MaxJson || length>file.size()-20) return {};
-            json=file.read(length);
+            json=readGlbJson(file,file.size(),MaxJson);
         } else {
             if (file.size()>MaxJson) return {};
             json=file.readAll();
@@ -93,19 +90,30 @@ inline std::optional<qint64> sourceTriangles(const QString& path) {
     qint64 total=0, vertices=0;
     bool continued=false;
     constexpr qint64 MaxLine=1024*1024;
+    QByteArray storage(MaxLine,Qt::Uninitialized);
+    auto space=[](char c) { return c==' ' || (c>='\t' && c<='\r'); };
     while (!file.atEnd()) {
-        auto line=file.readLine(MaxLine);
-        if (line.size()==MaxLine-1 && !line.endsWith('\n') && !file.atEnd()) return {};
-        const auto comment=line.indexOf('#');
-        if (comment>=0) line.truncate(comment);
-        line=line.simplified();
-        const bool more=line.endsWith('\\');
-        if (more) line.chop(1);
+        const auto length=file.readLine(storage.data(),MaxLine);
+        if (length<=0) return {};
+        const char* begin=storage.constData();
+        const char* end=begin+length;
+        if (length==MaxLine-1 && end[-1]!='\n' && !file.atEnd()) return {};
+        if (const auto* comment=static_cast<const char*>(std::memchr(begin,'#',size_t(length)))) end=comment;
+        while (begin<end && space(*begin)) ++begin;
+        while (begin<end && space(end[-1])) --end;
+        const bool more=begin<end && end[-1]=='\\';
+        if (more) --end;
         if (!continued) {
-            if (!line.startsWith("f ")) continue;
-            vertices=0; line.remove(0,2);
+            if (end-begin<2 || begin[0]!='f' || !space(begin[1])) continue;
+            vertices=0; begin+=2;
         }
-        for (const auto& token:line.split(' ')) if (!token.isEmpty()) ++vertices;
+        while (begin<end) {
+            while (begin<end && space(*begin)) ++begin;
+            if (begin==end) break;
+            if (vertices==std::numeric_limits<qint64>::max()) return {};
+            ++vertices;
+            while (begin<end && !space(*begin)) ++begin;
+        }
         continued=more;
         if (!more) {
             if (vertices<3 || total>std::numeric_limits<qint64>::max()-(vertices-2)) return {};
@@ -114,4 +122,27 @@ inline std::optional<qint64> sourceTriangles(const QString& path) {
     }
     return continued ? std::nullopt : std::optional<qint64>(total);
 }
+
+// Scalar metadata belongs to the visible ModelView and is independent of
+// external textures, display settings and imported GPU resources.
+class TriangleMetadata {
+public:
+    std::optional<qint64> count(const QString& path) {
+        return count(path,sourceFingerprint(path));
+    }
+    // A model importer can supply its pre-import fingerprint, preventing a
+    // count from being attached to geometry imported during a source save.
+    std::optional<qint64> count(const QString& path,const SourceFingerprint& before) {
+        const auto result=ready && path==sourcePath && before==sourceStamp ? triangles : sourceTriangles(path);
+        if (before!=sourceFingerprint(path)) { clear(); return {}; }
+        sourcePath=path; sourceStamp=before; triangles=result; ready=true;
+        return result;
+    }
+    void clear() { sourcePath.clear(); sourceStamp={}; triangles.reset(); ready=false; }
+private:
+    QString sourcePath;
+    SourceFingerprint sourceStamp;
+    std::optional<qint64> triangles;
+    bool ready=false;
+};
 }

@@ -28,23 +28,21 @@ def start_flatpak():
                 if time.monotonic()>deadline:raise RuntimeError('Concurrent Flatpak startup timed out')
                 time.sleep(.05)
         if client['running'](timeout=15):return False
-        log_fd=os.open(state/'server.log',os.O_CREAT|os.O_WRONLY|os.O_TRUNC|os.O_NOFOLLOW,0o600)
-        with os.fdopen(log_fd,'wb') as log:
-            command=['flatpak','run','--user',
-                '--env=ASSET_PREVIEW_RUNTIME_DIR='+str(runtime),
-                '--env=ASSET_PREVIEW_STATE_DIR='+str(state),
-                '--filesystem='+str(runtime)+':rw',
-                '--filesystem='+str(state)+':rw',
-                '--command=asset-preview',APP_ID,'--foreground']
-            process=subprocess.Popen(command,stdin=subprocess.DEVNULL,stdout=log,stderr=log,start_new_session=True)
+        command=['flatpak','run','--user',
+            '--env=ASSET_PREVIEW_RUNTIME_DIR='+str(runtime),
+            '--env=ASSET_PREVIEW_STATE_DIR='+str(state),
+            '--filesystem='+str(runtime)+':rw',
+            '--filesystem='+str(state)+':rw',
+            '--command=asset-preview',APP_ID,'--foreground']
+        process=subprocess.Popen(command,stdin=subprocess.DEVNULL,stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL,start_new_session=True)
         globals_['_SPAWNED'].append(process)
         deadline=time.monotonic()+30
         while time.monotonic()<deadline:
             if client['running']():return True
-            if process.poll() is not None:raise RuntimeError('Flatpak exited; see '+str(state/'server.log'))
+            if process.poll() is not None:raise RuntimeError('Flatpak exited; see '+str(state/'crash.log'))
             time.sleep(.05)
         with contextlib.suppress(ProcessLookupError):os.killpg(process.pid,15)
-        raise RuntimeError('Flatpak startup timed out; see '+str(state/'server.log'))
+        raise RuntimeError('Flatpak startup timed out; see '+str(state/'crash.log'))
 
 globals_['start']=start_flatpak
 if __name__=='__main__':

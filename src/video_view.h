@@ -21,7 +21,6 @@ protected:
     bool eventFilter(QObject*, QEvent*) override;
     void keyPressEvent(QKeyEvent*) override;
     void mousePressEvent(QMouseEvent*) override;
-    void mouseDoubleClickEvent(QMouseEvent*) override;
 private:
     struct Player;
     static void wakeup(void*);

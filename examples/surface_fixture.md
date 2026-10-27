@@ -73,3 +73,8 @@ exact model/native/proof bytes and canonical pin. It records the separate saved
 geometry audit's bounded scope and the two-pose motion limit.
 
 ![Actual saved fixture GLBs and matching native diagnostic views](surface_fixture.png)
+
+The connector groups all fixture views under its stable ID prefix (overridable
+with `ASSET_PREVIEW_PROJECT_ID` / `ASSET_PREVIEW_PROJECT_LABEL`). The saved host
+model is current; open/closed/contact diagnostic views use `--no-current`.
+Project pane updates preserve the user's global selection and layout.

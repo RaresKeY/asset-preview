@@ -8,12 +8,14 @@ Dependencies retain their individual licenses.
 | Dependency | Upstream license/source |
 |---|---|
 | Qt 6 Core, Gui, Widgets, Network, OpenGL | [Qt licensing](https://www.qt.io/licensing/open-source-lgpl-obligations), LGPL-3.0 / GPL / commercial options depending on distribution |
+| KDE KF6 Parts (optional host terminal integration) | [KParts source/licenses](https://invent.kde.org/frameworks/kparts), LGPL-2.0-or-later / LGPL-2.1-or-later per component |
+| Konsole KPart (optional, host-installed) | [Konsole source/licenses](https://invent.kde.org/utilities/konsole), GPL-2.0-or-later; not bundled in existing release artifacts |
 | F3D / libf3d | [F3D license](https://github.com/f3d-app/f3d/blob/v3.5.0/LICENSE.md), BSD-3-Clause |
-| VTK (through F3D) | [VTK copyright](https://gitlab.kitware.com/vtk/vtk/-/blob/v9.4.2/Copyright.txt), BSD-style |
+| VTK (F3D and optional inspection adapter) | [VTK copyright](https://gitlab.kitware.com/vtk/vtk/-/blob/v9.4.2/Copyright.txt), BSD-style |
 | Assimp (F3D reader) | [Assimp license](https://github.com/assimp/assimp/blob/master/LICENSE), BSD-3-Clause |
 | jemalloc (installed F3D dependency, static TLS compatibility) | [jemalloc license](https://github.com/jemalloc/jemalloc/blob/dev/COPYING), BSD-2-Clause |
 | libmpv (lazy video backend) | [mpv copyright](https://github.com/mpv-player/mpv/blob/v0.41.0/Copyright), Release: LGPL-2.1-or-later (`gpl=false`); installed system builds may use GPL-2.0-or-later |
-| FFmpeg and transitive mpv codec/render dependencies | Release: LGPL-2.1-or-later with GPL/nonfree components disabled; system configurations vary; [FFmpeg licensing](https://ffmpeg.org/legal.html) |
+| FFmpeg (direct waveform decode) and transitive mpv codec/render dependencies | Release: LGPL-2.1-or-later with GPL/nonfree components disabled; system configurations vary; [FFmpeg licensing](https://ffmpeg.org/legal.html) |
 
 ## Release 0.0.1
 

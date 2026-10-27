@@ -1,4 +1,6 @@
 #include "service.h"
+#include "crash_log.h"
+#include "thumbnail_job.h"
 #include <QApplication>
 #include <QCommandLineParser>
 #include <QDir>
@@ -6,18 +8,26 @@
 #include <QLockFile>
 #include <QSocketNotifier>
 #include <QSurfaceFormat>
+#include <clocale>
 #include <csignal>
 #include <fcntl.h>
+#include <memory>
 #include <unistd.h>
 
 static int signalWrite=-1;
 static void signalHandler(int) { const char byte=1; if (signalWrite>=0) { const auto ignored=::write(signalWrite,&byte,1); (void)ignored; } }
 int main(int argc,char** argv) {
+    if (argc==3 && QByteArray(argv[1])=="--thumbnail-job") return preview::thumbnailJob(argc,argv);
+    // Keep the singleton lock until Qt teardown and crash-marker cleanup finish.
+    std::unique_ptr<QLockFile> lock;
+    preview::CrashLog crash(preview::CrashLog::stateArgument(argc,argv));
     QSurfaceFormat format;
     format.setVersion(3,3); format.setProfile(QSurfaceFormat::CoreProfile);
     format.setDepthBufferSize(24); format.setStencilBufferSize(8); format.setSamples(0);
     QSurfaceFormat::setDefaultFormat(format);
     QApplication app(argc,argv);
+    // Qt adopts the desktop locale; libmpv requires C numeric formatting.
+    std::setlocale(LC_NUMERIC,"C");
     app.setApplicationName("asset-preview"); app.setApplicationDisplayName("Asset Preview");
     app.setDesktopFileName(qEnvironmentVariable("ASSET_PREVIEW_DESKTOP_ID", "asset-preview")); app.setQuitOnLastWindowClosed(false);
     QCommandLineParser parser; parser.addHelpOption();
@@ -26,18 +36,20 @@ int main(int argc,char** argv) {
     parser.process(app);
     const auto sock=parser.value("socket"), state=parser.value("state");
     if (sock.isEmpty() || state.isEmpty()) { qCritical("Use bin/asset-preview to start the application"); return 2; }
-    QLockFile lock(QFileInfo(sock).absolutePath()+"/server.lock");
-    lock.setStaleLockTime(0);
-    if (!lock.tryLock(0)) { qCritical("Another Asset Preview server holds the lock"); return 3; }
-    Service service(sock,state); QString error;
-    if (!service.start(error)) { qCritical("%s",qPrintable(error)); return 1; }
+    lock=std::make_unique<QLockFile>(QFileInfo(sock).absolutePath()+"/server.lock");
+    lock->setStaleLockTime(0);
+    if (!lock->tryLock(0)) { qCritical("Another Asset Preview server holds the lock"); return 3; }
+    QString error;
+    if (!crash.beginSession(error)) { qCritical("%s",qPrintable(error)); return crash.finish(1); }
+    Service service(sock,state);
+    if (!service.start(error)) { qCritical("%s",qPrintable(error)); return crash.finish(1); }
     std::signal(SIGTERM,signalHandler); std::signal(SIGINT,signalHandler);
     int signalPipe[2];
-    if (::pipe2(signalPipe,O_NONBLOCK|O_CLOEXEC)) { qCritical("Cannot create signal pipe"); return 1; }
+    if (::pipe2(signalPipe,O_NONBLOCK|O_CLOEXEC)) { qCritical("Cannot create signal pipe"); return crash.finish(1); }
     signalWrite=signalPipe[1];
     QSocketNotifier notifier(signalPipe[0],QSocketNotifier::Read);
     QObject::connect(&notifier,&QSocketNotifier::activated,&app,[&app] { app.quit(); });
     const int result=app.exec();
     signalWrite=-1; ::close(signalPipe[0]); ::close(signalPipe[1]);
-    return result;
+    return crash.finish(result);
 }

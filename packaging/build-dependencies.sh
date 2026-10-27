@@ -26,7 +26,7 @@ cd ffmpeg
  --enable-demuxer=mov,matroska,avi,gif,mpegvideo,mpegts,ogg,flac,wav,mp3,aac,image2,asf \
  --enable-parser=h264,hevc,mpeg4video,mpegvideo,vp8,vp9,aac,mpegaudio,flac,vorbis,opus,av1,png \
  --enable-protocol=file \
- --enable-filter=buffer,buffersink,abuffer,abuffersink,format,aformat,scale,aresample,volume,anull,null,setpts,asetpts
+ --enable-filter=buffer,buffersink,abuffer,abuffersink,format,aformat,scale,aresample,volume,anull,null,setpts,asetpts,astats,aspectralstats
 make -j4 && make install
 exit 0
 fi

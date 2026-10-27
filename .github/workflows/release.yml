@@ -54,7 +54,7 @@ jobs:
           chmod +x release/asset-preview-${ASSET_PREVIEW_VERSION}-linux-x86_64.run
           export QT_QPA_PLATFORM=offscreen
           if ! release/asset-preview-${ASSET_PREVIEW_VERSION}-linux-x86_64.run start; then
-            tail -30 "$HOME/.local/state/asset-preview/server.log"
+            tail -30 "$HOME/.local/state/asset-preview/crash.log"
             exit 1
           fi
           release/asset-preview-${ASSET_PREVIEW_VERSION}-linux-x86_64.run status --json

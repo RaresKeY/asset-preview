@@ -1,10 +1,41 @@
 #include "../src/triangle_counts.h"
 #include <QTemporaryDir>
 #include <iostream>
+#include <random>
 #include <stdexcept>
 
 static void expect(bool condition,const char* message) {
     if (!condition) throw std::runtime_error(message);
+}
+
+// Frozen pre-optimization scanner. Parity covers its best-effort token rules,
+// including malformed inputs and the exact QFile readLine boundary.
+static std::optional<qint64> referenceObjTriangles(const QString& path) {
+    QFile file(path);
+    if (!file.open(QIODevice::ReadOnly)) return {};
+    qint64 total=0, vertices=0;
+    bool continued=false;
+    constexpr qint64 MaxLine=1024*1024;
+    while (!file.atEnd()) {
+        auto line=file.readLine(MaxLine);
+        if (line.size()==MaxLine-1 && !line.endsWith('\n') && !file.atEnd()) return {};
+        const auto comment=line.indexOf('#');
+        if (comment>=0) line.truncate(comment);
+        line=line.simplified();
+        const bool more=line.endsWith('\\');
+        if (more) line.chop(1);
+        if (!continued) {
+            if (!line.startsWith("f ")) continue;
+            vertices=0; line.remove(0,2);
+        }
+        for (const auto& token:line.split(' ')) if (!token.isEmpty()) ++vertices;
+        continued=more;
+        if (!more) {
+            if (vertices<3 || total>std::numeric_limits<qint64>::max()-(vertices-2)) return {};
+            total+=vertices-2;
+        }
+    }
+    return continued ? std::nullopt : std::optional<qint64>(total);
 }
 
 int main() {
@@ -50,5 +81,38 @@ int main() {
     expect(!preview::sourceTriangles(oversized),"oversized JSON is unavailable without reading it");
     expect(!preview::sourceTriangles(file("long-line.obj",QByteArray("f ")+QByteArray(1024*1024,'1')+'\n')),
         "oversized OBJ line is unavailable");
+    const auto parity=dir.filePath("parity.obj");
+    auto compare=[&](const QByteArray& bytes) {
+        file("parity.obj",bytes);
+        expect(preview::sourceTriangles(parity)==referenceObjTriangles(parity),"OBJ tokenizer matches the frozen scanner");
+    };
+    for (unsigned value=0;value<256;++value) {
+        const auto separator=char(value);
+        compare(QByteArray("f")+separator+"1"+separator+"2"+separator+"3\n");
+        compare(QByteArray(" \t f 1 2 \\\n")+separator+"3 # comment\r\n");
+    }
+    const QList<QByteArray> lines={"f 1 2 3\n","f 1 2 3 4 # quad\n","f 1\\\n","f \\\n","  # comment\n",
+        "f 1 2 \\\n"," 3 4\\ # continuation\n","\n","\r\n","f\v1\t2\f3\n","f 1 2 3\\\n","\\\n",
+        "f # no vertices\n","f 1 2\n","f 1/2/3 -1//2 0/0\n","v 1 2 3\\\n","3 4 5\n","f 1 2 3"};
+    std::mt19937 random(18743);
+    for (int sample=0;sample<512;++sample) {
+        QByteArray bytes;
+        const auto count=1+random()%32;
+        for (unsigned i=0;i<count;++i) bytes+=lines[qsizetype(random()%unsigned(lines.size()))];
+        compare(bytes);
+    }
+    for (int padding:{1024*1024-10,1024*1024-9,1024*1024-8,1024*1024-7}) {
+        compare("f 1 2 3"+QByteArray(padding,' '));
+        compare("f 1 2 3"+QByteArray(padding,' ')+'\n');
+        compare("f 1 2 3"+QByteArray(padding,' ')+"\nf 1 2 3\n");
+    }
+    auto overflow=QJsonDocument::fromJson(json).object();
+    overflow["scene"]=0;
+    overflow["scenes"]=QJsonArray{QJsonObject{{"nodes",QJsonArray{0}}}};
+    overflow["nodes"]=QJsonArray{QJsonObject{{"mesh",0},{"extensions",QJsonObject{{"EXT_mesh_gpu_instancing",
+        QJsonObject{{"attributes",QJsonObject{{"TRANSLATION",1}}}}}}}}};
+    overflow["accessors"]=QJsonArray{QJsonObject{{"count",QJsonValue(qint64(1)<<62)}},QJsonObject{{"count",8}}};
+    overflow["meshes"]=QJsonArray{QJsonObject{{"primitives",QJsonArray{QJsonObject{{"mode",5},{"indices",0}}}}}};
+    expect(!preview::gltfTriangles(overflow),"triangle multiplication overflow is unavailable");
     std::cout << "Triangle metadata checks passed\n";
 }

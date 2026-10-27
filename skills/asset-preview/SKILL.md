@@ -1,144 +1,28 @@
 ---
 name: asset-preview
-description: Connect live image, video, model and baked-material previews during asset authoring or inspection. Use the existing Asset Preview app and its source-save generators; exclude viewer implementation and game profiling.
+description: Connect live previews for images, media, 3D assets and baked materials during authoring or inspection; exclude viewer implementation and game profiling.
 ---
 
 # Asset Preview
 
-Use the existing native app at `${ASSET_PREVIEW_PROJECT:-$HOME/workspace/asset-preview}`.
-Call its `bin/asset-preview` directly; fish setup is unnecessary. It owns one
-window, saved registrations and a private Unix socket. The CLI handles startup
-and socket communication. Read that checkout's `docs/agent-flow.md` for exporter
-integration or `docs/protocol.md` for additional commands/settings.
+Use `bin/asset-preview` in `${ASSET_PREVIEW_PROJECT:-$HOME/workspace/asset-preview}`. The CLI owns service startup and socket communication; no fish setup is needed. Examples use `$preview` for this full executable path. The checkout's `specs/_readme.md` routes implementation contracts.
 
-Connect the authoritative exported output early, even if it does not exist yet.
-Choose a stable project/asset/view ID (letters, digits, `_` or `-`, max 64), and
-keep other work's registrations intact. Asset Workshop already defines
-`workshop-<asset>-<view>` IDs and a manifest-driven connector:
-`./workshop preview <asset> [--view <name>]` from its root.
+## Core flow
 
-```sh
-preview="${ASSET_PREVIEW_PROJECT:-$HOME/workspace/asset-preview}/bin/asset-preview"
-"$preview" add /absolute/project/exports/chair.glb \
-  --id project-chair-model --label "Chair · geometry"
-"$preview" material /absolute/project/exports/albedo.png \
-  --id project-chair-finish --normal /absolute/project/exports/normal.png \
-  --orm /absolute/project/exports/orm.png --shape sphere
-```
+1. **Create the project and connect early.** Use one stable project/workstream and choose its current preview; read [projects](references/projects.md) for automatic IDs, early creation and supporting views. Register the authoritative exported output with `add` or `material`, even before the file exists. Use stable project/asset/view IDs and preserve other registrations. Read [connections](references/connections.md) for syntax, ID limits and reconnect behavior. Asset Workshop's `./workshop preview ASSET [--view NAME]` already supplies manifest-driven connections.
+2. **Preserve the desktop.** Sends/updates stay in the background, preserving selection, layout, visibility and focus. Connecting an asset does not request a window. Open/raise only on an explicit user request; respect later closure/hiding. Never create another desktop instance or reopen for captures/load checks. Hidden or off-page registrations may remain suspended.
+3. **Watch output saves.** Register once; ordinary watching is enough while the agent owns the build. For source-triggered exports, read [generators](references/generators.md) and attach one finite owner wrapper to one view. Preserve its runtime and locks; avoid duplicate builders and generated-output watch loops.
+4. **Verify refresh.** Check `status --json` for the expected ID/path, actual active/build/loading state and successful revision. Registration, a Live label or last-good content does not prove a new build or visual correctness. Read [verification](references/verification.md) for async media, renderer evidence, failures and headless captures.
+5. **Clean up narrowly.** Keep useful connections during iteration. `remove ID` unregisters that preview without deleting files. Avoid global hide/stop/close-all, which affects other work. Preserve user inspection and playback choices.
 
-Register once and let output saves refresh the view. Re-registering an ID replaces
-its connection configuration and recreates the view, retaining inspection settings
-for the same kind unless explicitly overridden. Retain its generator/watch configuration
-when reconnecting. New previews inherit remembered image/video/3D preferences;
-`settings ID JSON` also remembers changed defaults. Preserve the user's choices
-from `status --json` when changing inspection options.
+## Read for the asset
 
-Registration starts the service if needed without raising the window or changing
-selection. `start` starts it in the background; `gui` opens/raises it for a
-requested visible launch. Preserve the user's placed window during iteration.
-`select ID` changes the shown asset/page without raising it. Hidden, minimized
-and off-page previews unload their images, renderers and video players; each
-generator's owned process group stops. Registration does not start a hidden
-generator.
+| Asset or task | Reference |
+|---|---|
+| Images, textures or baked material samples | [Images and materials](references/images-materials.md) |
+| Music/SFX, video or rendered turntables | [Audio and video](references/audio-video.md) |
+| Models, scenes, modular kits or assembled hosts | [3D assets](references/3d-assets.md) |
+| Rigged, node or morph animation | [3D animation](references/animations.md) |
+| Exact component targets, comments, pins or planar cuts | [3D inspection](references/3d-inspection.md); opt in on an existing model registration. Offline review reads need no viewer. |
 
-When the agent already runs the build, ordinary output watching is sufficient.
-To rebuild on source saves, attach one explicit **finite** generator to one view:
-
-```sh
-"$preview" add /absolute/project/exports/chair.obj \
-  --id project-chair-model --watch /absolute/project/source/chair.json \
-  --watch /absolute/project/scripts/build-chair.sh --cwd /absolute/project \
-  --exec /absolute/project/scripts/build-chair.sh
-```
-
-`--watch` alone never executes a script. Put `--exec` last; argv has no shell
-expansion. The wrapper owns its prescribed runtime/container invocation, mounts
-and project/GPU locks. Watch source and recipe dependencies, excluding generated
-outputs. Publish validated outputs atomically. Do not run the same builder
-independently while this view owns it or
-attach it to several views. Editors, games and long-lived servers are unsuitable
-generators. Source-triggered generation runs only while the view is visible.
-Valid intermediate output saves refresh during a run. The timeout defaults to
-120 seconds; set `--timeout` explicitly for a known finite job needing more
-(max 3600).
-
-Use GLB/OBJ for exported geometry, PNG/images for textures/captures, and baked
-sRGB albedo plus linear tangent normal/ORM for material samples. ORM packs
-occlusion/roughness/metallic in R/G/B. F3D does not execute Godot `.gd`, `.tscn`,
-`.gdshader` or Material Maker `.ptex`; use the owning exporter/baker, or a finite
-Godot PNG capture for exact shader appearance. F3D lighting is an inspection
-environment, not engine-shader equivalence.
-
-For a flush window, paint strip or thin fixed panel, preview the actual host GLB
-whose topology/material regions own that surface; joining coplanar duplicate
-faces into one object is insufficient. A moving leaf stays separate and fits a
-real aperture/rim. Raised seats retain purposeful contact without decorative
-holes. Use the owner-produced host/material, edge and closed/open-leaf PNGs with
-the exported model, rather than a generic material sample or ownership diagram.
-The canonical `surface-ownership/v1` helper is in game-dev-tools' geometry-authoring
-family; Asset Workshop's `constructs/surface-ownership` is the intended pinned caller.
-Read their current specs, implementation/pin hashes and saved-readback tests before
-claiming support. Details and proof-view requirements are in `docs/agent-flow.md`.
-The viewer does not implement these geometry operations.
-
-Watch declaration/recipe, source geometry, materials and the finite owner wrapper
-or pin inputs; exclude generated models/receipts/images. Attach that build to one
-model view and let the proof-image views watch its outputs. Publish validated
-candidates atomically and their export/proof hash manifest last. Exact byte-bound
-saved geometry/material/opening/leaf-fit checks are required alongside appearance;
-native IDs, schema validity, Live/load status, triangle counts or UI overlays are
-not geometry proof. Topology changes invalidate the affected UV/tangent/bake,
-LOD, collision, motion and visual evidence until its owner rechecks them.
-
-For rendered turntables/animation captures, connect the local finished encode with
-`add /absolute/project/preview/turntable.mp4 --id project-turntable`; common video
-extensions are automatic, other local video formats can use `--kind video`.
-The same watched-output/finite-generator flow applies. Publish encodes atomically.
-libmpv streams videos; a reload completes asynchronously, restarts at the beginning
-and preserves paused/muted/loop preferences. Playback defaults to muted looping.
-`settings ID '{"paused":true}'` pauses it; `seek ID 2.5` seeks a loaded visible
-video. Check successful publication as described below. `metrics.hwdec` reports
-the actual decoder separately from GPU renderer identity; software fallback works.
-
-Preserve inspection choices unless the task calls for a change. `layout single`
-shows one view; `layout grid --size 3 --compact` shows a compact 3×3 page.
-Grid sizes 2/3/4 show 4/9/16 views, with more active views costing more memory.
-`--compact` tightens spacing and `--no-compact` restores normal density; per-view
-controls live inside each view. For 3D, default `lock_horizon:true` and
-`up_axis:"y"` keep the XZ floor level; `up_axis:"z"`
-uses an XY floor. `lighting:"studio"` uses F3D's HDRI ambient plus normal lights;
-`"lightkit"` uses normal lights. `materials:false` shows opaque neutral clay;
-`textures:false` hides maps while retaining material properties. These are JSON
-keys for `settings`, for example `settings ID '{"textures":false}'`.
-
-Check `status --json`: confirm the expected path/ID; distinguish `active`,
-`building`, waiting/failure status and successful revisions/loads. For video
-refreshes, compare before/after revisions or loads and wait for loading to finish;
-accepting a load command is insufficient. `metrics.loads` resets when a view unloads or is
-recreated. A registered or suspended view does not prove a build ran or looked
-correct. Loaded 3D views report `metrics.renderer`; use that for renderer evidence.
-On failure, inspect the bounded generator tail or service log and correct the
-source/runtime/path;
-do not treat retained last-good content as the new output. The supported desktop
-path is XWayland (`xcb`); retain the launcher's default unless testing an explicit
-alternative. If the executable is absent, read its AGENTS/specs and build using
-existing dependencies; report an unavailable prerequisite rather than silently
-substituting another renderer or installing packages.
-
-For automated visual checks, use Gamescope headless through the owning project's
-runtime and verify its actual renderer. Capture the preview with `capture NEW.png`
-when visual evidence is needed; it requires a visible window and refuses overwrite.
-
-Keep useful live connections during iteration. `remove <id>` unregisters only
-that preview and preserves files. Avoid global `hide`/`stop`/`close-all` during task
-cleanup because they affect other connected work.
-
-For a producer with a known export frame, use `add ... --settings
-'{"up_axis":"y","materials":true,"textures":true}'` to declare its model view
-atomically. Preserve other inspection choices. Source Z-up does not imply the
-export is Z-up: Asset Workshop reference-modeling GLBs convert to Y-up/-Z-front.
-Wrong remembered axes or clay mode can make a valid model appear tipped and
-untextured. Inspect saved settings and source export conventions before blaming
-geometry/material loss. `defaults 3d JSON` changes only future remembered defaults;
-existing entries need their own requested correction. See
-`docs/source-model-settings.md` for the public CLI and preservation test.
+Scenes, modules and animated GLBs use the existing `model` kind. The viewer inspects exported products; geometry, engine-specific shading and gameplay acceptance remain with their owning workflows.

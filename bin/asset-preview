@@ -3,19 +3,56 @@
 from __future__ import annotations
 import argparse
 import contextlib
+from datetime import datetime
 import fcntl
+import html
+import hashlib
 import json
+import math
 import os
 from pathlib import Path
+import re
 import socket
 import stat
 import subprocess
 import sys
 import time
+import uuid
 
 ROOT = Path(__file__).resolve().parents[1]
 LIMIT = 1024 * 1024
+REVIEW_FILE_LIMIT = 16 * LIMIT
+REVIEW_NOTE_LIMIT = 4096
+REVIEW_TEXT_LIMIT = 8 * 1024
+REVIEW_PAGE_LIMIT = 100
+REVIEW_PAGE_BYTES = 256 * 1024
+REVIEW_EXPORT_LIMIT = 32 * LIMIT
+REVIEW_STATUSES = ("open", "in_progress", "resolved", "obsolete")
 _SPAWNED: list[subprocess.Popen] = []
+
+def _json_float(value: str) -> float:
+    result = float(value)
+    if not math.isfinite(result):
+        raise ValueError("JSON numbers must be finite")
+    return result
+
+def _json_constant(value: str) -> None:
+    raise ValueError(f"Invalid JSON constant: {value}")
+
+def _json_object(pairs: list[tuple[str, object]]) -> dict:
+    result = {}
+    for key, value in pairs:
+        if key in result:
+            raise ValueError("Duplicate JSON field")
+        result[key] = value
+    return result
+
+def json_value(value: str) -> object:
+    try:
+        return json.loads(value, parse_float=_json_float, parse_constant=_json_constant,
+                          object_pairs_hook=_json_object)
+    except RecursionError as exc:
+        raise ValueError("JSON nesting is too deep") from exc
 
 def locations() -> tuple[Path, Path]:
     runtime_base = Path(os.environ.get("XDG_RUNTIME_DIR", f"/tmp/asset-preview-{os.getuid()}"))
@@ -30,9 +67,27 @@ def private_directory(path: Path) -> None:
     if not stat.S_ISDIR(info.st_mode) or info.st_uid != os.getuid() or info.st_mode & 0o077:
         raise RuntimeError(f"A private directory owned by this user is required: {path}")
 
+def codex_origin() -> dict:
+    thread = os.environ.get("CODEX_THREAD_ID", os.environ.get("CODEX_SESSION_ID", ""))
+    try:
+        thread = str(uuid.UUID(thread))
+    except ValueError:
+        return {}
+    codex_root = Path(os.environ.get("CODEX_HOME", Path.home() / ".codex"))
+    endpoint = os.environ.get("ASSET_PREVIEW_CODEX_SOCKET", str(codex_root / "app-server-control/app-server-control.sock"))
+    return {"thread_id": thread, "cwd": os.getcwd(), "socket": os.path.abspath(endpoint)}
+
 def rpc(request: dict, timeout: float = 15) -> dict:
+    request = dict(request)
+    origin = codex_origin()
+    if origin:
+        if request.get("method") == "add":
+            request["entry"] = dict(request["entry"])
+            request["entry"].setdefault("codex", origin)
+        elif request.get("method") in {"show", "open"}:
+            request.setdefault("codex", origin)
     runtime, _ = locations()
-    data = (json.dumps(request, ensure_ascii=False) + "\n").encode()
+    data = (json.dumps(request, ensure_ascii=False, allow_nan=False) + "\n").encode()
     if len(data) > LIMIT:
         raise RuntimeError("Request exceeds 1 MiB")
     with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as client:
@@ -47,7 +102,9 @@ def rpc(request: dict, timeout: float = 15) -> dict:
             response.extend(chunk)
             if len(response) > 8 * LIMIT:
                 raise RuntimeError("Server response too large")
-    result = json.loads(response.split(b"\n", 1)[0])
+    result = json_value(response.split(b"\n", 1)[0].decode("utf-8"))
+    if not isinstance(result, dict):
+        raise RuntimeError("Server response must be a JSON object")
     if not result.get("ok"):
         raise RuntimeError(result.get("error", "Preview request failed"))
     return result
@@ -59,6 +116,36 @@ def running(timeout: float = 0.3) -> bool:
         return rpc({"method": "ping"}, timeout=timeout).get("protocol") == 1
     except (OSError, RuntimeError, ValueError):
         return False
+
+def viewer_environment() -> dict[str, str]:
+    environment = os.environ.copy()
+    # Embedded OpenGL views use XWayland by default. Keep explicit test/platform choices.
+    environment.setdefault("QT_QPA_PLATFORM", "xcb")
+    if ("XDG_CURRENT_DESKTOP" in environment or "QT_QPA_PLATFORMTHEME" in environment or
+            environment["QT_QPA_PLATFORM"].split(":", 1)[0] not in {"xcb", "wayland", "wayland-egl"}):
+        return environment
+    # Agent shells can lack desktop identity, making Qt choose Fusion instead of
+    # the user's native style/fonts/icons. Borrow only theme metadata, never the
+    # session's display endpoints, library paths, credentials or preview locations.
+    try:
+        result = subprocess.run(
+            ["systemctl", "--user", "show-environment", "--output=json"],
+            stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
+            timeout=1, check=False,
+        )
+        if result.returncode or len(result.stdout) > 128 * 1024:
+            return environment
+        session = json_value(result.stdout.decode("utf-8"))
+    except (OSError, subprocess.TimeoutExpired, ValueError):
+        return environment
+    if not isinstance(session, dict):
+        return environment
+    for key in ("XDG_CURRENT_DESKTOP", "XDG_SESSION_DESKTOP", "KDE_FULL_SESSION", "KDE_SESSION_VERSION",
+                "XDG_CONFIG_DIRS", "XDG_DATA_DIRS", "QT_QPA_PLATFORMTHEME", "QT_STYLE_OVERRIDE"):
+        value = session.get(key)
+        if isinstance(value, str) and len(value) <= 4096 and "\0" not in value:
+            environment.setdefault(key, value)
+    return environment
 
 def start() -> bool:
     runtime, state = locations()
@@ -82,25 +169,37 @@ def start() -> bool:
         binary = ROOT / "build/asset-preview-server"
         if not binary.is_file():
             raise RuntimeError("Build first: tools/build.sh")
-        log_path = state / "server.log"
-        # Keep one bounded session log; never accumulate older generated logs.
-        log_fd = os.open(log_path, os.O_CREAT | os.O_WRONLY | os.O_TRUNC | os.O_NOFOLLOW, 0o600)
-        preview_env = os.environ.copy()
-        # The embedded native OpenGL views are verified through XWayland on KDE.
-        # Preserve an explicit override, including the offscreen functional lane.
-        preview_env.setdefault("QT_QPA_PLATFORM", "xcb")
-        with os.fdopen(log_fd, "wb") as log:
-            process = subprocess.Popen(
-                [str(binary), "--socket", str(runtime / "preview.sock"), "--state", str(state)],
-                cwd=ROOT, stdin=subprocess.DEVNULL, stdout=log, stderr=log,
-                start_new_session=True, env=preview_env,
-            )
+        log_path = state / "crash.log"
+        preview_env = viewer_environment()
+        # Reuse the account's installed F3D CUDA-SONAME repair for this child.
+        # Keep the caller's search paths; no shell/system environment is changed.
+        f3d_runtime = Path.home() / ".local/share/f3d-runtime/lib"
+        if (f3d_runtime / "libcudart.so.13").is_file():
+            paths = preview_env.get("LD_LIBRARY_PATH", "").split(":")
+            preview_env["LD_LIBRARY_PATH"] = ":".join([str(f3d_runtime), *(p for p in paths if p and p != str(f3d_runtime))])
+        process = subprocess.Popen(
+            [str(binary), "--socket", str(runtime / "preview.sock"), "--state", str(state)],
+            cwd=ROOT, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+            start_new_session=True, env=preview_env,
+        )
         _SPAWNED.append(process)
         deadline = time.monotonic() + 12
         while time.monotonic() < deadline:
             if running():
                 return True
             if process.poll() is not None:
+                if process.returncode == 3:
+                    # A quitting native renderer can outlive its socket while
+                    # releasing GPU work. Keep the startup lease and retry only
+                    # this exact duplicate-lock exit, within the same deadline.
+                    time.sleep(0.1)
+                    process = subprocess.Popen(
+                        [str(binary), "--socket", str(runtime / "preview.sock"), "--state", str(state)],
+                        cwd=ROOT, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                        start_new_session=True, env=preview_env,
+                    )
+                    _SPAWNED.append(process)
+                    continue
                 raise RuntimeError(f"Server exited {process.returncode}; see {log_path}")
             time.sleep(0.05)
         # Terminate only this startup's exact child group.
@@ -112,8 +211,386 @@ def path(value: str) -> str:
     # Keep the filename rather than resolving a symlink: replacements must remain observable.
     return os.path.abspath(os.path.expanduser(value))
 
+def positive_integer(value: str) -> int:
+    result = int(value)
+    if result < 1:
+        raise argparse.ArgumentTypeError("must be a positive integer")
+    return result
+
+def nonnegative_integer(value: str) -> int:
+    result = int(value)
+    if result < 0:
+        raise argparse.ArgumentTypeError("must be a nonnegative integer")
+    return result
+
+def page_limit(value: str) -> int:
+    result = positive_integer(value)
+    if result > REVIEW_PAGE_LIMIT:
+        raise argparse.ArgumentTypeError(f"must be at most {REVIEW_PAGE_LIMIT}")
+    return result
+
+def finite_number(value: str) -> float:
+    result = float(value)
+    if not math.isfinite(result):
+        raise argparse.ArgumentTypeError("must be a finite number")
+    return result
+
+def _review_string(value: object, label: str, limit: int = 4096, *, empty: bool = True,
+                   multiline: bool = False, controls: bool = False) -> str:
+    if not isinstance(value, str) or (not empty and not value.strip()):
+        raise ValueError(f"{label} must be {'a' if empty else 'a nonempty'} string")
+    try:
+        size = len(value.encode("utf-8"))
+    except UnicodeEncodeError as exc:
+        raise ValueError(f"{label} must contain valid Unicode") from exc
+    if size > limit:
+        raise ValueError(f"{label} exceeds {limit} UTF-8 bytes")
+    allowed = "\n\r\t" if multiline else ""
+    if "\0" in value or (not controls and any(
+            ord(char) < 32 and char not in allowed or ord(char) == 127 for char in value)):
+        raise ValueError(f"{label} contains a control character")
+    return value
+
+def _review_data_string(value: object, label: str, limit: int = 4096, *, empty: bool = True) -> str:
+    # Saved JSON permits every non-NUL control character, matching the Qt store.
+    text = _review_string(value, label, limit, controls=True)
+    # Python additionally treats these four controls as whitespace; QString does not.
+    if not empty and all(char.isspace() and char not in "\x1c\x1d\x1e\x1f" for char in text):
+        raise ValueError(f"{label} must be a nonempty string")
+    return text
+
+def _review_vector(value: object, label: str, *, nonzero: bool = False) -> None:
+    if not isinstance(value, list) or len(value) != 3 or any(
+            not _finite_json_number(number) or abs(number) > 1e12 for number in value):
+        raise ValueError(f"{label} must contain three finite numbers")
+    if nonzero and sum(number * number for number in value) < 1e-18:
+        raise ValueError(f"{label} must not be zero")
+
+def _finite_json_number(value: object) -> bool:
+    return type(value) in (int, float) and -sys.float_info.max <= value <= sys.float_info.max
+
+def _review_structure(value: object, depth: int = 0, remaining: list[int] | None = None) -> None:
+    # Bound extension metadata too, before interpreting the known review fields.
+    if remaining is None:
+        remaining = [1000000]
+    remaining[0] -= 1
+    if remaining[0] < 0:
+        raise ValueError("Review exceeds one million JSON values")
+    if depth > 32:
+        raise ValueError("Review nesting exceeds 32 levels")
+    if isinstance(value, dict):
+        if len(value) > 1024:
+            raise ValueError("Review object exceeds 1024 fields")
+        for key, child in value.items():
+            _review_data_string(key, "Review field name", 256, empty=False)
+            _review_structure(child, depth + 1, remaining)
+    elif isinstance(value, list):
+        if len(value) > 65536:
+            raise ValueError("Review array exceeds 65536 items")
+        for child in value:
+            _review_structure(child, depth + 1, remaining)
+    elif isinstance(value, str):
+        _review_data_string(value, "Review value", 64 * 1024)
+    elif type(value) in (int, float) and not _finite_json_number(value):
+        raise ValueError("Review numbers must be finite")
+
+def _review_integer(value: object, label: str, minimum: int = 0, maximum: int = 9007199254740991) -> None:
+    if not _finite_json_number(value) or not minimum <= value <= maximum or value != int(value):
+        raise ValueError(f"{label} must be an integer from {minimum} to {maximum}")
+
+def _review_digest(value: object, label: str) -> None:
+    if not isinstance(value, str) or not re.fullmatch(r"[0-9a-fA-F]{64}", value):
+        raise ValueError(f"{label} must be a SHA-256 digest")
+
+def _review_asset(asset: object) -> None:
+    if not isinstance(asset, dict):
+        raise ValueError("Review asset must be an object")
+    for key, maximum in (("id", 512), ("variant", 128), ("model", 4096)):
+        _review_data_string(asset.get(key), f"asset.{key}", maximum, empty=False)
+    _review_integer(asset.get("lod"), "asset.lod", maximum=255)
+    _review_digest(asset.get("model_sha256"), "asset.model_sha256")
+    if "dependency_manifest_sha256" in asset:
+        _review_digest(asset["dependency_manifest_sha256"], "asset.dependency_manifest_sha256")
+    if "dependency_manifest" in asset and not isinstance(asset["dependency_manifest"], dict):
+        _review_data_string(asset["dependency_manifest"], "asset.dependency_manifest", empty=False)
+    frame = asset.get("frame")
+    if not isinstance(frame, dict):
+        raise ValueError("asset.frame must be an object")
+    axes = {"+X", "-X", "+Y", "-Y", "+Z", "-Z"}
+    up = _review_data_string(frame.get("up"), "asset.frame.up", 2, empty=False).upper()
+    front = _review_data_string(frame.get("front"), "asset.frame.front", 2, empty=False).upper()
+    if up not in axes or front not in axes or up[1] == front[1]:
+        raise ValueError("asset.frame axes must be valid and perpendicular")
+    _review_data_string(frame.get("units"), "asset.frame.units", 64, empty=False)
+
+def _review_target(target: object) -> None:
+    if not isinstance(target, dict):
+        raise ValueError("Annotation target must be an object")
+    if not any(key in target for key in ("id", "path", "instance_selector")):
+        raise ValueError("Target requires an exact id or instance path")
+    for key in ("id", "path", "instance_selector"):
+        if key in target:
+            _review_data_string(target[key], f"Target {key}", empty=False)
+    for key in ("semantic_id", "name", "exported_name"):
+        if key in target:
+            _review_data_string(target[key], f"Target {key}", 2048)
+    if "node_index" in target:
+        _review_integer(target["node_index"], "Target node_index", maximum=2147483647)
+    if "anchor" in target:
+        anchor = target["anchor"]
+        if not isinstance(anchor, dict):
+            raise ValueError("Target anchor must be an object")
+        _review_data_string(anchor.get("kind"), "Target anchor kind", 64, empty=False)
+        for key in ("position_local", "normal_local"):
+            if key in anchor:
+                _review_vector(anchor[key], f"Target anchor {key}", nonzero=key == "normal_local")
+        if anchor["kind"] == "surface_point" and "position_local" not in anchor:
+            raise ValueError("Surface anchors require position_local")
+
+def _review_references(value: object, label: str, limit: int) -> None:
+    if not isinstance(value, list) or len(value) > limit:
+        raise ValueError(f"{label} must be an array of at most {limit} targets")
+    for target in value:
+        if isinstance(target, str):
+            _review_data_string(target, label, empty=False)
+        else:
+            _review_target(target)
+
+def _review_view(view: object) -> None:
+    if not isinstance(view, dict):
+        raise ValueError("Annotation view must be an object")
+    if "camera" in view:
+        camera = view["camera"]
+        if not isinstance(camera, dict):
+            raise ValueError("Annotation camera must be an object")
+        for key in ("position", "focal", "up"):
+            _review_vector(camera.get(key), f"Camera {key}", nonzero=key == "up")
+        if sum((position - focal) ** 2 for position, focal in zip(camera["position"], camera["focal"])) < 1e-18:
+            raise ValueError("Camera position must differ from its focal point")
+        for key, maximum in (("angle", 180), ("parallel_span", 1e12)):
+            if not _finite_json_number(camera.get(key)) or not 0 < camera[key] <= maximum or (
+                    key == "angle" and camera[key] == 180):
+                raise ValueError(f"Camera {key} is outside its finite range")
+    if "orthographic" in view and type(view["orthographic"]) is not bool:
+        raise ValueError("View orthographic must be boolean")
+    if "cuts" in view:
+        if not isinstance(view["cuts"], list) or len(view["cuts"]) > 6:
+            raise ValueError("View cuts must be an array of at most 6 planes")
+        for cut in view["cuts"]:
+            if not isinstance(cut, dict):
+                raise ValueError("View cut must be an object")
+            if "enabled" in cut and type(cut["enabled"]) is not bool:
+                raise ValueError("Cut enabled must be boolean")
+            if "axis" in cut:
+                if not isinstance(cut["axis"], str) or cut["axis"].lower() not in {"x", "y", "z"}:
+                    raise ValueError("Invalid cut axis")
+                if not _finite_json_number(cut.get("position")) or abs(cut["position"]) > 1e12:
+                    raise ValueError("Invalid cut position")
+            else:
+                _review_vector(cut.get("normal"), "Cut normal", nonzero=True)
+                _review_vector(cut.get("origin"), "Cut origin")
+            if "keep" in cut and cut["keep"] not in ("positive", "negative"):
+                raise ValueError("Invalid cut keep side")
+    for key in ("hidden", "hidden_targets"):
+        if key in view:
+            _review_references(view[key], f"View {key}", 8192)
+    if "selected" in view:
+        if isinstance(view["selected"], str):
+            _review_data_string(view["selected"], "View selected")
+        elif isinstance(view["selected"], list):
+            _review_references(view["selected"], "View selected", 16)
+        else:
+            _review_target(view["selected"])
+
+def _review_time(value: object, label: str) -> datetime:
+    timestamp = _review_data_string(value, label, 40, empty=False)
+    if not re.fullmatch(r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?Z", timestamp):
+        raise ValueError(f"{label} must be an ISO 8601 UTC timestamp")
+    return datetime.fromisoformat(timestamp[:-1] + "+00:00")
+
+def validate_review(document: object) -> dict:
+    _review_structure(document)
+    if not isinstance(document, dict) or document.get("schema") != "asset-preview-review/v1":
+        raise ValueError("Review schema must be asset-preview-review/v1")
+    _review_integer(document.get("document_revision"), "Review document_revision", minimum=1)
+    if "_digest" in document:
+        raise ValueError("Transient _digest must not be persisted")
+    _review_asset(document.get("asset"))
+    notes = document.get("annotations")
+    if not isinstance(notes, list) or len(notes) > REVIEW_NOTE_LIMIT:
+        raise ValueError(f"Review annotations must be an array of at most {REVIEW_NOTE_LIMIT} notes")
+    identifiers = set()
+    for note in notes:
+        if not isinstance(note, dict):
+            raise ValueError("Each annotation must be an object")
+        identifier = _review_data_string(note.get("id"), "Annotation id", 64, empty=False)
+        try:
+            valid_id = uuid.UUID(identifier.removeprefix("note-")).int != 0
+        except ValueError:
+            valid_id = False
+        if not valid_id:
+            raise ValueError("Annotation id must contain a nonzero UUID")
+        if identifier in identifiers:
+            raise ValueError(f"Duplicate annotation id: {identifier}")
+        identifiers.add(identifier)
+        author = note.get("author")
+        if not isinstance(author, dict) or author.get("kind") not in ("human", "agent"):
+            raise ValueError("Annotation author must identify a human or agent")
+        _review_data_string(author.get("name"), "Annotation author.name", 256, empty=False)
+        created = _review_time(note.get("created_at"), "Annotation created_at")
+        if _review_time(note.get("updated_at"), "Annotation updated_at") < created:
+            raise ValueError("Annotation updated_at precedes creation")
+        if note.get("status") not in REVIEW_STATUSES:
+            raise ValueError("Annotation status must be open, in_progress, resolved or obsolete")
+        _review_data_string(note.get("text"), "Annotation text", REVIEW_TEXT_LIMIT, empty=False)
+        _review_digest(note.get("created_against"), "Annotation created_against")
+        if "dependency_revision" in note:
+            _review_digest(note["dependency_revision"], "Annotation dependency_revision")
+        tags = note.get("tags", [])
+        if not isinstance(tags, list) or len(tags) > 32:
+            raise ValueError("Annotation tags must be an array of at most 32 strings")
+        for tag in tags:
+            _review_data_string(tag, "Annotation tag", 128, empty=False)
+        targets = note.get("targets")
+        if not isinstance(targets, list) or len(targets) > 16:
+            raise ValueError("Annotation targets must be an array of at most 16 objects")
+        for target in targets:
+            _review_target(target)
+        _review_view(note.get("view"))
+        if note.get("resolution") is not None:
+            resolution = note["resolution"]
+            if not isinstance(resolution, dict):
+                raise ValueError("Annotation resolution must be an object or null")
+            if "resolved_against" in resolution:
+                _review_digest(resolution["resolved_against"], "Resolution resolved_against")
+            if "evidence" in resolution:
+                evidence = resolution["evidence"]
+                if isinstance(evidence, str):
+                    _review_data_string(evidence, "Resolution evidence", REVIEW_TEXT_LIMIT, empty=False)
+                elif isinstance(evidence, list) and len(evidence) <= 32:
+                    for item in evidence:
+                        if not isinstance(item, dict):
+                            _review_data_string(item, "Resolution evidence", empty=False)
+                else:
+                    raise ValueError("Resolution evidence must be text or an array of at most 32 entries")
+    if "layer_presets" in document:
+        layers = document["layer_presets"]
+        if not isinstance(layers, list) or len(layers) > 128:
+            raise ValueError("Layer presets must be an array of at most 128 layers")
+        for layer in layers:
+            if not isinstance(layer, dict):
+                raise ValueError("Layer preset must be an object")
+            _review_data_string(layer.get("name"), "Layer preset name", 256, empty=False)
+            key = "targets" if "targets" in layer else "members"
+            _review_references(layer.get(key), "Layer preset targets", 8192)
+    return document
+
+def read_review(filename: str) -> dict:
+    descriptor = os.open(path(filename), os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
+    with os.fdopen(descriptor, "rb") as source:
+        info = os.fstat(source.fileno())
+        if not stat.S_ISREG(info.st_mode):
+            raise ValueError("Review path must name a regular file")
+        if info.st_size > REVIEW_FILE_LIMIT:
+            raise ValueError("Review file exceeds 16 MiB")
+        data = source.read(REVIEW_FILE_LIMIT + 1)
+    if len(data) > REVIEW_FILE_LIMIT:
+        raise ValueError("Review file exceeds 16 MiB")
+    source = data.decode("utf-8")
+    depth, quoted, escaped = 0, False, False
+    for char in source:
+        if quoted:
+            if escaped:
+                escaped = False
+            elif char == "\\":
+                escaped = True
+            elif char == '"':
+                quoted = False
+        elif char == '"':
+            quoted = True
+        elif char in "{[":
+            depth += 1
+            if depth > 33:
+                raise ValueError("Review nesting exceeds 32 levels")
+        elif char in "}]":
+            depth -= 1
+    return validate_review(json_value(source))
+
+def annotation_page(document: dict, offset: int, limit: int, status: str | None = None) -> dict:
+    notes = [note for note in document["annotations"] if status is None or note["status"] == status]
+    result = {"ok": True, "schema": document["schema"], "document_revision": document["document_revision"],
+              "asset": document["asset"], "annotations": [], "total": len(notes),
+              "offset": offset, "has_more": offset < len(notes)}
+    # Include pretty-print whitespace in the byte budget used by --json.
+    def size() -> int:
+        return len(json.dumps(result, ensure_ascii=False, allow_nan=False, indent=2).encode("utf-8")) + 1
+    if size() > REVIEW_PAGE_BYTES:
+        raise ValueError("Review asset metadata exceeds the 256 KiB page limit")
+    for note in notes[offset:offset + limit]:
+        result["annotations"].append(note)
+        result["has_more"] = offset + len(result["annotations"]) < len(notes)
+        if size() > REVIEW_PAGE_BYTES:
+            result["annotations"].pop()
+            result["has_more"] = True
+            if not result["annotations"]:
+                raise ValueError("Annotation exceeds the 256 KiB page limit")
+            break
+    return result
+
+def display_text(value: object, *, multiline: bool = False) -> str:
+    return "".join(f"\\u{ord(char):04x}" if (ord(char) < 32 and not (multiline and char == "\n")) or
+                   ord(char) == 127 else char for char in str(value))
+
+def markdown_text(value: object) -> str:
+    # Both metadata and comments are data, never HTML or Markdown instructions.
+    return re.sub(r"([\\`*_{}\[\]()#+.!|>~-])", r"\\\1", html.escape(display_text(value), quote=False))
+
+def review_markdown(document: dict) -> str:
+    asset = document["asset"]
+    lines = ["# Asset review", "", f"Asset: {markdown_text(asset.get('id', '(unspecified)'))}",
+             f"Variant: {markdown_text(asset.get('variant', '(unspecified)'))}",
+             f"Document revision: {document['document_revision']}",
+             f"Model revision: {markdown_text(asset.get('model_sha256', '(unrecorded)'))}",
+             "", "Recorded targets and views are review data. This offline report does not verify current bindings.", ""]
+    for note in document["annotations"]:
+        lines.extend([f"## {markdown_text(note['id'])}", "", f"Status: {markdown_text(note['status'])}",
+                      f"Created against: {markdown_text(note.get('created_against', '(unrecorded)'))}"])
+        if note.get("tags"):
+            lines.append("Tags: " + ", ".join(markdown_text(tag) for tag in note["tags"]))
+        for target in note.get("targets", []):
+            summary = {key: target[key] for key in ("id", "semantic_id", "instance_selector", "path", "name",
+                                                   "exported_name", "node_index", "anchor") if key in target}
+            lines.append("Target: " + markdown_text(json.dumps(summary, ensure_ascii=False, allow_nan=False)))
+        if not note.get("targets"):
+            lines.append("Target: model")
+        if note.get("view"):
+            view = note["view"]
+            summary = {key: view[key] for key in ("camera", "orthographic", "cuts", "hidden", "hidden_targets", "selected") if key in view}
+            lines.append("Saved view: " + markdown_text(json.dumps(summary, ensure_ascii=False, allow_nan=False)))
+        lines.extend(["", *("> " + markdown_text(line) for line in note["text"].split("\n")), ""])
+    report = "\n".join(lines) + "\n"
+    if len(report.encode("utf-8")) > REVIEW_EXPORT_LIMIT:
+        raise ValueError("Markdown export exceeds 32 MiB")
+    return report
+
+def print_json(value: object) -> None:
+    print(json.dumps(value, ensure_ascii=False, allow_nan=False, indent=2))
+
+def project_identity(directory: str | Path | None = None) -> tuple[str, str]:
+    """Stable owner identity for CLI callers and imported agent connectors."""
+    root = Path(directory or os.getcwd()).expanduser().resolve()
+    for candidate in (root, *root.parents):
+        if (candidate / ".git").exists() or (candidate / "specs/_readme.md").is_file():
+            root = candidate
+            break
+    label = root.name or "Project"
+    slug = re.sub(r"[^A-Za-z0-9_-]+", "-", label).strip("-")[:48] or "project"
+    identifier = os.environ.get("ASSET_PREVIEW_PROJECT_ID") or f"{slug}-{hashlib.sha256(str(root).encode()).hexdigest()[:10]}"
+    return identifier, os.environ.get("ASSET_PREVIEW_PROJECT_LABEL", label)
+
+
 def parser() -> argparse.ArgumentParser:
-    p = argparse.ArgumentParser(description="One live window for images, videos, models and baked materials.")
+    p = argparse.ArgumentParser(description="One live window for images, audio, videos, models and baked materials.")
     p.add_argument("--version", action="version", version="Asset Preview " + (ROOT / "VERSION").read_text().strip())
     sub = p.add_subparsers(dest="action")
     for action, text in [("gui", "Open the preview window"), ("start", "Start the background server"),
@@ -122,12 +599,14 @@ def parser() -> argparse.ArgumentParser:
                          ("paths", "Print local socket and state paths"), ("licenses", "Show dependency notices")]:
         q = sub.add_parser(action, help=text)
         if action in {"list", "status"}: q.add_argument("--json", action="store_true")
-    add = sub.add_parser("add", help="Watch an image, video or model output; optionally run a generator on source saves")
+    opening = sub.add_parser("open", help="Open files in the window; reuse existing previews and select the last file")
+    opening.add_argument("files", nargs="*", metavar="FILE", help="Image, audio, video or model files (also accepted without 'open')")
+    add = sub.add_parser("add", help="Watch an image, audio, video or model output; optionally run a generator on source saves")
     add.add_argument("file")
     add.add_argument("--id", help="Stable ID; reusing it updates that registration")
     add.add_argument("--label")
-    add.add_argument("--kind", choices=["auto", "image", "model", "video"], default="auto")
-    add.add_argument("--settings", help="Explicit JSON inspection options; preserve remembered defaults")
+    add.add_argument("--kind", choices=["auto", "image", "model", "video", "audio", "graph"], default="auto")
+    add.add_argument("--settings", help="Explicit JSON display/playback options; preserve remembered defaults")
     add.add_argument("--watch", action="append", default=[], metavar="SOURCE", help="Additional input/dependency file (repeatable)")
     add.add_argument("--cwd", default=os.getcwd(), help="Working directory for explicit generator")
     add.add_argument("--timeout", type=int, default=120)
@@ -142,35 +621,220 @@ def parser() -> argparse.ArgumentParser:
     for action in ["remove", "select", "reload"]:
         sub.add_parser(action).add_argument("id")
     sub.add_parser("close-all", help="Close every preview; keep files and remembered settings")
+    for registration in (add, mat):
+        registration.add_argument("--project", help="Project ID; defaults to the owning checkout")
+        registration.add_argument("--project-label", help="Project display name")
+        registration.add_argument("--no-current", action="store_true", help="Keep the project's current preview when adding supporting assets")
+        registration.add_argument("--ungrouped", action="store_true", help="Register without a project")
+    project = sub.add_parser("project", help="Create projects and choose their current previews without opening the window")
+    project_commands = project.add_subparsers(dest="project_action", required=True)
+    create = project_commands.add_parser("create")
+    create.add_argument("id", nargs="?", help="Defaults to the owning checkout's stable ID")
+    create.add_argument("--label")
+    current = project_commands.add_parser("current")
+    current.add_argument("id"); current.add_argument("preview")
+    remove = project_commands.add_parser("remove")
+    remove.add_argument("id")
+    listing = project_commands.add_parser("list")
+    listing.add_argument("--json", action="store_true")
     layout = sub.add_parser("layout")
-    layout.add_argument("mode", choices=["single", "grid"])
-    layout.add_argument("--size", type=int, choices=[2, 3, 4], help="Grid rows/columns: 4, 9 or 16 previews per page")
-    layout.add_argument("--compact", action=argparse.BooleanOptionalAction, default=None, help="Tight spacing and in-view controls")
+    layout.add_argument("mode", choices=["single", "grid", "overview", "projects"])
+    layout.add_argument("--size", choices=["auto", "2", "3", "4"], help="Grid size; auto is available for Projects")
+    layout.add_argument("--group-projects", action=argparse.BooleanOptionalAction, default=None, help="Group Overview by project")
+    layout.add_argument("--project", help="Filter Overview/Projects by ID; all or ungrouped")
+    cache = sub.add_parser("cache", help="Read bounded cache churn, eviction and reclamation diagnostics without opening a window")
+    cache.add_argument("mode", choices=["stats", "events"], nargs="?", default="stats")
+    cache.add_argument("--limit", type=int, default=64, help="Maximum recent events (1 to 128)")
+    cache.add_argument("--after", type=int, default=0, help="Only events after this sequence number")
+    cache.add_argument("--json", action="store_true", help="Print the complete JSON response")
     defaults = sub.add_parser("defaults", help="Update remembered options without changing registered previews")
-    defaults.add_argument("group", choices=["image", "video", "3d"])
+    defaults.add_argument("group", choices=["image", "video", "audio", "3d"])
     defaults.add_argument("value", help="JSON object")
     settings = sub.add_parser("settings", help="Update per-preview options with a JSON object")
     settings.add_argument("id"); settings.add_argument("value", help='For example: {"grid":false,"light":1.2}')
-    seek = sub.add_parser("seek", help="Seek a visible video to seconds from the start")
+    seek = sub.add_parser("seek", help="Seek visible audio, video or a model animation to seconds from the start")
     seek.add_argument("id"); seek.add_argument("seconds", type=float)
     sub.add_parser("capture", help="Save the current visible window to a new PNG").add_argument("file")
+    inspect = sub.add_parser("inspect", help="Opt into 3D inspection for a registered model; never raises the window")
+    inspection = inspect.add_subparsers(dest="inspect_action", required=True)
+    for action in ("open", "close", "state", "parts", "select", "hide", "show", "isolate", "restore", "cut"):
+        operation = inspection.add_parser(action)
+        operation.add_argument("id", help="Existing model preview ID")
+        operation.add_argument("--json", action="store_true", help="Print the complete JSON response")
+        if action == "open":
+            operation.add_argument("--review", metavar="FILE", help="Durable review JSON path outside generated exports")
+            operation.add_argument("--asset-id", help="Owning project's durable asset ID")
+            operation.add_argument("--variant", help="Explicit model variant, for example active or reviewed")
+        elif action == "parts":
+            operation.add_argument("--offset", type=nonnegative_integer, default=0)
+            operation.add_argument("--limit", type=page_limit, default=REVIEW_PAGE_LIMIT)
+        elif action in {"select", "hide", "show", "isolate"}:
+            operation.add_argument("--target", required=True, help="Exact opaque ID from inspect parts")
+        elif action == "restore":
+            choice = operation.add_mutually_exclusive_group(required=True)
+            choice.add_argument("--all", action="store_true", help="Restore every hidden part")
+            choice.add_argument("--last", action="store_true", help="Undo the last visibility operation")
+        elif action == "cut":
+            operation.add_argument("--axis", choices=["x", "y", "z"], required=True)
+            operation.add_argument("--position", type=finite_number, required=True, help="Position in exported model units")
+            operation.add_argument("--keep", choices=["positive", "negative"], default="positive")
+            operation.add_argument("--enabled", action=argparse.BooleanOptionalAction, default=True)
+    annotations = sub.add_parser("annotations", help="Read review files offline or edit an active inspection review")
+    annotation = annotations.add_subparsers(dest="annotation_action", required=True)
+    listing = annotation.add_parser("list", help="Read a review JSON file without starting the service")
+    listing.add_argument("file")
+    listing.add_argument("--status", choices=REVIEW_STATUSES)
+    listing.add_argument("--offset", type=nonnegative_integer, default=0)
+    listing.add_argument("--limit", type=page_limit, default=REVIEW_PAGE_LIMIT)
+    listing.add_argument("--json", action="store_true")
+    export = annotation.add_parser("export", help="Export escaped Markdown without starting the service")
+    export.add_argument("file")
+    export.add_argument("--format", choices=["markdown"], default="markdown")
+    export.add_argument("--output", metavar="FILE", help="Write a new file; refuses overwrite")
+    for action in ("add", "update", "remove"):
+        operation = annotation.add_parser(action)
+        operation.add_argument("id", help="Inspected model preview ID")
+        operation.add_argument("--json", action="store_true")
+        operation.add_argument("--expected-revision", type=nonnegative_integer if action == "add" else positive_integer,
+                               required=action == "remove",
+                               help="Review document revision; add/update otherwise read current inspection state")
+        operation.add_argument("--expected-digest", help="Exact review_digest from inspect state")
+        if action in {"update", "remove"}:
+            operation.add_argument("--note", required=True, metavar="NOTE_ID")
+        if action in {"add", "update"}:
+            operation.add_argument("--text", required=action == "add", help="Plain review text, at most 8 KiB UTF-8")
+            operation.add_argument("--status", choices=REVIEW_STATUSES, default="open" if action == "add" else None)
+            tags = operation.add_mutually_exclusive_group()
+            tags.add_argument("--tag", action="append", help="Tag; repeat to supply the complete tag list")
+            if action == "update":
+                tags.add_argument("--clear-tags", action="store_true", help="Replace tags with an empty list")
+    p.set_defaults(_command_names=frozenset(sub.choices))
     return p
+
+def inspection_request(args: argparse.Namespace) -> dict:
+    request = {"method": "inspect", "id": args.id, "action": args.inspect_action}
+    if args.inspect_action == "open":
+        if args.review is not None:
+            request["review"] = path(args.review)
+        for key in ("asset_id", "variant"):
+            if getattr(args, key) is not None:
+                request[key] = _review_string(getattr(args, key), key, 256, empty=False)
+    elif args.inspect_action == "parts":
+        request.update(offset=args.offset, limit=args.limit)
+    elif args.inspect_action in {"select", "hide", "show", "isolate"}:
+        request["target"] = _review_string(args.target, "Target ID", empty=False)
+    elif args.inspect_action == "restore":
+        request["all" if args.all else "last"] = True
+    elif args.inspect_action == "cut":
+        request.update(axis=args.axis, position=args.position, keep=args.keep, enabled=args.enabled)
+    return request
+
+def annotation_request(args: argparse.Namespace) -> dict:
+    request = {"method": "annotations", "id": args.id, "action": args.annotation_action}
+    if args.annotation_action in {"update", "remove"}:
+        request["note_id"] = _review_string(args.note, "Annotation id", 256, empty=False)
+    if args.annotation_action in {"add", "update"}:
+        note = {}
+        if args.text is not None:
+            note["text"] = _review_string(args.text, "Annotation text", REVIEW_TEXT_LIMIT, empty=False, multiline=True)
+        if args.status is not None:
+            note["status"] = args.status
+        if args.tag is not None:
+            if len(args.tag) > 32:
+                raise ValueError("Annotations accept at most 32 tags")
+            note["tags"] = [_review_string(tag, "Annotation tag", 128, empty=False) for tag in args.tag]
+        elif getattr(args, "clear_tags", False):
+            note["tags"] = []
+        if not note:
+            raise ValueError("annotations update requires --text, --status, --tag or --clear-tags")
+        request["note"] = note
+    revision, digest = args.expected_revision, args.expected_digest
+    if revision is None:
+        state = rpc({"method": "inspect", "id": args.id, "action": "state"})
+        revision = state.get("document_revision")
+        if type(revision) is not int or revision < 0 or (revision == 0 and args.annotation_action != "add"):
+            raise RuntimeError("Inspection has no current review document revision; open inspection first")
+        if digest is None:
+            digest = state.get("review_digest")
+    request["expected_revision"] = revision
+    if digest is not None:
+        request["expected_digest"] = _review_string(digest, "Expected review digest", 256,
+                                                    empty=revision == 0 and args.annotation_action == "add")
+    return request
+
+def print_inspection(args: argparse.Namespace, result: dict) -> None:
+    if args.json:
+        print_json(result)
+    elif args.inspect_action == "parts":
+        for item in result.get("items", []):
+            print(f'{item.get("id", "")}\t{item.get("name", item.get("exported_name", ""))}\t{item.get("path", "")}')
+        print(f'{len(result.get("items", []))} of {result.get("total", 0)} parts, offset {result.get("offset", args.offset)}'
+              + (", more available" if result.get("has_more") else ""))
+    elif args.inspect_action in {"open", "state"}:
+        loaded = "loaded" if result.get("loaded") else "suspended"
+        if result.get("supported") is False:
+            loaded = "unavailable"
+        print(f'3D inspection for {args.id}: {loaded}')
+        for key, label in (("revision", "Model revision"), ("review_path", "Review file"),
+                           ("document_revision", "Document revision"), ("selected", "Selected target")):
+            if result.get(key) not in (None, ""):
+                print(f'{label}: {result[key]}')
+    else:
+        print({"close": "Inspection closed", "select": "Target selected", "hide": "Target hidden",
+               "show": "Target shown", "isolate": "Target isolated", "restore": "Visibility restored",
+               "cut": "Cut updated"}[args.inspect_action])
+
+def offline_annotations(args: argparse.Namespace) -> int:
+    document = read_review(args.file)
+    if args.annotation_action == "export":
+        report = review_markdown(document)
+        if args.output:
+            destination = path(args.output)
+            with open(destination, "x", encoding="utf-8") as output:
+                output.write(report)
+            print(destination)
+        else:
+            print(report, end="")
+    else:
+        result = annotation_page(document, args.offset, args.limit, args.status)
+        if args.json:
+            print_json(result)
+        else:
+            print(f'Review revision {result["document_revision"]}')
+            for note in result["annotations"]:
+                print(f'\n{display_text(note["id"])} [{note["status"]}]')
+                print(display_text(note["text"], multiline=True))
+            print(f'\n{len(result["annotations"])} of {result["total"]} annotations, offset {result["offset"]}'
+                  + (", more available" if result["has_more"] else ""))
+    return 0
+
+def parse_arguments(arguments: list[str]) -> argparse.Namespace:
+    argument_parser = parser()
+    if arguments:
+        first = arguments[0]
+        # Keep command names authoritative even when a file has the same name.
+        if first == "--" or (first not in argument_parser.get_default("_command_names") and not first.startswith("-") and
+                ("/" in first or Path(first).suffix or Path(first).expanduser().exists())):
+            arguments = ["open", *arguments]
+    return argument_parser.parse_args(arguments)
 
 def main() -> int:
     # Fish completion: read-only, no Qt import, server startup, generators or mutations.
-    if sys.argv[1:] == ["--complete-ids"]:
+    if sys.argv[1:] in (["--complete-ids"], ["--complete-projects"]):
+        collection = "projects" if sys.argv[1] == "--complete-projects" else "entries"
         try:
             runtime, state = locations()
             if running():
-                entries = rpc({"method": "list"}, timeout=0.5)["entries"]
+                entries = rpc({"method": "list"}, timeout=0.5).get(collection, [])
             else:
-                entries = json.loads((state / "previews.json").read_text())["entries"]
+                entries = json.loads((state / "previews.json").read_text()).get(collection, [])
             for entry in entries:
+                if not entry["id"]: continue
                 print(f'{entry["id"]}\t{entry.get("label", "").replace(chr(10), " ").replace(chr(9), " ")}')
         except (OSError, RuntimeError, ValueError, KeyError):
             pass
         return 0
-    args = parser().parse_args()
+    args = parse_arguments(sys.argv[1:])
     action = args.action or "gui"
     if action == "licenses":
         print((ROOT / "THIRD_PARTY_NOTICES.md").read_text())
@@ -179,14 +843,47 @@ def main() -> int:
         runtime, state = locations()
         print(json.dumps({"socket": str(runtime / "preview.sock"), "state": str(state)}, indent=2))
         return 0
-    if action in {"stop", "hide", "status", "list", "close-all"} and not running(timeout=15):
+    if action == "annotations" and args.annotation_action in {"list", "export"}:
+        return offline_annotations(args)
+    if action == "inspect":
+        print_inspection(args, rpc(inspection_request(args)))
+        return 0
+    if action == "annotations":
+        result = rpc(annotation_request(args))
+        if args.json:
+            print_json(result)
+        else:
+            print(f'Review revision {result["document_revision"]}')
+        return 0
+    if action in {"stop", "hide", "status", "list", "close-all", "cache"} and not running(timeout=15):
         if action == "status": print('{"running": false}' if args.json else "Server stopped")
         elif action == "list" and args.json: print("[]")
+        elif action == "cache": print('{"running": false}' if args.json else "Server stopped")
         return 0
     if action == "start":
         created = start(); print("Server started" if created else "Server already running"); return 0
-    if action in {"gui", "add", "material"}: start()
+    if action == "project":
+        if args.project_action == "list":
+            rows = rpc({"method": "project", "action": "list"})["projects"] if running(timeout=15) else []
+            if args.json: print_json(rows)
+            else:
+                for row in rows: print(f'{row["id"] or "(ungrouped)"}\t{row["label"]}\t{row["current"]}')
+            return 0
+        if args.project_action == "create":
+            identifier, label = project_identity()
+            start()
+            result = rpc({"method": "project", "id": args.id or identifier, "label": args.label or (args.id if args.id else label)})
+            print(result["id"])
+        else:
+            request = {"method": "project", "id": args.id}
+            if args.project_action == "current": request["current"] = args.preview
+            else: request["action"] = "remove"
+            rpc(request)
+        return 0
+    if action in {"gui", "open", "add", "material"}: start()
     request = {"method": {"gui": "show", "stop": "quit", "status": "list", "close-all": "close_all"}.get(action, action)}
+    if action == "cache": request.update(action=args.mode, limit=args.limit, after=args.after)
+    if action == "open": request["paths"] = [path(filename) for filename in args.files]
     if action in {"add", "material"}:
         entry = {"path": path(args.albedo if action == "material" else args.file),
                  "kind": "material" if action == "material" else args.kind,
@@ -199,28 +896,60 @@ def main() -> int:
             entry["maps"] = {key: path(getattr(args, key)) for key in ("normal", "orm") if getattr(args, key)}
             if args.shape is not None: entry["settings"] = {"shape": args.shape}
         if action == "add" and args.settings is not None:
-            entry["settings"] = json.loads(args.settings)
+            entry["settings"] = json_value(args.settings)
             if not isinstance(entry["settings"], dict): raise RuntimeError("--settings requires a JSON object")
-        request = {"method": "add", "entry": entry}
+        if args.ungrouped and (args.project or args.project_label): raise RuntimeError("--ungrouped cannot be combined with --project or --project-label")
+        project_id, project_label = project_identity(args.cwd)
+        entry["project"] = "" if args.ungrouped else args.project or project_id
+        request = {"method": "add", "entry": entry, "make_current": not args.no_current}
+        if not args.ungrouped:
+            # Explicit IDs keep their existing name unless a label is supplied.
+            if args.project_label or not args.project:
+                request["project_label"] = args.project_label or project_label
     if action in {"select", "remove", "reload", "settings", "seek"}: request["id"] = args.id
     if action == "seek": request["seconds"] = args.seconds
-    if action == "settings": request["settings"] = json.loads(args.value)
+    if action == "settings": request["settings"] = json_value(args.value)
     if action == "defaults":
-        request.update(group=args.group, settings=json.loads(args.value))
+        request.update(group=args.group, settings=json_value(args.value))
         if not isinstance(request["settings"], dict): raise RuntimeError("defaults requires a JSON object")
     if action == "layout":
         request["layout"] = args.mode
-        if args.size is not None: request["grid_size"] = args.size
-        if args.compact is not None: request["compact"] = args.compact
+        if args.size is not None:
+            if args.mode == "projects": request["project_grid_size"] = 0 if args.size == "auto" else int(args.size)
+            elif args.size == "auto": raise RuntimeError("--size auto requires layout projects")
+            else: request["grid_size"] = int(args.size)
+        if args.group_projects is not None: request["group_projects"] = args.group_projects
+        if args.project is not None: request["project_filter"] = {"all": "", "ungrouped": "@ungrouped"}.get(args.project, args.project)
     if action == "capture": request["path"] = path(args.file)
     result = rpc(request)
+    if action == "cache":
+        if "diagnostics" not in result.get("cache", {}):
+            raise RuntimeError("Restart Asset Preview to enable cache churn diagnostics in the running service")
+        if args.json: print_json(result)
+        elif args.mode == "events":
+            for event in result["events"]:
+                detail=event.get("detail", {})
+                print(f'{event["seq"]} {event["time"]} {event["tier"]}.{event["action"]} '
+                      f'{event.get("key", "")[:12]} bytes={event["bytes"]:.0f} reason={event["reason"]} '
+                      f'work_us={event["work_us"]:.0f} {json.dumps(detail.get("source", ""), ensure_ascii=False)}')
+        else:
+            cache=result["cache"]; diagnostic=cache["diagnostics"]; counts=diagnostic["counters"]
+            print(f'RAM {cache["bytes"]/1048576:.2f} / {cache["limit"]/1048576:.0f} MiB · {cache["entries"]} retained entries')
+            print(f'Recent RAM refaults: {counts.get("ram.recent_refaults", 0):.0f} · '
+                  f'unused RAM removals: {counts.get("ram.unused_removals", 0):.0f} · '
+                  f'empty disk prune scans: {counts.get("small_disk.empty_prune_scans", 0)+counts.get("glb_disk.empty_prune_scans", 0):.0f}')
+            print(f'Log: {diagnostic["log_path"]}')
+            for suspect in diagnostic["suspects"]:
+                print(f'  {suspect["source"] or suspect["identity"]}: refaults={suspect["recent_refaults"]:.0f} '
+                      f'unused={suspect["unused_removals"]:.0f} replacements={suspect["replacements"]:.0f}')
+        return 0
     if action in {"add", "material"}: print(result["id"])
     elif action == "status":
         result["running"] = True
         if args.json: print(json.dumps(result, indent=2))
         else:
             print(f'{len(result["entries"])} previews · {result["active"]} active · {result["layout"]} · PID {result["pid"]}')
-            for row in result["entries"]: print(f'  {row["id"]}: {row["label"]} — {row["status"]}')
+            for row in result["entries"]: print(f'  {row["id"]}: {row["label"]}: {row["status"]}')
     elif action == "list":
         if args.json: print(json.dumps(result["entries"], indent=2))
         else:

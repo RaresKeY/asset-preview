@@ -2,11 +2,12 @@
 Type=Application
 Name=Asset Preview
 GenericName=Live Asset Viewer
-Comment=Preview images, videos, models and materials as AI agents produce them
-Exec=asset-preview
+Comment=Preview images, audio, videos, models and materials as AI agents produce them
+Exec=asset-preview open %F
 Icon=io.github.RaresKeY.AssetPreview
 Terminal=false
 StartupNotify=false
 StartupWMClass=asset-preview
 Categories=Graphics;3DGraphics;
-Keywords=Asset;Preview;Live;3D;Model;Material;Video;
+MimeType=model/x-trellis-post;model/x-ovoxel;
+Keywords=Asset;Preview;Live;3D;Model;Material;Audio;Music;WAV;MP3;Video;

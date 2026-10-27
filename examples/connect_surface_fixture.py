@@ -61,7 +61,11 @@ def plan(workshop: Path, preview: Path, tools: Path, runner: Path,
         if not re.fullmatch(r"[A-Za-z0-9_-]{1,64}", entry_id):
             raise ValueError("Prefix produces an invalid preview ID (maximum 64 characters)")
         command = [str(preview / "bin/asset-preview"), "add", str(output / filename),
-                   "--id", entry_id, "--label", label, "--cwd", str(workshop)]
+                   "--id", entry_id, "--label", label, "--cwd", str(workshop),
+                   "--project", os.environ.get("ASSET_PREVIEW_PROJECT_ID", prefix),
+                   "--project-label", os.environ.get("ASSET_PREVIEW_PROJECT_LABEL", "Surface fixture")]
+        if suffix != "model":
+            command.append("--no-current")
         if generate and suffix == "model":
             for path in inputs:
                 command += ["--watch", str(path)]
@@ -124,7 +128,7 @@ def main() -> None:
     parser.add_argument("--workshop", default=os.environ.get("ASSET_WORKSHOP_PROJECT", str(workspace / "asset-workshop")))
     parser.add_argument("--preview", default=os.environ.get("ASSET_PREVIEW_PROJECT", str(workspace / "asset-preview")))
     parser.add_argument("--tools", default=os.environ.get("GAME_DEV_TOOLS_ROOT", str(workspace / "game-dev-tools")))
-    parser.add_argument("--runner", default=os.environ.get("GODOT_PODMAN_RUNNER", str(workspace / "godot-podman/bin/godot-podman")))
+    parser.add_argument("--runner", default=os.environ.get("GODOT_PODMAN_RUNNER", str(workspace / "tooling/godot-podman/bin/godot-podman")))
     parser.add_argument("--id-prefix", default="workshop-surface-fixture")
     parser.add_argument("--generate", action="store_true", help="Attach the finite owner build to the model view only")
     parser.add_argument("--timeout", type=int, default=1200)

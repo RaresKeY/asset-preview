@@ -1,7 +1,7 @@
 # Linux distribution options
 
 Assessment for Asset Preview: a Qt GUI with a local agent CLI/socket, live project
-file watching, F3D model rendering, libmpv video and optional host generators.
+file watching, F3D model rendering, libmpv audio/video and optional host generators.
 
 | Format | User experience | Fit and complications |
 | --- | --- | --- |

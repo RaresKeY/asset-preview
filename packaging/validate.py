@@ -33,7 +33,7 @@ with tempfile.TemporaryDirectory(prefix='asset-preview-release-check-',dir=os.en
         call('add',str(model),'--id','model','--label','Model')
         call('material',str(image),'--id','material','--shape','sphere')
         call('add',str(video),'--id','video','--label','Video')
-        call('layout','grid','--size','2','--compact');call('gui')
+        call('layout','grid','--size','2');call('gui')
         deadline=time.monotonic()+60
         while True:
             status=call('status','--json')
@@ -55,7 +55,8 @@ with tempfile.TemporaryDirectory(prefix='asset-preview-release-check-',dir=os.en
         (args.output/'validation.json').write_text(json.dumps(report,indent=2)+'\n')
         print(json.dumps(report))
     finally:
-        log=fixture/'state/server.log'
-        if log.exists():shutil.copy2(log,args.output/'server.log')
+        for name in ('crash.log','crash.log.1'):
+            log=fixture/'state'/name
+            if log.exists():shutil.copy2(log,args.output/name)
         call('stop')
         if supervisor and supervisor.wait(timeout=20)!=0:raise RuntimeError('Foreground shutdown failed')

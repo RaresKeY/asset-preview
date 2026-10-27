@@ -8,6 +8,8 @@ import importlib.machinery
 import importlib.util
 import json
 import os
+import subprocess
+import sys
 import tempfile
 import time
 
@@ -18,20 +20,25 @@ client=helpers.client
 
 def main():
     parser=argparse.ArgumentParser(); parser.add_argument("--phase",choices=["before","after"],required=True)
-    parser.add_argument("--output",type=Path,required=True); args=parser.parse_args()
+    parser.add_argument("--output",type=Path,required=True)
+    for name in ("model","albedo","normal","orm"):
+        parser.add_argument("--"+name,type=Path,help="Optional local asset; defaults to a generated fixture")
+    args=parser.parse_args()
     output=args.output.resolve(); output.mkdir(parents=True,exist_ok=True)
-    atlas=ROOT.parent/"material-atlas"
-    files={"model":atlas/"assets/models/sugar_cube/sugar_cube_textured.glb",
-           "albedo":atlas/"assets/materials/smoked_walnut_albedo.png",
-           "normal":atlas/"assets/materials/smoked_walnut_normal.png",
-           "orm":atlas/"assets/materials/smoked_walnut_orm.png"}
-    report={"phase":args.phase,"source_sha256":{name:hashlib.sha256(path.read_bytes()).hexdigest() for name,path in files.items()},"captures":[]}
     with tempfile.TemporaryDirectory(prefix="asset-preview-ui-") as folder:
         fixture=Path(folder); os.environ["ASSET_PREVIEW_RUNTIME_DIR"]=str(fixture/"runtime"); os.environ["ASSET_PREVIEW_STATE_DIR"]=str(fixture/"state")
+        os.environ["ASSET_PREVIEW_SMALL_CACHE"]=str(fixture/"small-cache"); os.environ["ASSET_PREVIEW_TEXTURE_CACHE"]=str(fixture/"texture-cache")
+        files={name:getattr(args,name).resolve() if getattr(args,name) else fixture/(name+(".obj" if name=="model" else ".png"))
+               for name in ("model","albedo","normal","orm")}
+        if not args.model:
+            subprocess.run([sys.executable,str(ROOT/"examples/generate_cube.py"),str(files["model"])],check=True,capture_output=True)
+        for name,color in (("albedo",(100,150,190,255)),("normal",(128,128,255,255)),("orm",(255,180,40,255))):
+            if not getattr(args,name): helpers.png(files[name],color,128)
+        report={"phase":args.phase,"source_sha256":{name:hashlib.sha256(path.read_bytes()).hexdigest() for name,path in files.items()},"captures":[]}
         client.start(); input=None
         try:
-            client.rpc({"method":"add","entry":{"id":"model","path":str(files["model"]),"label":"Sugar cube · textured GLB"}})
-            client.rpc({"method":"add","entry":{"id":"material","kind":"material","path":str(files["albedo"]),"maps":{"normal":str(files["normal"]),"orm":str(files["orm"])},"label":"Smoked walnut · baked material"}})
+            client.rpc({"method":"add","entry":{"id":"model","path":str(files["model"]),"label":"Fixture model"}})
+            client.rpc({"method":"add","entry":{"id":"material","kind":"material","path":str(files["albedo"]),"maps":{"normal":str(files["normal"]),"orm":str(files["orm"])},"label":"Fixture material"}})
             for i in range(16):
                 path=fixture/f"image{i}.png"; helpers.png(path,(40+i*10,130,210-i*8,255),64)
                 client.rpc({"method":"add","entry":{"id":f"image{i}","path":str(path),"label":("Very long asset name to check truncation and control reachability" if i==0 else f"Texture {i+1}")}})
@@ -45,10 +52,10 @@ def main():
                 report["captures"].append({"file":path.name,"state":client.rpc({"method":"list"})})
             capture("normal-2x2"); capture("small-2x2",700,500)
             if args.phase=="after":
-                client.rpc({"method":"layout","layout":"grid","grid_size":3,"compact":True}); capture("compact-3x3",1000,720)
-                client.rpc({"method":"layout","layout":"grid","grid_size":4}); capture("compact-4x4",1600,1000)
+                client.rpc({"method":"layout","layout":"grid","grid_size":3}); capture("grid-3x3",1000,720)
+                client.rpc({"method":"layout","layout":"grid","grid_size":4}); capture("grid-4x4",1600,1000)
                 capture("small-4x4",700,500)
-                client.rpc({"method":"layout","layout":"single","compact":False}); capture("studio",1000,720)
+                client.rpc({"method":"layout","layout":"single"}); capture("studio",1000,720)
                 client.rpc({"method":"settings","id":"model","settings":{"textures":False}}); capture("no-textures")
                 client.rpc({"method":"settings","id":"model","settings":{"materials":False}}); capture("clay")
                 client.rpc({"method":"settings","id":"model","settings":{"materials":True,"textures":True,"lighting":"lightkit"}}); capture("light-kit")
@@ -62,14 +69,14 @@ def main():
                 input.click(control["x"]+control["width"]//2,control["y"]+control["height"]//2)
                 time.sleep(.2); capture("preview-menu"); input.press("Escape")
                 client.rpc({"method":"compare","ids":[]})
-                client.rpc({"method":"layout","layout":"grid","grid_size":2,"compact":False})
+                client.rpc({"method":"layout","layout":"grid","grid_size":2})
                 capture("minimum-grid",540,380)
             report["renderer"]=helpers.row("model")["metrics"]["renderer"]
             assert not any(token in report["renderer"].lower() for token in ("llvmpipe","softpipe","software","unknown"))
             if args.phase=="after":
-                client.rpc({"method":"layout","layout":"grid","grid_size":4,"compact":True})
+                client.rpc({"method":"layout","layout":"grid","grid_size":4})
                 client.rpc({"method":"add","entry":{"id":"image0","path":str(fixture/"pending.png"),"label":"Texture baking · waiting for output"}})
-                capture("compact-waiting",1600,1000)
+                capture("grid-waiting",1600,1000)
                 client.rpc({"method":"hide"})
                 for entry in client.rpc({"method":"list"})["entries"]:
                     client.rpc({"method":"remove","id":entry["id"]})

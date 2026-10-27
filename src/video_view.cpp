@@ -1,4 +1,5 @@
 #include "video_view.h"
+#include <QAbstractButton>
 #include <QFileInfo>
 #include <QGuiApplication>
 #include <QKeyEvent>
@@ -13,24 +14,8 @@
 #include <cmath>
 #include <stdexcept>
 
-namespace {
-void checked(int code) { if (code<0) throw std::runtime_error(mpv_error_string(code)); }
-void command(mpv_handle* player, const QByteArray& first, const QByteArray& second={}, const QByteArray& third={}) {
-    const char* args[]={first.constData(),second.isNull()?nullptr:second.constData(),third.isNull()?nullptr:third.constData(),nullptr};
-    checked(mpv_command_async(player,0,args));
-}
-void flag(mpv_handle* player, const char* name, bool value) {
-    int v=value; checked(mpv_set_property_async(player,0,name,MPV_FORMAT_FLAG,&v));
-}
-void string(mpv_handle* player, const char* name, const char* value) {
-    checked(mpv_set_property_async(player,0,name,MPV_FORMAT_STRING,&value));
-}
-bool playbackKey(const QKeyEvent* e) {
-    if (e->modifiers()==Qt::ShiftModifier) return e->key()==Qt::Key_Left || e->key()==Qt::Key_Right;
-    return e->modifiers()==Qt::NoModifier &&
-        (e->key()==Qt::Key_Space || e->key()==Qt::Key_M || e->key()==Qt::Key_Home);
-}
-}
+#include "mpv_player.h"
+using namespace preview::media;
 
 struct VideoView::Player {
     mpv_handle* client=nullptr;
@@ -84,22 +69,8 @@ bool VideoView::reload(const QJsonObject& cfg, QString& error) {
         candidate.reset();
         auto next=std::make_unique<Player>();
         next->client=mpv_create(); if (!next->client) throw std::runtime_error("Cannot create libmpv player");
-        auto option=[&](const char* key,const char* value) {
-            const int code=mpv_set_option_string(next->client,key,value);
-            // Minimal LGPL libmpv builds can omit scripting entirely.
-            if (code==MPV_ERROR_OPTION_NOT_FOUND &&
-                (qstrcmp(key,"load-scripts")==0 || qstrcmp(key,"ytdl")==0 || qstrcmp(key,"osc")==0)) return;
-            checked(code);
-        };
-        option("config","no"); option("load-scripts","no"); option("ytdl","no");
-        option("input-default-bindings","no"); option("input-vo-keyboard","no"); option("osc","no"); option("osd-level","0");
-        option("vo","libmpv"); option("hwdec","auto-safe"); option("keep-open","yes");
-        option("background","color");
-        option("idle","yes"); option("cache","no"); option("demuxer-max-bytes","8MiB"); option("demuxer-max-back-bytes","0");
-        option("audio-display","no"); option("sub-auto","no"); option("audio-file-auto","no");
-        option("access-references","no"); option("msg-level","all=error");
-        // The candidate stays silent until it has a decoded video frame.
-        option("mute","yes"); option("aid","no"); option("pause",config["settings"].toObject()["paused"].toBool()?"yes":"no");
+        configure(next->client,false);
+        checked(mpv_set_option_string(next->client,"pause",config["settings"].toObject()["paused"].toBool()?"yes":"no"));
         checked(mpv_initialize(next->client));
         mpv_opengl_init_params init{[](void* ctx,const char* name)->void* {
             return reinterpret_cast<void*>(static_cast<QOpenGLContext*>(ctx)->getProcAddress(name));
@@ -114,7 +85,7 @@ bool VideoView::reload(const QJsonObject& cfg, QString& error) {
         const std::pair<const char*,mpv_format> observed[]={
             {"video-params/w",MPV_FORMAT_INT64},{"video-params/h",MPV_FORMAT_INT64},
             {"duration",MPV_FORMAT_DOUBLE},{"time-pos",MPV_FORMAT_DOUBLE},
-            {"pause",MPV_FORMAT_FLAG},{"mute",MPV_FORMAT_FLAG},{"eof-reached",MPV_FORMAT_FLAG},
+            {"pause",MPV_FORMAT_FLAG},{"mute",MPV_FORMAT_FLAG},{"eof-reached",MPV_FORMAT_FLAG},{"seekable",MPV_FORMAT_FLAG},
             {"hwdec-current",MPV_FORMAT_STRING},{"video-codec",MPV_FORMAT_STRING}};
         for (const auto& [key,format]:observed) checked(mpv_observe_property(next->client,0,key,format));
         mpv_set_wakeup_callback(next->client,&VideoView::wakeup,this);
@@ -132,20 +103,15 @@ void VideoView::failed(const QString& error) {
 }
 void VideoView::drain() {
     QString error;
+    bool notify=false;
     for (auto* p:{current.get(),candidate.get()}) {
         if (!p) continue;
         while (auto* event=mpv_wait_event(p->client,0)) {
             if (event->event_id==MPV_EVENT_NONE) break;
             if (event->event_id==MPV_EVENT_PROPERTY_CHANGE) {
                 const auto* prop=static_cast<mpv_event_property*>(event->data);
-                if (!prop->data) continue;
-                switch (prop->format) {
-                case MPV_FORMAT_FLAG: p->properties[prop->name]=bool(*static_cast<int*>(prop->data)); break;
-                case MPV_FORMAT_INT64: p->properties[prop->name]=double(*static_cast<int64_t*>(prop->data)); break;
-                case MPV_FORMAT_DOUBLE: p->properties[prop->name]=*static_cast<double*>(prop->data); break;
-                case MPV_FORMAT_STRING: p->properties[prop->name]=QString::fromUtf8(*static_cast<char**>(prop->data)); break;
-                default: break;
-                }
+                notify|=p==current.get();
+                updateProperty(p->properties,*prop);
                 if (p==current.get() && QByteArray(prop->name)=="eof-reached" && p->properties[prop->name].toBool() &&
                     !config["settings"].toObject()["loop"].toBool(true)) change({{"paused",true}});
             } else if (event->event_id==MPV_EVENT_FILE_LOADED) p->fileLoaded=true;
@@ -156,6 +122,7 @@ void VideoView::drain() {
         }
     }
     if (!error.isEmpty()) failed(error);
+    if (notify && playbackChanged) playbackChanged();
 }
 void VideoView::apply(Player& p) {
     const auto s=config["settings"].toObject();
@@ -166,7 +133,14 @@ void VideoView::apply(Player& p) {
 }
 void VideoView::settings(const QJsonObject& cfg) {
     config=cfg;
-    try { if (current) apply(*current); if (candidate) flag(candidate->client,"pause",config["settings"].toObject()["paused"].toBool()); }
+    try {
+        if (current) {
+            if (current->properties["eof-reached"].toBool() && !config["settings"].toObject()["paused"].toBool())
+                command(current->client,"seek","0","absolute+exact");
+            apply(*current);
+        }
+        if (candidate) flag(candidate->client,"pause",config["settings"].toObject()["paused"].toBool());
+    }
     catch (const std::exception& e) { if (loaded) loaded(false,QString::fromUtf8(e.what())); }
 }
 void VideoView::change(QJsonObject patch) { if (changed) changed(patch); }
@@ -182,7 +156,7 @@ QJsonObject VideoView::metrics() const {
         const auto& p=current->properties;
         result["width"]=p["video-params/w"]; result["height"]=p["video-params/h"];
         result["duration"]=p["duration"]; result["position"]=p["time-pos"];
-        result["paused"]=p["pause"]; result["muted"]=p["mute"]; result["eof"]=p["eof-reached"];
+        result["paused"]=p["pause"]; result["muted"]=p["mute"]; result["eof"]=p["eof-reached"]; result["seekable"]=p["seekable"];
         result["hwdec"]=p["hwdec-current"]; result["codec"]=p["video-codec"];
     }
     return result;
@@ -216,10 +190,13 @@ QImage VideoView::snapshot() {
     makeCurrent(); paintGL(); QImage image=grabFramebuffer(); doneCurrent(); return image;
 }
 void VideoView::mousePressEvent(QMouseEvent* e) { if (activated) activated(); if (focusSurface) focusSurface(); requestActivate(); e->accept(); }
-void VideoView::mouseDoubleClickEvent(QMouseEvent* e) { change({{"paused",!config["settings"].toObject()["paused"].toBool()}}); e->accept(); }
 bool VideoView::eventFilter(QObject* watched, QEvent* e) {
     // After programmatic focus, Qt can send keys to the widget container
     // instead of the native child. Forward only this video's playback keys.
+    // Focused playback buttons retain native Space activation.
+    if ((e->type()==QEvent::ShortcutOverride || e->type()==QEvent::KeyPress) &&
+        static_cast<QKeyEvent*>(e)->key()==Qt::Key_Space && qobject_cast<QAbstractButton*>(watched))
+        return QOpenGLWindow::eventFilter(watched,e);
     if (e->type()==QEvent::ShortcutOverride && playbackKey(static_cast<QKeyEvent*>(e))) { e->accept(); return true; }
     if (e->type()==QEvent::KeyPress && playbackKey(static_cast<QKeyEvent*>(e))) {
         keyPressEvent(static_cast<QKeyEvent*>(e)); return true;

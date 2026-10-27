@@ -37,6 +37,9 @@ release outputs are removed after remote upload verification.
 The release omits Qt’s optional TIFF plugin because Ubuntu’s TIFF library links
 GPL JBIG code. Convert TIFF image previews to PNG; this restriction does not
 change the separately built VTK model readers. Minimal libmpv omits scripting.
+The minimal FFmpeg filter allowlist includes metadata-only `astats` and
+`aspectralstats` for music-reactive audio previews, alongside the existing media
+conversion filters.
 
 Historical release 0.0.1 remains private on GitHub with GHCR tag `0.0.1`.
 Its application snapshot is commit
@@ -69,6 +72,17 @@ host execution; no strict sandbox claim. Its host CLI bridge is a separate small
 release archive requiring host Python 3. The `.flatpak` bundle and bridge are
 GitHub Release downloads; no public Flathub submission or remote update channel.
 `docs/install-linux.md` owns install/remove/update commands and platform limits.
+Source and packaged desktop entries use `open %F`, accepting local file drops
+and file arguments while retaining ordinary no-file launches. This changes source
+integration and future packages; frozen release artifacts remain unchanged.
+Flatpak routes those file activations through the foreground supervisor, which
+shares CLI parsing and owns the native service until shutdown. Concurrent or later
+activations reuse that child under the private startup flock. Explicit `start`
+starts or pings the service without opening a window; a later GUI/file activation
+can reuse that hidden owner. Read-only and
+control commands retain the ordinary client path. `tools/test.sh packaged` checks
+these lifetimes against the prepared native binary in a temporary fixture bundle;
+it does not create distribution artifacts or install dependencies.
 
 Release 0.0.2 is published privately from frozen tag snapshot
 `4bb0516f7825ca3234848470f8a8fb11cdd85db7`, with all desktop formats, the host
@@ -84,3 +98,9 @@ The temporary OCI transport archive is removed from Releases after private GHCR
 publication; generated local candidates are removed after remote verification.
 
 Local Podman builds use `packaging/build-image.sh`. The default runtime target is retained; `ASSET_PREVIEW_BUILD_TARGET=build` or `artifacts` marks task images ephemeral. Intermediate build images carry ephemeral retention and project labels. The wrapper holds the shared workstation build-retention flock. This local policy does not change published Docker/GHCR release workflows.
+
+Host source builds optionally find KF6 Parts and load the installed Konsole KPart
+for the Codex dock. Existing portable releases do not bundle Konsole. Builds
+without KF6 Parts retain capture/annotation and report terminal unavailability;
+future distribution of the optional terminal must account for its KDE dependency
+closure and component licenses in THIRD_PARTY_NOTICES.md.

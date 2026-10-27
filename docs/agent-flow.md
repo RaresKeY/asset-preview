@@ -4,20 +4,43 @@ The user opens and places the Asset Preview window. Connect work through
 `~/workspace/asset-preview/bin/asset-preview`; an agent does not need fish loaded.
 Use `start` if the socket is absent. Registration does not raise the window;
 `gui` is the deliberate visible-window action.
+Agent sends and updates default to background registration with `add` / `material`
+(socket `add`), preserving selection, layout, visibility and focus. A request to
+send an asset to preview does not request a desktop launch. Use `gui` / socket
+`show`, `open`, bare paths or the no-argument launcher only when the user explicitly
+asks to open or raise the preview. Respect later user closure or hiding; do not
+reopen for updates, captures or load checks, or start a second desktop instance.
+Automated visual checks and captures belong in a hardware Gamescope headless
+session. A suspended background registration is expected until the user opens it.
+The launcher restores missing desktop theme metadata from the user's session,
+so an agent's stripped shell still uses the desktop's Qt style, fonts and icons.
+Explicit desktop/theme overrides are preserved; no display or plugin paths are
+imported from the session.
+
+Create a project as work starts (`project create ID --label "Name"`), or let the
+first `add` / `material` send create it. Sends default to the caller's owning
+checkout and promote that view as the project's current preview. Use `--project`
+for an explicit workstream and `--no-current` for supporting proof images. Choose
+an existing member with `project current PROJECT PREVIEW`; this does not replace
+its generator or settings. It updates that project's pane when the user is in
+Projects, preserving global selection, layout, visibility and focus. See the
+[project flow](../skills/asset-preview/references/projects.md) for identity,
+environment overrides, helpers and verification. Overview can group/filter these
+same projects, while Projects provides full interactive panes in an adaptive grid.
 
 Use a stable, project-specific ID and connect the authoritative exported file
 before generation starts. Missing files are valid registrations:
 
 ```sh
 ~/workspace/asset-preview/bin/asset-preview add /absolute/project/assets/generated/chair.glb \
-  --id project-chair --label "Chair · geometry"
+  --id project-chair --project chair --project-label "Chair" --label "Chair · geometry"
 ```
 
 The user's current selection stays in place. `select project-chair` changes it
 without moving or raising the window; use it when the user wants to follow that
 asset. Later registration with the same ID updates its paths and command. Same-kind
 reconnections retain inspection settings; explicit settings override them. New previews
-inherit the app's remembered image/video/3D preferences. A `settings` request also
+inherit the app's remembered image/audio/video/3D preferences. A `settings` request also
 updates those defaults, so preserve the user's inspection choices when changing them.
 
 When the agent already runs a generator, use file watching alone. The exported
@@ -46,13 +69,42 @@ materials, prefer a self-contained GLB. For Godot-only materials, use a finite
 offscreen capture command and connect its PNG; an ordinary game `play.sh` is an
 interactive process and is unsuitable as this generator.
 
-For rendered turntables or animation captures, connect the local video output:
+For rigged characters, node motion and morphs, connect the exported GLB as a
+model. Set `--settings '{"animation":0,"paused":true,"animation_speed":1,"loop":true}'`
+when explicit transport choices are useful. Read `metrics.animations` after a
+successful load before choosing a zero-based clip. Use `settings ID '{"paused":false}'`
+to play and `seek ID 0.75` to inspect a fixed time. Paused/static models stay idle;
+hidden/off-page scenes unload. Export baked clips, skeletons and weights through
+the owning exporter; the viewer does not evaluate DCC control rigs, IK or scripts.
+The optional component inspector is static-only. See [Animations](../specs/animations.md),
+[Scenes](../specs/scenes.md) and [Modular assets](../specs/modular.md).
+
+For rendered turntables or engine-exact animation captures, connect the local video output:
 `add /absolute/project/preview/turntable.mp4 --id project-turntable`. It uses the
 same finite-generator/source-save flow; publish finished encodes atomically.
 Playback defaults to muted looping. Preserve the user's paused/muted/loop choices;
 `settings ID '{"paused":true}'` and `seek ID 2.5` support inspection. Loading is
 asynchronous; wait for Live and `metrics.loads`, and read `metrics.hwdec` separately
 from renderer identity when reporting hardware decoding.
+
+For music and sound effects, register the local output once:
+
+```sh
+~/workspace/asset-preview/bin/asset-preview add /absolute/project/audio/song.wav \
+  --id project-music --label "Song"
+```
+
+WAV, MP3, FLAC, OGG, Opus and M4A route to audio automatically; use `--kind audio`
+for other supported local formats. Audio starts paused and unmuted, with looping
+on. Press Play to listen, or explicitly request `settings project-music
+'{"paused":false}'`; `seek project-music 12.5` seeks a loaded visible track.
+Audio has separate remembered defaults. The timeline, elapsed/total time, mute,
+loop and keyboard shortcuts match video. Watch the finished audio output normally;
+a finite source-save generator is optional and follows the same ownership rules.
+Successful async audio publication requires loaded decoder parameters, never a
+video frame. Failed replacements retain the previous track and are not successful
+revisions. Hidden, minimized and off-page tracks release their players and stop
+sound; returning reloads from the start with stored playback preferences.
 
 Inspect `status --json` after connecting: `active` distinguishes a visible entry
 from a suspended one, `building` distinguishes an in-flight command, `status`
@@ -81,14 +133,10 @@ and its boundary. A raised turret/machinery seat is a seated component and needs
 no decorative hull hole. Classify raised covers, slats and curved features before
 choosing an operator.
 
-The canonical `surface-ownership/v1` declaration and saved-readback helpers belong
-to `game-dev-tools/tools/geometry-authoring/src/surface_ownership.py`; read that
-owner's `specs/surface-ownership.md` through its
-[spec map](../../game-dev-tools/specs/_readme.md). Asset Workshop's
-`constructs/surface-ownership` is the intended pinned caller; read the
-[workshop map](../../asset-workshop/specs/_readme.md) and construct's own contract.
-Recheck those files, implementation/pin hashes and current tests before invocation.
-This viewer loads their products and does not add a geometry repair engine.
+Keep surface ownership, geometry edits and saved-readback validation in the
+owning authoring pipeline. Follow that pipeline's documented contracts and
+validate the saved export before publishing it. This viewer loads the resulting
+assets and does not add a geometry repair engine.
 
 Keep an asset's model and small owner-generated PNG proof views connected under
 separate IDs: host/material and raking edge, leaf closed/open, and raised-seat
@@ -126,3 +174,12 @@ runtime adoption as separate outcomes.
 The [finite surface fixture connector](../examples/surface_fixture.md) delegates
 to the owner construct, watches its explicit inputs and registers actual host
 models plus diagnostic proof views without changing the viewer or user layout.
+
+Project-aware connectors also cover `clockwork-hands/bin/preview` (main model,
+with anatomical/reel support), hand-video-capture's exported animation sender,
+Conventional Space Fleet's per-ship variants, Modeling Flows' lab/overview
+launcher, Texture Budget Lab's per-asset packed variants and Charge Grid's
+building comparison. Their owning specs document the chosen current output.
+Existing explicit visible launchers remain user launch routes; background agents
+use their registration-only helpers or the central CLI. Isolated historical
+capture/review scripts keep their private registries and need no desktop groups.

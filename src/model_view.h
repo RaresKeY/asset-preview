@@ -1,13 +1,16 @@
 #pragma once
-#include "viewer.h"
-#include <QOpenGLWindow>
+#include "model_worker.h"
+#include "triangle_counts.h"
+
+#include <QElapsedTimer>
+#include <QTimer>
 #include <f3d/engine.h>
 #include <optional>
 
-class ModelView final : public QOpenGLWindow, public PreviewView {
+class ModelScene final : public ModelWorker {
 public:
-    explicit ModelView(QJsonObject config);
-    ~ModelView() override;
+    explicit ModelScene(QJsonObject config);
+    ~ModelScene() override;
     bool reload(const QJsonObject&, QString&) override;
     void fit() override;
     void resetView() override;
@@ -17,19 +20,39 @@ public:
     void cameraView(const QString&) override;
     void settings(const QJsonObject&) override;
     QJsonObject metrics() const override;
-    std::function<void(bool, QString)> loaded;
     QImage snapshot() override;
-protected:
-    void initializeGL() override;
-    void resizeGL(int, int) override;
-    void paintGL() override;
-    void wheelEvent(QWheelEvent*) override;
-    void mousePressEvent(QMouseEvent*) override;
-    void mouseReleaseEvent(QMouseEvent*) override;
-    void mouseMoveEvent(QMouseEvent*) override;
-    void mouseDoubleClickEvent(QMouseEvent*) override;
+    bool seek(double, QString&) override;
+    static QImage thumbnail(QJsonObject,QString& error,QString& renderer);
+    void viewport(QSize,double) override;
+    void exposed(bool) override;
+    void scroll(double) override;
+    void drag(QPointF,bool) override;
 private:
-    bool load(QString& error);
+    int width() const { return extent.width(); }
+    int height() const { return extent.height(); }
+    double devicePixelRatioF() const { return ratio; }
+    bool isExposed() const { return visible; }
+    void update();
+    void paintGL();
+    QSize extent{100,100};
+    double ratio=1;
+    bool visible=true,framePending=false;
+    bool pendingLoadNotice=false;
+    bool load(QString& error, bool retainAnimation=false);
+    struct Animation {
+        QStringList clips;
+        int index=0;
+        double start=0, duration=0, position=0, sample=0;
+        bool paused=true, eof=false;
+    } animation;
+    Animation prepareAnimation(f3d::engine&, double position=0);
+    void advanceAnimation();
+    void restartAnimationClock();
+    void scheduleAnimation();
+    void notifyPlayback();
+    QTimer animationTick;
+    QElapsedTimer animationClock, notificationClock;
+    double animationAnchor=0, animationClockAtPose=0;
     void applyOptions(f3d::engine&);
     void cleanup();
     f3d::vector3_t worldUp() const;
@@ -43,8 +66,15 @@ private:
     std::unique_ptr<f3d::engine> engine;
     QString renderer;
     QPointF last;
-    bool initialized = false;
+    bool thumbnailOnly = false;
     bool resetCameraFrame = false;
     int loads = 0, renders = 0;
     std::optional<qint64> triangles;
+    preview::TriangleMetadata triangleMetadata;
+    QJsonObject texturePreviewMetrics;
+    QJsonObject loadTiming;
+    QJsonObject gltfImport;
+    QElapsedTimer loadClock;
+    bool firstFramePending=false;
+    QString publishedMaterialModel;
 };

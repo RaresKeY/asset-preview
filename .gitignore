@@ -7,3 +7,9 @@
 /release/
 /captures/*
 !/captures/.gitkeep
+
+# Local runtime snapshots, raw captures, profiling data and planning history.
+/.local/
+/evidence/
+/docs/plans/
+/TODO.md

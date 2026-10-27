@@ -12,7 +12,7 @@ enable materials and textures if it must remain independent of prior clay inspec
 Do not reset unrelated camera, lighting, grid, or other inspection choices.
 
 `defaults 3d '{"up_axis":"y","materials":true,"textures":true}'` changes only
-remembered options for future registrations; groups `image` and `video` also work.
+remembered options for future registrations; groups `image`, `audio` and `video` also work.
 Existing entries keep their settings. By comparison, `settings ID JSON` updates an
 entry and remembered defaults together. Reconnecting without explicit settings
 retains same-kind entry settings; a new entry inherits remembered preferences.
