@@ -3,7 +3,7 @@
 [Projects](projects.md) owns persistent agent grouping, chosen current previews,
 the interactive Projects grid and Overview grouping/filtering.
 
-Source ownership: `src/viewer.{h,cpp}`, `src/backend_loader.h`, `src/backend_abi.cpp`, `src/backend_abi_config.h.in`, `src/model_view.{h,cpp}`, `src/triangle_counts.h`, `src/dependency_metadata.h`, `src/video_view.{h,cpp}`, `src/video_controls.{h,cpp}`, `src/animation_controls.{h,cpp}`, `src/seek_slider.h`, `src/fullscreen_notice.{h,cpp}`, `src/audio_view.{h,cpp}`, `src/audio_visualizer.{h,cpp}`, `src/mpv_player.h`, preview/card/window paths in `src/service.cpp`,
+Source ownership: `src/viewer.{h,cpp}`, `src/backend_loader.h`, `src/backend_abi.cpp`, `src/backend_abi_config.h.in`, `src/model_view.{h,cpp}`, `src/triangle_counts.h`, `src/dependency_metadata.h`, `src/gl_framebuffer.h`, `src/video_view.{h,cpp}`, `src/video_controls.{h,cpp}`, `src/animation_controls.{h,cpp}`, `src/seek_slider.h`, `src/fullscreen_notice.{h,cpp}`, `src/audio_view.{h,cpp}`, `src/audio_visualizer.{h,cpp}`, `src/mpv_player.h`, preview/card/window paths in `src/service.cpp`,
 `examples/generate_cube.py`, `tests/integration.py`, `tools/ui_scenes.py`. Renderer decisions and dependency
 provenance are in [vendored/rendering.md](../vendored/rendering.md).
 
@@ -145,15 +145,34 @@ verifying that rejection preserves daemon and image-preview operation.
 The same lane also invokes a matching fixture through the real server, ensuring
 its compiled fingerprint agrees with the generated contract and permits factories.
 Images use QImageReader with a 4096-edge decode target and 64 MiB allocation limit,
-QPainter fit/zoom/pan and checker/dark/light/pixel options. Models and material samples
-use external-context F3D native/Assimp readers. Material sample geometry has normals
-and explicitly triangulated UV faces. The view is a native QOpenGLWindow embedded
-inside the main window, with explicit color/depth/blend initialization on each paint.
-There is no framebuffer copy loop; requested captures and a finite departure
-thumbnail may read GPU frames back before a visible view unloads.
+QPainter fit/zoom/pan and checker/dark/light/pixel options. Models and material
+samples use F3D native/Assimp readers on the shared render worker described in
+[Models](models.md). Material sample geometry has normals and explicitly
+triangulated UV faces. Each scene renders into its own offscreen context,
+preferring EGL on Linux/F3D4, and publishes completed image frames to a QWidget
+surface. Static scenes have no recurring frame copy/render loop. Component
+inspection and video retain embedded QOpenGLWindow surfaces. Startup explicitly
+requests desktop OpenGL 3.3 core, avoiding an incompatible default EGL API on
+Wayland. Requested native-surface captures render into a temporary color and
+depth/stencil framebuffer and read that target, avoiding unreliable native
+back-buffer readback between Wayland frames. VTK blits to the currently supplied
+target; mpv receives its framebuffer ID. The target is destroyed before its
+context is released. Captures are opaque; ordinary repainting retains no
+capture framebuffer or readback/cache loop.
 Baked color/normal/ORM maps apply to sphere/cube/plane geometry. F3D does not
-evaluate native Godot or Material Maker source. Models load on the OpenGL GUI thread;
-arbitrary-scene memory and import latency are not bounded by the file-size cap.
+evaluate native Godot or Material Maker source. Ordinary model imports run on
+the render worker; inspection imports remain on the GUI thread. Arbitrary-scene
+memory and import latency are not bounded by the file-size cap.
+
+`tools/test.sh wayland-gpu` uses a private KWin Wayland compositor inside
+Gamescope headless, using Gamescope's X server only for KWin's outer output;
+the application has no DISPLAY and uses KWin's Wayland socket. Gamescope alone
+lacks wl_subcompositor, which embedded video and inspection surfaces require.
+The check uses existing KWin/dbus-run-session; these are test prerequisites,
+not application dependencies. `tools/wayland-session.py` isolates its D-Bus,
+runtime/config/data/cache/state directories and child exit status; it does not
+replace or configure the desktop compositor. The lane verifies actual hardware
+rendering with DISPLAY removed. Existing XTest input checks retain `xcb`.
 
 Scroll zoom anchors images at the pointer, respecting the existing zoom limits.
 Model/material scroll zoom preserves the camera's focal point and orientation,

@@ -3,7 +3,7 @@
 [Projects](projects.md) owns persistent agent grouping, chosen current previews,
 the interactive Projects grid and Overview grouping/filtering.
 
-Owners: `src/preview_cache.*`, `src/preview_preload.*`, `src/overview_grid.*`, `src/thumbnail_job.*`, cache/layout routes in
+Owners: `src/preview_cache.*`, `src/preview_preload.*`, `src/overview_grid.*`, `src/thumbnail_queue.*`, `src/thumbnail_job.*`, cache/layout routes in
 `src/service.*`, image reuse in `src/viewer.*`, waveform reuse in
 `src/audio_view.cpp`. Verification: `tests/preview_cache.cpp`,
 `tests/overview_integration.py` and existing lifecycle lanes.
@@ -45,7 +45,14 @@ selection would show. It follows Settings > After Closing a Preview: left
 neighbor by default, or last viewed survivor; both fall back to the right neighbor
 when there is no left neighbor/history. An already visible target needs no worker.
 Overview, hidden/minimized windows, an empty registry and explicit cache clearing
-cancel publication. Clear does not immediately refill the cache.
+cancel publication. Clear does not immediately refill the cache. In Projects the
+same single preloader instead prepares the next member of the selected visible
+project (previous at its edge), following the last native arrow direction.
+It waits for visible previews to finish loading and never activates the neighbor.
+The project target must remain unchanged for 250 ms before starting; fast pointer
+motion cancels pending targets instead of decoding a full image for every pane.
+Clearing/hiding cancels this finite delay as well as the owned preload worker.
+
 
 One service-owned worker runs at a time, with one replacement target and
 cooperative cancellation between reads. It decodes supported standalone images
@@ -159,16 +166,54 @@ and checkbox clicks keep the overview open without activating any ordinary view.
 Ctrl+Space toggles the keyboard target. Checked state survives scrolling and
 layout changes; thumbnail refreshes do not reset it.
 
+Loaded thumbnails keep their memoized identities through overlapping scrolls,
+resizes and label/group changes. Source notifications revalidate visible paint
+keys together, so unrelated saves do not flash cached tiles to placeholders.
+The opaque viewport repaints completely after reflow to erase previous tile and
+header positions. Painting remains RAM-only and never validates or reads files.
+
+### Shared thumbnail scheduling
+
+`ThumbnailQueue`, owned by the existing Overview widget for the window lifetime,
+serves all layouts. It admits at most two independent image decodes plus one
+isolated model/material child. Workers run at nice 19 and idle I/O priority;
+model processes retain their independent hard-cancellation and resource limits.
+There is no queued thread backlog: slots are filled from current demand.
+
+Visible images lead visible models/materials. After 250 ms without a demand or
+source change, nearby project members precede the remaining open registrations.
+All 256 tiny thumbnails fit the existing 16 MiB subquota. Ordinary active views
+are excluded; they provide their own frame on departure. Warming pauses while
+ordinary views are loading or their generators are running. Background image
+work uses only one decode slot, reserving capacity for foreground arrivals.
+A newly visible model preempts the exact background child. A formerly visible
+model moved offscreen is cancelled and can retry as background after quiet.
+
+Source validation and cache hydration yield after at most four candidates or
+approximately 8 ms per GUI callback. Source identities deduplicate concurrent
+jobs across aliases. Successful frames enter the existing bounded shared cache;
+source/config/dependency fingerprints are checked again before publication.
+OBJ MTL membership changes refresh the dependency manifest even if the OBJ is
+unchanged. Failed identities are attempted once, cancelled identities can retry,
+and old attempt keys are pruned with the current bounded registration identities.
+
+Hiding/minimizing cancels the owned model group and cooperatively cancels raster
+publication, clears RAM through the ordinary service lifecycle, and stops finite
+dispatches. Clearing the cache suppresses background refill until demand changes;
+visible Overview tiles can still regenerate. Completion and invalidation are
+event-driven; settled queues have no polling, rendering or recurring work timer.
+Only visible loading tiles animate the existing spinner.
+
 On departure, a successfully displayed current preview contributes one frame
 before its visible engine/player is destroyed. GPU readback is finite and refused
 above a 16 MiB RGBA surface estimate; images reuse decoded pixels. No idle copies.
 Keys include source/dependency fingerprints and visual settings. Unknown-format
 dependency discovery remains best effort; thumbnails are navigation aids.
 
-Visible missing thumbnails prepare lazily, one job at a time at low priority.
+Missing thumbnails use the bounded lanes above.
 Self-contained raster inputs are limited to 16 MiB files and a 32 MiB decoded
 raster estimate, with 160×100 cached output. Unvisited models and material samples use
-one task-owned `--thumbnail-job` child of the prepared server binary, sharing the
+one task-owned `--thumbnail-job` child at a time of the prepared server binary, sharing the
 ordinary F3D importer/plugins, visual settings and camera conventions. It renders
 one offscreen 256×160 frame without opening a desktop window, playing animations,
 activating registrations or executing asset commands. The child runs at nice 19
@@ -186,29 +231,35 @@ reclaims up to 256 recognized private orphan jobs after an abrupt service exit.
 The child's application cache identity matches the service, so texture derivatives
 reuse the same bounded partition rather than creating a separate cache tree.
 
-Scrolling or resizing a tile away, filtering/removing/replacing its source, leaving Overview,
-hiding or minimizing cancels the exact owned child group and rejects stale output.
-Results recheck source/dependency/settings identity before publication. A failed or
-timed-out identity is attempted once until invalidation; cancellation can retry
-when visible again. Unvisited video/audio/graph and unsupported assets retain a
-kind placeholder until an ordinary view supplies a frame. No thumbnail starts a
-player or asset generator. Workers and single-shot dispatches settle without idle
-rendering/polling. `presentation.overview` reports the current thumbnail child,
-serial worker limit, completed renders, renderer identity and last render error.
+Removing/replacing a source, hiding or minimizing cancels the exact owned child
+and rejects stale outputs. Navigation updates demand without resetting cached
+pixels or selection; leaving Overview continues eligible quiet warming for the
+other layouts. Unvisited video/audio/graph and unsupported assets retain a kind
+placeholder until an ordinary view supplies a frame. Thumbnail jobs never start
+a player or asset generator.
 
-Only visible thumbnail sources/dependencies and nearest parent directories are
-watched; no recursive registry-wide scanning. `presentation.overview` exposes
-tile geometry, count and worker state for native verification.
+While visible, the service watches registered source files and nearest existing
+parents, with dependency watches limited to visible tiles and running thumbnail
+jobs. There is no recursive scan. Queue dirtiness is processed in bounded slices;
+unchanged identities do not rerun failed imports. `presentation.overview` retains
+tile geometry and model-child fields, and adds `image_workers`, `image_peak`,
+`image_worker_limit:2`, `render_worker_limit:1`, aggregate `worker_limit:3`,
+`decoded`, `targets`, `enabled` and `warming`. It remains available while the
+Overview widget is hidden so clients can observe warming in Projects/single.
+`visible_ready`/`foreground_active` separate viewport readiness from all-open
+warming; consumers need not wait for every background job before navigating.
 
-Initial/invalidated viewport work retains a 25 ms debounce. Successfully completed
-jobs dispatch the next visible thumbnail after a 1 ms yield, keeping serial
-low-priority work responsive without repeating the viewport debounce per tile.
-Cancellation, rejected results and failures retain the ordinary debounce.
-Viewport activity replaces any pending fast continuation and records its quiet
-period even during a worker job; completion respects a still-pending debounce.
-Hiding or minimized-window invalidation stops queued dispatch immediately.
-`tools/test.sh overview-dispatch` checks refresh during decoding and between jobs,
-hide/reentry and minimize/restore.
+Visible demand retains a 25 ms debounce; completion yields for 1 ms, with failures
+and rejected results using 25 ms. Background preparation has the separate 250 ms
+quiet period. A pending background deadline cannot delay a freed foreground
+slot, while a real demand/source debounce still protects its quiet period.
+Image job completion does not rebuild source watchers; visible/running model
+dependency changes use a separate coalesced notification.
+`tools/test.sh thumbnail-queue` verifies parallel lanes, priority,
+alias deduplication, preemption, freshness, hidden cleanup and clear/resume.
+`overview-dispatch` checks debounce, hide/minimize/reentry and cached-pixel
+stability. Native integration covers actual model/image overlap, all-open and
+Projects warming, predictive neighbor preload, cache limits and idle settling.
 
 Run `tools/test.sh preview-cache`, `overview`, `overview-gpu`, `functional` and
 the existing GPU lifecycle/texture lanes. Evidence goes under

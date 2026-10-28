@@ -22,6 +22,7 @@ int main(int argc,char** argv) {
     std::unique_ptr<QLockFile> lock;
     preview::CrashLog crash(preview::CrashLog::stateArgument(argc,argv));
     QSurfaceFormat format;
+    format.setRenderableType(QSurfaceFormat::OpenGL);
     format.setVersion(3,3); format.setProfile(QSurfaceFormat::CoreProfile);
     format.setDepthBufferSize(24); format.setStencilBufferSize(8); format.setSamples(0);
     QSurfaceFormat::setDefaultFormat(format);

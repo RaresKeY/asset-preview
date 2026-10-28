@@ -215,13 +215,15 @@ class OverviewIntegration(unittest.TestCase):
         path=self.image("left",1024); self.image("current"); self.image("other")
         self.rpc({"method":"select","id":"current"}); self.rpc({"method":"show"}); self.loaded("current")
         state=self.preloaded("left")
+        state=self.settled()
         self.assertEqual(state["active"],1); self.assertNotIn("metrics",self.row("left"))
         self.assertGreaterEqual(state["cache"]["bytes"],1024*1024*4)
         self.assertLessEqual(state["cache"]["bytes"],state["cache"]["limit"])
         sequence=state["cache"]["diagnostics"]["last_seq"]
         before=ticks(self.fixture.process.pid); time.sleep(.6)
         self.assertLessEqual(ticks(self.fixture.process.pid)-before,3)
-        self.assertEqual(self.rpc({"method":"list"})["cache"]["diagnostics"]["last_seq"],sequence)
+        self.assertEqual(self.rpc({"method":"list"})["cache"]["diagnostics"]["last_seq"],sequence,
+            self.rpc({'method':'cache','action':'events','after':sequence})['events'])
         png(path,(10,210,40,255),1024)
         harness.eventually(lambda:any(e["tier"]=="preload" and e["action"]=="complete" for e in
             self.rpc({"method":"cache","action":"events","after":sequence})["events"]))
@@ -245,6 +247,8 @@ class OverviewIntegration(unittest.TestCase):
         self.rpc({"method":"layout","layout":"overview"}); self.settled()
         self.assertEqual(self.rpc({"method":"list"})["preload"]["target"],"")
         self.rpc({"method":"layout","layout":"grid"})
+        harness.eventually(lambda:self.rpc({"method":"list"})["active"]==4,
+            description="finite grid admission before checking preload ownership")
         self.assertEqual(self.rpc({"method":"list"})["preload"]["target"],"","visible target needs no speculative decode")
 
     def test_return_preload_missing_large_and_model_without_generator(self):
@@ -374,7 +378,7 @@ class OverviewIntegration(unittest.TestCase):
         stopped=subprocess.run([str(harness.CLI),"cache","--json"],env=self.fixture.env,capture_output=True,text=True,check=True)
         self.assertEqual(json.loads(stopped.stdout),{"running":False})
 
-    def test_overview_lazy_viewport_generation_and_idle(self):
+    def test_overview_visible_priority_all_open_warming_and_idle(self):
         for i in range(80): self.image(f"image-{i}",color=(30+i*2,100,200,255))
         marker=self.root/"must-not-run"
         self.rpc({"method":"add","entry":{"id":"generator","path":str(self.root/"waiting.png"),"cwd":str(self.root),
@@ -383,7 +387,8 @@ class OverviewIntegration(unittest.TestCase):
         harness.eventually(lambda:self.rpc({"method":"list"})["cache"]["disk_entries"]>=4)
         state=self.settled(); overview=state["presentation"]["overview"]
         self.assertEqual(state["active"],0); self.assertEqual(overview["items"],81)
-        self.assertLess(len(overview["tiles"]),40); self.assertLess(state["cache"]["disk_entries"],40)
+        self.assertLess(len(overview["tiles"]),40); self.assertEqual(state["cache"]["disk_entries"],80)
+        self.assertEqual(overview['image_worker_limit'],2); self.assertEqual(overview['render_worker_limit'],1)
         self.assertLessEqual(state["cache"]["thumbnail_bytes"],16*1024*1024)
         self.assertFalse(marker.exists()); self.assertTrue(all(not r["building"] for r in state["entries"]))
         time.sleep(.2); before=ticks(self.fixture.process.pid); time.sleep(.6); after=ticks(self.fixture.process.pid)
@@ -412,7 +417,8 @@ class OverviewIntegration(unittest.TestCase):
         def finished():
             state=self.rpc({'method':'list'}); overview=state['presentation']['overview']
             self.assertEqual(state['active'],0)
-            self.assertEqual(overview['worker_limit'],1)
+            self.assertEqual(overview['worker_limit'],3)
+            self.assertEqual(overview['render_worker_limit'],1)
             if overview['worker_pid']: observed.add(int(overview['worker_pid']))
             self.assertTrue(all(not entry['building'] and 'metrics' not in entry for entry in state['entries']))
             return state if not overview['worker_active'] and overview['rendered']==3 else None
@@ -488,11 +494,92 @@ class OverviewIntegration(unittest.TestCase):
         input.x.XResizeWindow(input.display,input.window,1000,350); input.x.XFlush(input.display)
         harness.eventually(lambda:all(t['id']!='last-model' for t in self.rpc({'method':'list'})['presentation']['overview']['tiles']))
         harness.eventually(lambda:not Path(f'/proc/{child}').exists(),timeout=3,description='resize cancels the offscreen thumbnail')
-        state=self.settled(); self.assertEqual(state['presentation']['overview']['rendered'],0)
+        state=self.settled(); self.assertEqual(state['presentation']['overview']['rendered'],1,'quiet background warming retries the cancelled offscreen model')
         self.assertFalse(list((self.fixture.runtime/'thumbnail-jobs').iterdir()),'cancelled jobs remove their scratch')
         input.press('End')
         state=harness.eventually(lambda:s if (s:=self.rpc({'method':'list'}))['presentation']['overview']['rendered']==1 and not s['presentation']['overview']['worker_active'] else None,timeout=20)
         self.assertEqual(state['active'],0)
+
+    def test_projects_warm_registered_thumbnails_and_prefetch_neighbor_without_activating_them(self):
+        paths=[]
+        for index in range(24):paths.append(self.image(f'warm-{index}',project='warm-project'))
+        self.rpc({'method':'project','id':'warm-project','current':'warm-0'})
+        self.rpc({'method':'layout','layout':'projects'}); self.rpc({'method':'show'}); self.loaded('warm-0')
+        self.preloaded('warm-1')
+        state=self.settled(); overview=state['presentation']['overview']
+        self.assertFalse(overview['visible']); self.assertTrue(overview['warming'])
+        self.assertEqual(state['active'],1); self.assertEqual(overview['decoded'],23)
+        self.assertTrue(all(not e['active'] and 'metrics' not in e for e in state['entries'] if e['id']!='warm-0'))
+        before=overview['decoded']; png(paths[20],(200,80,40,255))
+        harness.eventually(lambda:self.rpc({'method':'list'})['presentation']['overview']['decoded']>before)
+        state=self.settled(); self.assertEqual(state['layout'],'projects'); self.assertEqual(state['selected'],'warm-0')
+        self.assertLessEqual(state['cache']['thumbnail_bytes'],16*1024*1024)
+        events=self.rpc({'method':'cache','action':'events','limit':128})['events']
+        generated=[e for e in events if e['tier']=='thumbnail' and e['action']=='generated']
+        self.assertTrue(generated); self.assertTrue(all(e['detail']['nice']==19 for e in generated))
+        self.rpc({'method':'cache','action':'clear'}); time.sleep(.35)
+        self.assertEqual(self.rpc({'method':'list'})['cache']['bytes'],0,'Completion callbacks must respect an explicit cache clear')
+        self.rpc({'method':'select','id':'warm-1','make_current':True}); self.loaded('warm-1'); self.preloaded('warm-2')
+        self.rpc({'method':'hide'}); time.sleep(.3)
+        state=self.rpc({'method':'list'}); self.assertEqual(state['cache']['bytes'],0)
+        self.assertFalse(state['presentation']['overview']['worker_active'])
+
+    def test_project_neighbor_prefetch_waits_for_a_settled_target(self):
+        for group in ('a','b'):
+            for index in range(2):self.image(f'{group}-{index}',1024,project=group)
+            self.rpc({'method':'project','id':group,'current':f'{group}-0'})
+        self.rpc({'method':'layout','layout':'projects'}); self.rpc({'method':'show'})
+        self.loaded('a-0'); self.loaded('b-0'); self.rpc({'method':'cache','action':'clear'})
+        for _ in range(5):
+            for key in ('a-0','b-0'):
+                self.rpc({'method':'select','id':key}); time.sleep(.03)
+        time.sleep(.05)
+        state=self.rpc({'method':'list'})
+        self.assertEqual(state['cache']['bytes'],0,'Sweeping across project panes must not decode every neighbor')
+        self.assertFalse(state['preload']['worker_active'])
+        self.preloaded('b-1')
+
+    @unittest.skipUnless(harness.GPU,harness.GPU_REASON)
+    def test_visible_image_refresh_continues_while_a_model_thumbnail_is_stopped(self):
+        self.rpc({'method':'add','entry':{'id':'slow','kind':'model','path':str(self.fixture.model)}})
+        paths=[self.image(f'parallel-{i}') for i in range(8)]
+        self.overview()
+        state=harness.eventually(lambda:s if (s:=self.rpc({'method':'list'}))['presentation']['overview']['worker_pid'] else None)
+        child=int(state['presentation']['overview']['worker_pid']); os.kill(child,signal.SIGSTOP)
+        self.addCleanup(lambda:os.kill(child,signal.SIGKILL) if Path(f'/proc/{child}').exists() else None)
+        harness.eventually(lambda:self.rpc({'method':'list'})['presentation']['overview']['decoded']==8)
+        before=8; png(paths[0],(210,70,50,255))
+        harness.eventually(lambda:self.rpc({'method':'list'})['presentation']['overview']['decoded']>before)
+        state=self.rpc({'method':'list'}); overview=state['presentation']['overview']
+        self.assertEqual(overview['worker_pid'],child); self.assertEqual(overview['image_peak'],2)
+        self.assertEqual(state['active'],0)
+        capture=self.root/'parallel-while-model-stopped.png'; self.rpc({'method':'capture','path':str(capture)})
+        tile=next(t for t in overview['tiles'] if t['id']=='parallel-0')
+        self.assertEqual(png_pixel(capture,tile['x']+tile['width']//2,tile['y']+40),(210,70,50))
+        self.rpc({'method':'hide'})
+        harness.eventually(lambda:not Path(f'/proc/{child}').exists())
+        self.assertEqual(self.rpc({'method':'list'})['cache']['bytes'],0)
+
+    @unittest.skipUnless(harness.GPU,harness.GPU_REASON)
+    def test_background_obj_manifest_revalidates_new_texture_membership_on_navigation(self):
+        self.image('current'); self.rpc({'method':'show'}); self.loaded('current')
+        first=self.root/'first-map.png'; second=self.root/'second-map.png'
+        png(first,(210,40,30,255)); png(second,(30,210,60,255))
+        mtl=self.root/'material.mtl'; mtl.write_text('newmtl paint\nKd 1 1 1\nmap_Kd first-map.png\n')
+        obj=self.root/'background.obj'
+        obj.write_text('mtllib material.mtl\nv -1 -1 0\nv 1 -1 0\nv 1 1 0\nv -1 1 0\n'
+            'vt 0 0\nvt 1 0\nvt 1 1\nvt 0 1\nusemtl paint\nf 1/1 2/2 3/3 4/4\n')
+        stamp=obj.stat().st_mtime_ns
+        self.rpc({'method':'add','entry':{'id':'background','path':str(obj),'kind':'model'}})
+        harness.eventually(lambda:self.rpc({'method':'list'})['presentation']['overview']['rendered']==1,timeout=25)
+        self.settled(); self.assertFalse(self.row('background')['active'])
+        mtl.write_text('newmtl paint\nKd 1 1 1\nmap_Kd second-map.png\n')
+        self.overview()
+        harness.eventually(lambda:self.rpc({'method':'list'})['presentation']['overview']['rendered']==2,timeout=25)
+        self.settled()
+        png(second,(60,40,210,255))
+        harness.eventually(lambda:self.rpc({'method':'list'})['presentation']['overview']['rendered']==3,timeout=25)
+        self.assertEqual(obj.stat().st_mtime_ns,stamp,'Manifest changes were tested without an OBJ save')
 
     def test_zoom_and_overview_save_failure_are_atomic(self):
         self.image("first"); self.image("second"); self.rpc({"method":"show"}); self.loaded("first")
@@ -581,6 +668,10 @@ class OverviewIntegration(unittest.TestCase):
         self.overview(); self.rpc({"method":"theme","mode":"dark"}); self.settled()
         self.rpc({"method":"capture","path":str(self.root/"overview-dark.png")})
         input.x.XResizeWindow.argtypes=[ctypes.c_void_p,ctypes.c_ulong,ctypes.c_uint,ctypes.c_uint]
+        input.x.XResizeWindow(input.display,input.window,1818,1024); input.x.XFlush(input.display)
+        harness.eventually(lambda:self.rpc({"method":"list"})["presentation"]["width"]==1818)
+        self.settled()
+        self.rpc({"method":"capture","path":str(self.root/"overview-wide.png")})
         input.x.XResizeWindow(input.display,input.window,540,380); input.x.XFlush(input.display); time.sleep(.3)
         self.rpc({"method":"capture","path":str(self.root/"overview-small.png")})
         self.assertGreaterEqual(self.rpc({"method":"list"})["presentation"]["overview"]["columns"],2)

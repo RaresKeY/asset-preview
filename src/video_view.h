@@ -30,6 +30,7 @@ private:
     void cleanup();
     void failed(const QString&);
     void change(QJsonObject);
+    void paintFrame(GLuint framebuffer);
     QJsonObject config;
     LoadedCallback loaded;
     SettingsCallback changed;

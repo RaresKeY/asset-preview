@@ -1,4 +1,5 @@
 #include "vtk_view.h"
+#include "../gl_framebuffer.h"
 #include "vtk_source.h"
 #include "matching.h"
 #include "../model_frame.h"
@@ -335,6 +336,7 @@ bool InspectionVtkView::load(QString& error) {
         next->window=vtkSmartPointer<vtkExternalOpenGLRenderWindow>::New();
         next->window->SetAutomaticWindowPositionAndResize(false);
         next->window->SetUseExternalContent(false);
+        next->window->SetFrameBlitModeToBlitToCurrent();
         next->window->SetMultiSamples(0);
         next->window->SetSize(std::max(1,int(width()*devicePixelRatio())),std::max(1,int(height()*devicePixelRatio())));
         next->window->SetMapped(true);
@@ -345,7 +347,9 @@ bool InspectionVtkView::load(QString& error) {
         callbacks->SetClientData(this);
         callbacks->SetCallback([](vtkObject*,unsigned long event,void* client,void* data) {
             auto* self=static_cast<InspectionVtkView*>(client);
-            if(event==vtkCommand::WindowMakeCurrentEvent) self->makeCurrent();
+            // Retain the caller's capture FBO (and Wayland EGL back buffer)
+            // when VTK asks to activate the context that is already current.
+            if(event==vtkCommand::WindowMakeCurrentEvent && QOpenGLContext::currentContext()!=self->context()) self->makeCurrent();
             if(event==vtkCommand::WindowIsCurrentEvent && data) *static_cast<bool*>(data)=QOpenGLContext::currentContext()==self->context();
             if(event==vtkCommand::WindowSupportsOpenGLEvent && data) *static_cast<int*>(data)=1;
             if(event==vtkCommand::WindowIsDirectEvent && data) *static_cast<int*>(data)=1;
@@ -434,10 +438,11 @@ void InspectionVtkView::options() {
 void InspectionVtkView::resizeGL(int w,int h) {
     if(scene) scene->window->SetSize(std::max(1,int(w*devicePixelRatio())),std::max(1,int(h*devicePixelRatio())));
 }
-void InspectionVtkView::paintGL() {
+void InspectionVtkView::paintGL() { paintFrame(defaultFramebufferObject()); }
+void InspectionVtkView::paintFrame(GLuint framebuffer) {
     ++renders;
     auto* f=context()->functions();
-    f->glBindFramebuffer(GL_FRAMEBUFFER,defaultFramebufferObject());
+    f->glBindFramebuffer(GL_FRAMEBUFFER,framebuffer);
     f->glViewport(0,0,int(width()*devicePixelRatio()),int(height()*devicePixelRatio()));
     f->glDisable(GL_SCISSOR_TEST); f->glEnable(GL_DEPTH_TEST); f->glDepthMask(GL_TRUE);
     f->glColorMask(GL_TRUE,GL_TRUE,GL_TRUE,GL_TRUE);
@@ -446,8 +451,7 @@ void InspectionVtkView::paintGL() {
     if(scene) { QuietVtk quiet; scene->window->GetState()->Reset(); scene->window->Render(); }
 }
 QImage InspectionVtkView::snapshot() {
-    if(!context()) return {};
-    makeCurrent(); paintGL(); const auto image=grabFramebuffer(); doneCurrent(); return image;
+    return preview::captureFramebuffer(*this,[this](GLuint framebuffer) { paintFrame(framebuffer); });
 }
 QJsonObject InspectionVtkView::cameraState() const {
     if(!scene) return {};

@@ -67,6 +67,15 @@ release players, renderers and owned generators using the ordinary lifecycle.
 No recurring grid timer or speculative renderer is created. Native captures clip
 preview snapshots/overlays to the scroll viewport.
 
+The window-owned thumbnail queue warms nearby members, then other open
+registrations after a quiet period, using two image slots and one finite model
+child. Active previews and their generators keep priority; loading pauses warming.
+A single predictive preloader warms the next/previous member of the selected
+visible project, following native arrow direction, without activating it.
+It waits for 250 ms on one target, so sweeping across panes does not prefetch
+every full image under the pointer.
+See [Cache and overview](cache-overview.md) for budgets, cancellation and metrics.
+
 Overview remains lightweight and activates no ordinary views. Grouping is a
 toggle; project filters apply in Overview and Projects. Grouped headers preserve
 project creation order, member registration order and put Ungrouped last. Flat

@@ -113,7 +113,9 @@ def main():
                     'preload':after['preload'],'performance':after.get('performance',{})}
                 report['phases'].append(item); print(json.dumps({k:v for k,v in item.items() if k not in ('cache','preload')}),flush=True)
                 return after
-            phase('overview-cold',lambda:rpc(path,{'method':'show'}),lambda s:not s['presentation']['overview']['worker_active'])
+            visible_ready=lambda s:s['presentation']['overview'].get('visible_ready',not s['presentation']['overview']['worker_active'])
+            phase('overview-cold',lambda:rpc(path,{'method':'show'}),visible_ready)
+            phase('overview-all-open-warm',lambda:None,lambda s:not s['presentation']['overview']['worker_active'])
             input=XInput()
             def hover():
                 overview=state_now()['presentation']['overview']; tiles=overview['tiles']
@@ -127,7 +129,7 @@ def main():
                 for i in range(40):
                     r=active[i%len(active)]['viewport']; input.motion(r['x']+r['width']//2,r['y']+r['height']//2); input.x.XFlush(input.display); time.sleep(.025)
             phase('projects-hover',project_hover)
-            phase('overview-return',lambda:rpc(path,{'method':'layout','layout':'overview'}),lambda s:not s['presentation']['overview']['worker_active'])
+            phase('overview-return',lambda:rpc(path,{'method':'layout','layout':'overview'}),visible_ready)
             phase('projects-warm-16',lambda:rpc(path,{'method':'layout','layout':'projects'}),loaded)
             phase('single-last',lambda:(rpc(path,{'method':'layout','layout':'single'}),rpc(path,{'method':'select','id':f'image-{args.count-1}'})),
                 lambda s:s['preload']['state'] in ('cached','skipped') and not s['preload']['worker_active'] and any(e['id']==s['selected'] and e.get('metrics',{}).get('loads',0)>0 and not e['metrics'].get('loading') for e in s['entries']))

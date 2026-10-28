@@ -414,6 +414,8 @@ private:
 
 Service::Service(QString sock, QString state) : socketPath(std::move(sock)), statePath(std::move(state)) {
     cache.setDiagnosticsDirectory(statePath);
+    projectPreloadDelay.setSingleShot(true); projectPreloadDelay.setInterval(250);
+    connect(&projectPreloadDelay,&QTimer::timeout,this,[this] { preloadReturnTarget(true); });
     qApp->installEventFilter(this);
     debounce.setSingleShot(true); debounce.setInterval(220);
     connect(&debounce, &QTimer::timeout, this, &Service::changed);
@@ -795,6 +797,7 @@ QJsonObject Service::add(QJsonObject config, bool restore, bool makeCurrent, con
         }
         if (inspectionId==id && !config.value("inspection").toObject()["enabled"].toBool()) inspectionId.clear();
         reconcile();
+        if(existing && window)window->refreshOverview();
     }
     return success({{"id",id}});
 }
@@ -932,7 +935,7 @@ QJsonObject Service::request(const QJsonObject& r) {
                     return failure("Cache events require limit 1..128 and a nonnegative integer after sequence");
                 auto result=cache.events(limit,quint64(after)); result["cache"]=cache.metrics(); return success(result);
             }
-            if (action=="clear") { preloader.target(); cache.clear(true); watchers(); if (window) window->refreshOverview(true); }
+            if (action=="clear") { projectPreloadDelay.stop(); preloader.target(); cache.clear(true); watchers(); if (window) window->refreshOverview(true); }
             return success({{"cache",cache.metrics()}});
         }
         if (method=="close_behavior") {
@@ -1310,7 +1313,7 @@ QJsonObject Service::request(const QJsonObject& r) {
             if (preview::frameChanged(old["settings"].toObject(),settings)) e->inspectionView.remove("camera");
             if (e->view) e->view->settings(config);
             if (e->card) status(*e,e->status);
-            if (window && window->overviewVisible()) { window->refreshOverview(); watchers(); }
+            if (window) { window->refreshOverview(); watchers(); }
             return success();
         }
         return failure("Unknown method");
@@ -1318,6 +1321,7 @@ QJsonObject Service::request(const QJsonObject& r) {
 }
 void Service::status(Entry& e, const QString& text) {
     e.status=text;
+    if(window)window->scheduleThumbnailPreparation();
     if (e.card) {
         auto* card=static_cast<PreviewCard*>(e.card);
         card->setStatus(text,text + (e.log.isEmpty()?"":"\n\n"+e.log));
@@ -1411,7 +1415,18 @@ void Service::watchers() {
         }
         e->stamps=retained;
     }
-    if (window && window->overviewVisible()) for (const auto& id:window->overviewIds()) {
+    if (window && window->isVisible() && !window->isMinimized()) {
+    // Warming watches registered source files/parents, never recursively scans.
+    // Dependency watches belong only to visible or currently running jobs.
+    for (const auto& id:order) {
+        const auto path=entries[id]->config["path"].toString();
+        if(QFileInfo(path).isFile())files.insert(path);
+        auto parent=QFileInfo(path).absolutePath();
+        while(!QFileInfo(parent).isDir() && parent!="/")parent=QFileInfo(parent).absolutePath();
+        dirs.insert(parent);
+    }
+    auto watched=window->overviewIds(); watched.append(window->thumbnailWorkingIds()); watched.removeDuplicates();
+    for (const auto& id:watched) {
         const auto e=entries.value(id); if (!e) continue;
         QStringList paths=e->thumbnailDependencies;
         paths.prepend(e->config["path"].toString());
@@ -1421,6 +1436,7 @@ void Service::watchers() {
             while (!QFileInfo(parent).isDir() && parent!="/") parent=QFileInfo(parent).absolutePath();
             dirs.insert(parent);
         }
+    }
     }
     for(const auto& path:preloader.targetPaths()) {
         if (QFileInfo(path).isFile()) files.insert(path);
@@ -1440,7 +1456,7 @@ void Service::watchers() {
     }
 }
 void Service::changed() {
-    if (window && window->overviewVisible()) window->refreshOverview();
+    if (window) window->refreshOverview();
     for (const auto& id:order) {
         auto e=entries[id]; if (!e->active) continue;
         bool dirty=false, source=false, output=false, reviewDirty=false;
@@ -1647,6 +1663,10 @@ QString Service::thumbnailKey(Entry& entry) {
     const auto path=entry.config["path"].toString();
     const auto source=preview::sourceCacheKey("overview-v1",path);
     if (source.isEmpty()) return {};
+    // OBJ texture membership can change without touching the OBJ itself.
+    // Refresh that bounded manifest before fingerprinting a background result.
+    if(entry.thumbnailSource==source)for(auto it=entry.thumbnailManifests.cbegin();it!=entry.thumbnailManifests.cend();++it)
+        if(stamp(it.key())!=it.value()) { entry.thumbnailSource.clear(); break; }
     if (entry.thumbnailSource!=source) {
         entry.thumbnailDependencies=dependencies(entry);
         entry.thumbnailSource=source;
@@ -1654,6 +1674,9 @@ QString Service::thumbnailKey(Entry& entry) {
         for (const auto& p:entry.thumbnailDependencies) bytes+=p.toUtf8().size();
         entry.thumbnailUnavailable=entry.thumbnailDependencies.size()>64 || bytes>16*1024;
         if (entry.thumbnailUnavailable) entry.thumbnailDependencies.clear();
+        entry.thumbnailManifests.clear();
+        for(const auto& dependency:entry.thumbnailDependencies)
+            if(dependency.endsWith(".mtl",Qt::CaseInsensitive))entry.thumbnailManifests[dependency]=stamp(dependency);
         if (!entry.active) { entry.dependencyMetadata.clear(); entry.imageCoverage.clear(); }
     }
     if (entry.thumbnailUnavailable) return {};
@@ -1698,10 +1721,34 @@ QString Service::closeTarget(const QString& id) const {
             if (*it!=id && entries.contains(*it)) return *it;
     return order.value(index>0?index-1:1);
 }
-void Service::preloadReturnTarget() {
-    const auto id=closeTarget(selected); const auto entry=entries.value(id);
-    if (!window || !window->isVisible() || window->isMinimized() || (layout=="overview" || layout=="projects") || !entry || entry->active) {
+void Service::preloadReturnTarget(bool settled) {
+    auto id=closeTarget(selected);
+    if(layout!="projects") { projectPreloadDelay.stop(); pendingProjectPreload.clear(); }
+    if(layout=="projects") {
+        id.clear(); const auto current=entries.value(selected);
+        if(current && current->active && !current->config.value("project").toString().isEmpty()) {
+            QStringList members; const auto group=current->config.value("project").toString();
+            for(const auto& key:order)if(entries[key]->config.value("project").toString()==group)members.append(key);
+            const int at=members.indexOf(selected),next=at+projectDirection,other=at-projectDirection;
+            if(next>=0 && next<members.size())id=members[next];
+            else if(other>=0 && other<members.size())id=members[other];
+        }
+        for(const auto& entry:entries)if(entry->active && ((entry->view && entry->view->loading()) ||
+            (entry->process && entry->process->state()!=QProcess::NotRunning)))id.clear();
+    }
+    const auto entry=entries.value(id);
+    if (!window || !window->isVisible() || window->isMinimized() || layout=="overview" || !entry || entry->active) {
+        projectPreloadDelay.stop(); pendingProjectPreload.clear();
         preloader.target(); return;
+    }
+    if(layout=="projects") {
+        if(settled && pendingProjectPreload!=id)return;
+        if(!settled && preloader.targetId()!=id) {
+            if(pendingProjectPreload!=id) {
+                preloader.target(); pendingProjectPreload=id; projectPreloadDelay.start();
+            }
+            return;
+        }
     }
     preloader.target(id,entry->config["kind"].toString(),entry->config["path"].toString(),dependencies(*entry));
 }
@@ -1777,6 +1824,7 @@ void Service::reconcile() {
     if (!window || !window->isVisible() || window->isMinimized()) cache.clear(false,"hidden");
     else cache.trimForPressure();
     preloadReturnTarget();
+    if(window)window->prepareThumbnails();
     watchers();
 #if defined(__GLIBC__)
     if (releasedViews && visible.isEmpty()) {
@@ -2056,7 +2104,11 @@ PreviewWindow::PreviewWindow(Service* s) : service(s) {
     };
     overview->selected=[this](const QString& id) { selectCard(id); };
     overview->marked=[this](const QString& id,Qt::KeyboardModifiers modifiers) { markCard(id,modifiers); };
-    overview->viewportChanged=[this] { QTimer::singleShot(0,service,&Service::watchers); };
+    overview->viewportChanged=[this] {
+        if(thumbnailWatchScheduled)return;
+        thumbnailWatchScheduled=true;
+        QTimer::singleShot(0,this,[this] { thumbnailWatchScheduled=false; service->watchers(); });
+    };
     vertical->addWidget(canvas,1); setCentralWidget(central);
     statusBar()->showMessage("Drag files to add · Left / Right to switch · close to suspend");
     connect(statusBar(),&QStatusBar::messageChanged,this,[this](const QString& message) {
@@ -2088,7 +2140,9 @@ PreviewWindow::PreviewWindow(Service* s) : service(s) {
             if (target.isEmpty()) return;
             // Unload the hovered native surface only after moving focus away.
             canvas->setFocus(Qt::OtherFocusReason);
+            const int previousDirection=service->projectDirection; service->projectDirection=delta;
             const auto result=service->request({{"method","select"},{"id",target},{"make_current",true}});
+            if(!result["ok"].toBool())service->projectDirection=previousDirection;
             const auto entry=service->entries.value(service->selected);
             if (entry && entry->surface) entry->surface->setFocus(Qt::OtherFocusReason);
             if (!result["ok"].toBool()) reportError(result["error"].toString());
@@ -2569,10 +2623,44 @@ bool PreviewWindow::overviewVisible() const { return overview && overview->isVis
 QStringList PreviewWindow::overviewIds() const { return overviewVisible()?overview->visibleIds():QStringList{}; }
 void PreviewWindow::refreshOverview(bool reset) {
     if (!overview) return;
-    for (const auto& id:overviewIds()) if (const auto e=service->entries.value(id)) {
+    auto ids=overviewIds(); ids.append(thumbnailWorkingIds()); ids.removeDuplicates();
+    for (const auto& id:ids) if (const auto e=service->entries.value(id)) {
         e->thumbnailSource.clear(); service->thumbnailKey(*e);
     }
     if (reset) overview->invalidate(); else overview->refresh();
+}
+QStringList PreviewWindow::thumbnailWorkingIds() const { return overview?overview->workingIds():QStringList{}; }
+void PreviewWindow::scheduleThumbnailPreparation() {
+    if(thumbnailPrepareScheduled)return;
+    thumbnailPrepareScheduled=true;
+    QTimer::singleShot(0,this,[this] {
+        thumbnailPrepareScheduled=false; prepareThumbnails();
+        if(service->layout=="projects") {
+            if(overview->backgroundAllowed())service->preloadReturnTarget();
+            else service->preloader.target();
+        }
+    });
+}
+void PreviewWindow::prepareThumbnails() {
+    if(!overview)return;
+    const bool enabled=isVisible() && !isMinimized();
+    bool ready=enabled && !service->activationScheduled;
+    QSet<QString> active; QStringList nearby;
+    QList<OverviewGrid::Item> all;
+    for(const auto& id:service->order) {
+        const auto entry=service->entries.value(id); const auto& config=entry->config;
+        all.append({id,config["label"].toString(),config["path"].toString(),config["kind"].toString(),{}, {}});
+        if(!entry->active)continue;
+        active.insert(id);
+        ready &= !entry->view || !entry->view->loading();
+        ready &= !entry->process || entry->process->state()==QProcess::NotRunning;
+        const auto group=config["project"].toString(); QStringList members;
+        for(const auto& member:service->order)if(service->entries[member]->config.value("project").toString()==group)members.append(member);
+        const int at=members.indexOf(id);
+        if(at+1<members.size())nearby.append(members[at+1]);
+        if(at>0)nearby.append(members[at-1]);
+    }
+    overview->warmItems(std::move(all),std::move(nearby),std::move(active),ready,enabled);
 }
 void PreviewWindow::selectCard(const QString& id) {
     if (id==service->selected || !service->entries.contains(id)) return;

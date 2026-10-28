@@ -4,12 +4,24 @@ preview_project_root="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)"
 preview_test_mode="${1:-functional}"
 if (( $# )); then shift; fi
 case "$preview_test_mode" in
+    thumbnail-queue)
+        preview_test_directory="$(mktemp -d /tmp/asset-preview-thumbnails.XXXXXX)"
+        trap 'rm -rf -- "$preview_test_directory"' EXIT
+        read -r -a preview_qt_flags <<< "$(pkg-config --cflags --libs Qt6Widgets)"
+        c++ -std=c++20 -O2 -fPIC -Wall -Wextra -Werror -I"$preview_project_root/src" \
+            "$preview_project_root/tests/thumbnail_queue.cpp" "$preview_project_root/src/thumbnail_queue.cpp" \
+            "$preview_project_root/src/preview_cache.cpp" "$preview_project_root/src/cache_diagnostics.cpp" \
+            -o "$preview_test_directory/thumbnail-check" "${preview_qt_flags[@]}"
+        QT_QPA_PLATFORM=offscreen "$preview_test_directory/thumbnail-check"
+        ;;
+    wayland-gpu) exec env ASSET_PREVIEW_TEST_PLATFORM=wayland "$preview_project_root/tools/offscreen.sh" python "$preview_project_root/tools/wayland-session.py" python "$preview_project_root/tests/wayland_integration.py" "$@" ;;
     overview-dispatch)
         preview_test_directory="$(mktemp -d /tmp/asset-preview-dispatch.XXXXXX)"
         trap 'rm -rf -- "$preview_test_directory"' EXIT
         read -r -a preview_qt_flags <<< "$(pkg-config --cflags --libs Qt6Widgets)"
         c++ -std=c++20 -O2 -fPIC -Wall -Wextra -Werror -I"$preview_project_root/src" \
             "$preview_project_root/tests/overview_dispatch.cpp" "$preview_project_root/src/overview_grid.cpp" \
+            "$preview_project_root/src/thumbnail_queue.cpp" \
             "$preview_project_root/src/preview_cache.cpp" "$preview_project_root/src/cache_diagnostics.cpp" \
             -o "$preview_test_directory/dispatch-check" "${preview_qt_flags[@]}"
         QT_QPA_PLATFORM=offscreen "$preview_test_directory/dispatch-check"
@@ -175,5 +187,5 @@ case "$preview_test_mode" in
     optimization-gpu) exec "$preview_project_root/tools/offscreen.sh" env ASSET_PREVIEW_GPU_TEST=1 python "$preview_project_root/tests/optimization_integration.py" "$@" ;;
     functional) QT_QPA_PLATFORM=offscreen python "$preview_project_root/tests/integration.py" "$@" ;;
     gpu) exec "$preview_project_root/tools/offscreen.sh" env ASSET_PREVIEW_GPU_TEST=1 python "$preview_project_root/tests/integration.py" "$@" ;;
-    *) printf 'Usage: %s [functional|overview-dispatch|async-loading|model-snapshot-gpu|responsiveness|responsiveness-gpu|crash-logging|gpu|projects|projects-gpu|overview|overview-gpu|preview-cache|cache-diagnostics|terminal-gpu|backend-compatibility|references-gpu|compact-gpu|reference-media-gpu|codex-origin|material-model|audio-waveform|animation|animation-gpu|video-controls|metadata|texture-preview|gltf-import|placement|inspection-document|inspection-cli|inspection-matching|inspection-panel|packaged|theme|theme-gpu|optimization|optimization-gpu] [unittest arguments]\n' "$0" >&2; exit 2 ;;
+    *) printf 'Usage: %s [functional|thumbnail-queue|wayland-gpu|overview-dispatch|async-loading|model-snapshot-gpu|responsiveness|responsiveness-gpu|crash-logging|gpu|projects|projects-gpu|overview|overview-gpu|preview-cache|cache-diagnostics|terminal-gpu|backend-compatibility|references-gpu|compact-gpu|reference-media-gpu|codex-origin|material-model|audio-waveform|animation|animation-gpu|video-controls|metadata|texture-preview|gltf-import|placement|inspection-document|inspection-cli|inspection-matching|inspection-panel|packaged|theme|theme-gpu|optimization|optimization-gpu] [unittest arguments]\n' "$0" >&2; exit 2 ;;
 esac

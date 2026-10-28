@@ -1,72 +1,41 @@
 #include "overview_grid.h"
+#include "thumbnail_queue.h"
 #include "project_identity.h"
-#include <QImageReader>
-#include <QCoreApplication>
-#include <QDir>
-#include <QFile>
-#include <QElapsedTimer>
 #include <QJsonArray>
-#include <QJsonDocument>
 #include <QKeyEvent>
 #include <QMouseEvent>
 #include <QPainter>
 #include <QPaintEvent>
-#include <QPointer>
-#include <QProcess>
-#include <QProcessEnvironment>
-#include <QRunnable>
 #include <QScrollBar>
 #include <QStyle>
 #include <QStyleOptionButton>
 #include <QToolTip>
 #include <QTimer>
-#include <QTemporaryDir>
-#include <QThread>
 #include <algorithm>
-#include <csignal>
-#include <sys/prctl.h>
-#include <unistd.h>
 
-namespace {
-constexpr int Gap=12,TileWidth=172,TileHeight=146;
-QImage smallImage(const QString& path) {
-    // Refuse expensive inputs; already-opened large assets use their saved frame.
-    if (QFileInfo(path).size()>16*1024*1024 || !QFileInfo(path).isFile()) return {};
-    QImageReader reader(path); reader.setAutoTransform(true);
-    static const QSet<QByteArray> formats{"png","jpeg","webp","bmp","tiff"};
-    if (!formats.contains(reader.format().toLower())) return {};
-    const auto size=reader.size();
-    const auto format=reader.imageFormat();
-    const int pixelBytes=format==QImage::Format_Invalid?16:std::max(4,int(QImage::toPixelFormat(format).bitsPerPixel()+7)/8);
-    if (!size.isValid() || qint64(size.width())*size.height()*pixelBytes>32*1024*1024) return {};
-    reader.setScaledSize(size.scaled(256,160,Qt::KeepAspectRatio));
-    return reader.read().convertToFormat(QImage::Format_RGBA8888);
-}
-}
-OverviewGrid::OverviewGrid(preview::PreviewCache* store,const QString& jobDirectory,QWidget* parent):QAbstractScrollArea(parent),cache(store),renderRoot(jobDirectory) {
+namespace { constexpr int Gap=12,TileWidth=172,TileHeight=146; }
+OverviewGrid::OverviewGrid(preview::PreviewCache* store,const QString& jobDirectory,QWidget* parent):QAbstractScrollArea(parent),cache(store),queue(new ThumbnailQueue(store,jobDirectory,this)) {
     setObjectName("overviewGrid"); setFrameShape(QFrame::NoFrame);
     setFocusPolicy(Qt::StrongFocus); setAccessibleName("All open previews");
-    viewport()->setMouseTracking(true); worker.setMaxThreadCount(1); worker.setExpiryTimeout(1000);
-    worker.setThreadPriority(QThread::LowPriority);
-    dispatch.setSingleShot(true);
-    connect(&dispatch,&QTimer::timeout,this,[this] { work(); });
+    viewport()->setAttribute(Qt::WA_OpaquePaintEvent); viewport()->setMouseTracking(true);
+    queue->keyFor=[this](const QString& id) { return keyFor?keyFor(id):QString(); };
+    queue->configFor=[this](const QString& id) { return configFor?configFor(id):QJsonObject{}; };
+    queue->changed=[this](const QString& id,const QString& key) {
+        if(isVisible() && visibleIds().contains(id)) { keys[id]=key; updateTile(id); }
+    };
+    queue->activityChanged=[this] { thumbnailState(); };
+    queue->sourcesChanged=[this] { if(viewportChanged)viewportChanged(); };
     spinner.setInterval(80);
     connect(&spinner,&QTimer::timeout,this,[this] {
         spinAngle=(spinAngle+30)%360;
-        for(int i=0;i<items.size();++i)if(items[i].id==loadingId) { viewport()->update(tile(i)); break; }
+        for(const auto& id:loading)updateTile(id);
     });
-    renderDeadline=new QTimer(this); renderDeadline->setSingleShot(true);
-    connect(renderDeadline,&QTimer::timeout,this,[this] { renderTimedOut=true; cancelRender(); });
     connect(verticalScrollBar(),&QScrollBar::valueChanged,this,[this] {
-        keys.clear();
-        if (!renderingId.isEmpty() && !visibleIds().contains(renderingId)) cancelRender();
-        viewport()->update(); schedule(); if (viewportChanged) viewportChanged();
+        pruneKeys(); viewport()->update(); syncDemand(); if(viewportChanged)viewportChanged();
     });
 }
 OverviewGrid::~OverviewGrid() {
-    ++epoch; dispatch.stop(); cancelRender();
-    if (renderWorker) { renderWorker->disconnect(this); renderWorker->waitForFinished(1000); }
-    worker.clear(); worker.waitForDone();
+    queue->changed={}; queue->activityChanged={}; queue->sourcesChanged={}; delete queue;
 }
 int OverviewGrid::columns() const { return std::max(1,(viewport()->width()-Gap)/(TileWidth+Gap)); }
 QRect OverviewGrid::tile(int i) const {
@@ -84,10 +53,22 @@ void OverviewGrid::setItems(QList<Item> next,const QString& id,bool groups) {
     bool changed=items.size()!=next.size() || grouped!=groups;
     grouped=groups;
     if (!changed) for (int i=0;i<items.size();++i) if (items[i].id!=next[i].id || items[i].path!=next[i].path || items[i].label!=next[i].label || items[i].kind!=next[i].kind || items[i].project!=next[i].project || items[i].projectLabel!=next[i].projectLabel) { changed=true; break; }
-    if (changed) { items=std::move(next); keys.clear(); attempted.clear(); ++epoch; cancelRender(); reflow(); viewport()->update(); }
+    if (changed) {
+        QMap<QString,QString> retained;
+        for (const auto& item:next) for (const auto& previous:items)
+            if (item.id==previous.id && item.path==previous.path && item.kind==previous.kind && keys.contains(item.id)) {
+                retained.insert(item.id,keys.value(item.id)); break;
+            }
+        items=std::move(next); keys=std::move(retained); reflow();
+    }
     QString target=id;
     if (std::none_of(items.begin(),items.end(),[&](const auto& item) { return item.id==target; })) target=items.isEmpty()?QString():items.first().id;
-    select(target); schedule();
+    if(!hasWarmItems) {
+        QList<ThumbnailQueue::Item> targets;
+        for(const auto& item:items)targets.append({item.id,item.path,item.kind});
+        queue->setItems(targets);
+    }
+    select(target); syncDemand();
 }
 void OverviewGrid::select(const QString& id,bool reveal) {
     const auto previous=current;
@@ -119,11 +100,21 @@ void OverviewGrid::reflow() {
     if (col) y+=TileHeight+Gap;
     verticalScrollBar()->setPageStep(viewport()->height()); verticalScrollBar()->setSingleStep(TileHeight+Gap);
     verticalScrollBar()->setRange(0,std::max(0,y-viewport()->height()));
+    pruneKeys();
+    // Reflow can move every tile/header, including inside an existing viewport.
+    viewport()->update();
 }
 QStringList OverviewGrid::visibleIds() const {
     QStringList ids;
     for (int i=0;i<items.size();++i) if (tile(i).intersects(viewport()->rect())) ids.append(items[i].id);
     return ids;
+}
+void OverviewGrid::pruneKeys() {
+    // Sources are watched only while visible; validate them anew on return.
+    const auto visible=visibleIds();
+    for (auto it=keys.begin();it!=keys.end();) {
+        if (!visible.contains(it.key())) it=keys.erase(it); else ++it;
+    }
 }
 void OverviewGrid::paintEvent(QPaintEvent* event) {
     QPainter p(viewport()); p.setRenderHint(QPainter::Antialiasing);
@@ -151,7 +142,7 @@ void OverviewGrid::paintEvent(QPaintEvent* event) {
         } else {
             p.setPen(pal.color(QPalette::PlaceholderText)); auto font=p.font(); font.setBold(true); p.setFont(font);
             p.drawText(imageArea,Qt::AlignCenter,item.kind=="image"?"Image":item.kind=="model"?"3D":item.kind=="material"?"Material":item.kind=="audio"?"Audio":item.kind=="video"?"Video":"Graph");
-            if(item.id==loadingId) {
+            if(loading.contains(item.id)) {
                 p.setPen(QPen(pal.color(QPalette::Highlight),2,Qt::SolidLine,Qt::RoundCap));
                 p.drawArc(QRectF(imageArea.right()-20,imageArea.bottom()-20,14,14),-spinAngle*16,250*16);
             }
@@ -169,133 +160,38 @@ void OverviewGrid::paintEvent(QPaintEvent* event) {
         style()->drawPrimitive(QStyle::PE_IndicatorCheckBox,&option,&p,this);
     }
 }
-void OverviewGrid::schedule(int delay) {
-    if (!isVisible() || window()->isMinimized()) { dispatch.stop(); return; }
-    // Viewport activity replaces an earlier continuation, including while a
-    // worker is busy. Its completion must respect the remaining quiet period.
-    // A timeout during that worker simply settles; completion schedules anew.
-    if(delay==25 || !dispatch.isActive())dispatch.start(delay);
+void OverviewGrid::warmItems(QList<Item> all,QStringList next,QSet<QString> shown,bool ready,bool enabled) {
+    hasWarmItems=true; nearby=std::move(next); active=std::move(shown); warmReady=ready; warmEnabled=enabled;
+    QList<ThumbnailQueue::Item> targets;
+    for(const auto& item:all)targets.append({item.id,item.path,item.kind});
+    queue->setItems(targets); syncDemand();
 }
-void OverviewGrid::work() {
-    if (busy || !isVisible() || window()->isMinimized()) return;
-    for (int i=0;i<items.size();++i) {
-        if (!tile(i).intersects(viewport()->rect())) continue;
-        const auto item=items[i];
-        if(!keys.contains(item.id)) { keys[item.id]=keyFor?keyFor(item.id):QString(); viewport()->update(tile(i)); }
-        const auto key=keys.value(item.id);
-        if (key.isEmpty() || attempted.value(item.id)==key) continue;
-        attempted.insert(item.id,key);
-        if (!cache->thumbnail(key).isNull()) { viewport()->update(tile(i)); continue; }
-        if (item.kind=="model" || item.kind=="material") {
-            if (cache->allowsPreload()) render(item,key);
-            if (busy) return;
-            continue;
-        }
-        if (item.kind!="image") continue;
-        busy=true; loadingId=item.id; spinner.start(); viewport()->update(tile(i));
-        const int token=epoch; QPointer<OverviewGrid> guard(this);
-        const auto source=preview::sourceCacheKey("thumbnail-source-v1",item.path);
-        worker.start(QRunnable::create([guard,item,key,source,token] {
-            QElapsedTimer timer; timer.start();
-            auto image=smallImage(item.path);
-            if (source!=preview::sourceCacheKey("thumbnail-source-v1",item.path)) image={};
-            const auto elapsedUs=timer.nsecsElapsed()/1000;
-            if (!guard) return;
-            QMetaObject::invokeMethod(guard,[guard,item,key,token,elapsedUs,image=std::move(image)]() mutable {
-                if (!guard) return;
-                guard->busy=false;
-                guard->loadingId.clear(); guard->spinner.stop();
-                const bool publish=token==guard->epoch && guard->isVisible() && !guard->window()->isMinimized() &&
-                    guard->visibleIds().contains(item.id) && guard->keyFor && guard->keyFor(item.id)==key && !image.isNull();
-                if (!publish && !image.isNull()) guard->attempted.remove(item.id);
-                guard->cache->observe("thumbnail",publish?"generated":image.isNull()?"skipped":"discarded",key,image.sizeInBytes(),
-                    publish?"visible":image.isNull()?"bounded_or_failed":"hidden_or_replaced",elapsedUs);
-                if (publish)
-                    guard->cache->putThumbnail(key,std::move(image));
-                // Yield to input between jobs without debouncing an already
-                // settled viewport again for every completed thumbnail.
-                guard->updateTile(item.id); guard->schedule(publish?1:25);
-            },Qt::QueuedConnection);
-        }));
-        return;
-    }
+QStringList OverviewGrid::workingIds() const { return queue->workingIds(); }
+bool OverviewGrid::backgroundAllowed() const { return queue->backgroundAllowed(); }
+void OverviewGrid::syncDemand() {
+    const bool enabled=window()->isVisible() && !window()->isMinimized();
+    queue->demand(isVisible()?visibleIds():QStringList{},nearby,active,
+        enabled && (isVisible() || (hasWarmItems && warmEnabled)),hasWarmItems && warmReady && warmEnabled);
+    thumbnailState();
 }
-void OverviewGrid::render(const Item& item,const QString& key) {
-    const auto config=configFor?configFor(item.id):QJsonObject{};
-    const QFileInfo source(item.path);
-    const auto request=QJsonDocument(config).toJson(QJsonDocument::Compact);
-    if (config.isEmpty() || renderRoot.isEmpty() || !source.isFile() || source.size()>256*1024*1024 || request.size()>64*1024) return;
-    renderDirectory=std::make_unique<QTemporaryDir>(renderRoot+"/job-XXXXXX");
-    if (!renderDirectory->isValid()) { renderDirectory.reset(); return; }
-    QFile input(renderDirectory->filePath("request.json"));
-    if (!input.open(QIODevice::WriteOnly) || input.write(request)!=request.size()) { renderDirectory.reset(); return; }
-    input.close();
-    busy=true; renderCancelled=false; renderTimedOut=false; renderingId=item.id; renderingKey=key;
-    loadingId=item.id; spinner.start(); updateTile(item.id);
-    const int token=epoch;
-    auto* process=new QProcess(this); renderWorker=process;
-    process->setChildProcessModifier([owner=::getpid()] {
-        if (::setsid()<0 || ::prctl(PR_SET_PDEATHSIG,SIGKILL)<0 || ::getppid()!=owner) _exit(126);
-    });
-    auto environment=QProcessEnvironment::systemEnvironment();
-    environment.insert("TMPDIR",renderDirectory->path());
-    process->setProcessEnvironment(environment);
-    process->setStandardOutputFile(QProcess::nullDevice()); process->setStandardErrorFile(QProcess::nullDevice());
-    auto elapsed=std::make_shared<QElapsedTimer>(); elapsed->start();
-    auto finish=[this,process,item,key,token,elapsed](bool success) {
-        if (renderWorker!=process) return;
-        renderDeadline->stop();
-        QFile receipt(renderDirectory->filePath("result.json"));
-        QJsonObject details;
-        if (receipt.open(QIODevice::ReadOnly) && receipt.size()<=4096) details=QJsonDocument::fromJson(receipt.readAll()).object();
-        QImage image;
-        const auto path=renderDirectory->filePath("thumbnail.png");
-        if (success && QFileInfo(path).size()<=256*1024) image=smallImage(path);
-        const bool publish=!renderCancelled && token==epoch && isVisible() && !window()->isMinimized() &&
-            visibleIds().contains(item.id) && keyFor && keyFor(item.id)==key && !image.isNull();
-        if ((renderCancelled && !renderTimedOut) || (!publish && !image.isNull())) attempted.remove(item.id);
-        if (!details["renderer"].toString().isEmpty()) lastRenderer=details["renderer"].toString();
-        lastRenderError=details["error"].toString();
-        if (!success && !renderCancelled && lastRenderError.isEmpty()) lastRenderError="Thumbnail worker failed";
-        if (renderTimedOut) lastRenderError="Thumbnail timed out";
-        cache->observe("thumbnail",publish?"generated":image.isNull()?"skipped":"discarded",key,image.sizeInBytes(),
-            publish?"visible_model":renderTimedOut?"timeout":renderCancelled?"cancelled":image.isNull()?"bounded_or_failed":"hidden_or_replaced",elapsed->nsecsElapsed()/1000,details);
-        if (publish) { cache->putThumbnail(key,std::move(image)); ++rendered; }
-        renderWorker.clear(); renderDirectory.reset(); renderingId.clear(); renderingKey.clear(); busy=false;
-        loadingId.clear(); spinner.stop();
-        process->deleteLater(); updateTile(item.id); schedule(publish?1:25);
-    };
-    connect(process,qOverload<int,QProcess::ExitStatus>(&QProcess::finished),this,[finish](int code,QProcess::ExitStatus status) {
-        finish(code==0 && status==QProcess::NormalExit);
-    });
-    connect(process,&QProcess::errorOccurred,this,[finish](QProcess::ProcessError error) { if (error==QProcess::FailedToStart) finish(false); });
-    renderDeadline->start(30000);
-    process->start(QCoreApplication::applicationFilePath(),{"--thumbnail-job",renderDirectory->path()});
-    if (viewportChanged) viewportChanged();
+void OverviewGrid::thumbnailState() {
+    const auto previous=loading; loading=queue->loadingIds();
+    const auto visible=visibleIds(); bool animate=false;
+    for(const auto& id:loading)if(isVisible() && visible.contains(id)) { animate=true; break; }
+    if(animate && !spinner.isActive())spinner.start(); else if(!animate)spinner.stop();
+    for(const auto& id:previous-loading)updateTile(id);
+    for(const auto& id:loading-previous)updateTile(id);
 }
-void OverviewGrid::cancelRender() {
-    if (!renderWorker) return;
-    renderCancelled=true; renderDeadline->stop();
-    const auto pid=renderWorker->processId();
-    if (pid>0) ::kill(-pid,SIGKILL);
-    renderWorker->kill();
-}
-void OverviewGrid::invalidate() { keys.clear(); attempted.clear(); ++epoch; cancelRender(); viewport()->update(); schedule(); }
+void OverviewGrid::invalidate() { keys.clear(); queue->refresh(true); viewport()->update(); syncDemand(); }
 void OverviewGrid::refresh() {
-    keys.clear();
-    // Directory notifications can be unrelated to any registered source. Do
-    // not restart an unchanged import or retry a failed identity on each one.
-    if (renderWorker && keyFor && keyFor(renderingId)!=renderingKey) cancelRender();
-    viewport()->update(); schedule();
+    if(isVisible())for(const auto& id:visibleIds())keys[id]=keyFor?keyFor(id):QString();
+    pruneKeys(); queue->refresh(); viewport()->update(); syncDemand();
 }
 void OverviewGrid::resizeEvent(QResizeEvent* e) {
-    keys.clear();
-    QAbstractScrollArea::resizeEvent(e); reflow();
-    if (!renderingId.isEmpty() && !visibleIds().contains(renderingId)) cancelRender();
-    schedule(); if (viewportChanged) viewportChanged();
+    QAbstractScrollArea::resizeEvent(e); reflow(); syncDemand(); if(viewportChanged)viewportChanged();
 }
-void OverviewGrid::showEvent(QShowEvent* e) { QAbstractScrollArea::showEvent(e); reflow(); schedule(); }
-void OverviewGrid::hideEvent(QHideEvent* e) { ++epoch; keys.clear(); attempted.clear(); dispatch.stop(); spinner.stop(); cancelRender(); QAbstractScrollArea::hideEvent(e); }
+void OverviewGrid::showEvent(QShowEvent* e) { QAbstractScrollArea::showEvent(e); reflow(); syncDemand(); }
+void OverviewGrid::hideEvent(QHideEvent* e) { keys.clear(); spinner.stop(); QAbstractScrollArea::hideEvent(e); syncDemand(); }
 void OverviewGrid::mousePressEvent(QMouseEvent* e) {
     if (e->button()!=Qt::LeftButton) return;
     setFocus(Qt::MouseFocusReason);
@@ -350,9 +246,9 @@ QJsonObject OverviewGrid::describe(QWidget* window) const {
             {"checkbox",QJsonObject{{"x",boxOrigin.x()},{"y",boxOrigin.y()},{"width",box.width()},{"height",box.height()}}}});
     }
     QJsonArray groups; for (const auto& heading:headings) groups.append(QJsonObject{{"id",heading.id},{"label",heading.label}});
-    return {{"visible",isVisible()},{"grouped",grouped},{"groups",groups},{"items",items.size()},{"columns",columns()},{"tiles",visible},
-        {"worker_active",busy || dispatch.isActive()},{"worker_limit",1},{"thumbnail_width",256},{"thumbnail_height",160},
-        {"loading_id",loadingId},{"spinner_active",spinner.isActive()},
-        {"worker_id",renderingId},{"worker_pid",renderWorker?double(renderWorker->processId()):0},
-        {"worker_nice",19},{"rendered",rendered},{"renderer",lastRenderer},{"render_error",lastRenderError}};
+    auto result=queue->metrics();
+    result["visible"]=isVisible(); result["grouped"]=grouped; result["groups"]=groups;
+    result["items"]=items.size(); result["columns"]=columns(); result["tiles"]=visible;
+    result["loading_id"]=loading.isEmpty()?QString():*loading.begin(); result["spinner_active"]=spinner.isActive();
+    return result;
 }

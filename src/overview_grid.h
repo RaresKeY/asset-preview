@@ -3,14 +3,10 @@
 #include <QAbstractScrollArea>
 #include <QSet>
 #include <QMap>
-#include <QThreadPool>
-#include <QPointer>
 #include <QTimer>
 #include <functional>
 #include <memory>
-class QProcess;
-class QTemporaryDir;
-class QTimer;
+class ThumbnailQueue;
 
 class OverviewGrid final : public QAbstractScrollArea {
 public:
@@ -24,6 +20,9 @@ public:
     QJsonObject describe(QWidget* window) const;
     void invalidate();
     void refresh();
+    void warmItems(QList<Item>,QStringList nearby,QSet<QString> active,bool ready,bool enabled);
+    QStringList workingIds() const;
+    bool backgroundAllowed() const;
     std::function<QString(const QString&)> keyFor;
     std::function<QJsonObject(const QString&)> configFor;
     std::function<void(const QString&)> activated,selected;
@@ -43,11 +42,10 @@ private:
     QRect tile(int index) const;
     QRect checkbox(int index) const;
     void reflow();
+    void pruneKeys();
     void updateTile(const QString&);
-    void schedule(int delay=25);
-    void work();
-    void render(const Item&,const QString& key);
-    void cancelRender();
+    void syncDemand();
+    void thumbnailState();
     preview::PreviewCache* cache;
     QList<Item> items;
     QString current;
@@ -56,19 +54,13 @@ private:
     struct Heading { QString id,label; QRect rect; };
     QList<Heading> headings;
     QSet<QString> checked;
-    int hover=-1,epoch=0;
-    bool busy=false;
-    QMap<QString,QString> attempted;
+    int hover=-1;
     QMap<QString,QString> keys;
-    QTimer spinner,dispatch;
-    QString loadingId;
+    QTimer spinner;
+    QSet<QString> loading;
     int spinAngle=0;
-    QThreadPool worker;
-    QPointer<QProcess> renderWorker;
-    QString renderRoot;
-    std::unique_ptr<QTemporaryDir> renderDirectory;
-    QTimer* renderDeadline;
-    QString renderingId,renderingKey,lastRenderer,lastRenderError;
-    int rendered=0;
-    bool renderCancelled=false,renderTimedOut=false;
+    ThumbnailQueue* queue;
+    bool hasWarmItems=false,warmReady=false,warmEnabled=false;
+    QStringList nearby;
+    QSet<QString> active;
 };

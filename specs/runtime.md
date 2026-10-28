@@ -72,9 +72,16 @@ processes to verify fatal signals, startup failures, quiet clean exits,
 restart retention, kill recovery, rotation and private-file protections.
 
 `--version` reports the root `VERSION`; `licenses` prints dependency notices without
-starting the service. The launcher defaults its child process to `QT_QPA_PLATFORM=xcb`, using XWayland
-on KDE Wayland. Explicit platform overrides are retained. Native Wayland 3D
-embedding is currently unsupported; ping/list expose the actual Qt platform.
+starting the service. The launcher defaults its child process to
+`QT_QPA_PLATFORM=wayland` when the caller supplies a nonempty `WAYLAND_DISPLAY`,
+and to `xcb` otherwise. Explicit platform overrides are retained, including
+offscreen test platforms. It does not import display endpoints from systemd.
+Ping/list expose the actual Qt platform. `tools/test.sh wayland-gpu` checks the
+default launcher with DISPLAY, XAUTHORITY and QT_QPA_PLATFORM removed, verifies
+the loaded Wayland platform plugin and hardware renderer, and exercises image
+refresh, model/material frames and camera, video playback/seek, audio, mixed
+grids, Parts/Cuts and hidden resource release. Native input coverage in the
+existing XTest lane remains X11-specific.
 On desktop startup without an explicit desktop identity or Qt platform theme,
 the launcher fills missing theme metadata from the same user's systemd session
 environment. This keeps agent shells consistent with the desktop's Qt style,

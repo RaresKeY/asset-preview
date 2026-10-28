@@ -64,6 +64,7 @@ struct Entry {
     bool inspectionNotificationPending = false;
     QString thumbnailSource;
     QStringList thumbnailDependencies;
+    QMap<QString,QString> thumbnailManifests;
     bool thumbnailUnavailable=false;
 };
 
@@ -91,6 +92,9 @@ public:
     bool overviewVisible() const;
     QStringList overviewIds() const;
     void refreshOverview(bool reset=false);
+    void prepareThumbnails();
+    void scheduleThumbnailPreparation();
+    QStringList thumbnailWorkingIds() const;
     QStringList prepareProjects();
 protected:
     void closeEvent(QCloseEvent*) override;
@@ -152,6 +156,7 @@ private:
     QShortcut* exitFullscreen = nullptr;
     FullscreenNotice* fullscreenNotice = nullptr;
     bool fullscreenFocus = false, fullscreenMode = false;
+    bool thumbnailWatchScheduled=false,thumbnailPrepareScheduled=false;
     Qt::WindowStates windowedState;
     QRect windowedGeometry;
 };
@@ -177,6 +182,7 @@ public:
     QStringList comparison;
     bool cameraSync=true;
     bool syncingCamera=false;
+    int projectDirection=1;
     QMap<QString, std::shared_ptr<Entry>> entries;
     QString selected, layout = "single", socketPath, statePath;
     QString thumbnailDirectory;
@@ -200,7 +206,7 @@ private:
     QJsonObject add(QJsonObject config, bool restore = false, bool makeCurrent = true, const QString& projectLabel = {});
     QJsonObject select(const QString& id,bool updateViews=true,bool single=false,bool makeCurrent=false);
     QString closeTarget(const QString& id) const;
-    void preloadReturnTarget();
+    void preloadReturnTarget(bool settled=false);
     QString thumbnailKey(Entry&);
     void rememberThumbnail(Entry&);
     QString validate(QJsonObject& config, bool restore = false);
@@ -223,6 +229,8 @@ private:
     QString theme = "auto";
     QString closeBehavior = "left";
     PreviewPreloader preloader{&cache};
+    QTimer projectPreloadDelay;
+    QString pendingProjectPreload;
     QJsonObject preferences;
     QStringList selectionHistory;
     struct ClosedEntry { QJsonObject config; int index; };

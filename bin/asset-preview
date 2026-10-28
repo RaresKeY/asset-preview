@@ -119,8 +119,8 @@ def running(timeout: float = 0.3) -> bool:
 
 def viewer_environment() -> dict[str, str]:
     environment = os.environ.copy()
-    # Embedded OpenGL views use XWayland by default. Keep explicit test/platform choices.
-    environment.setdefault("QT_QPA_PLATFORM", "xcb")
+    # Use the caller's native Wayland session; retain X11 and explicit test/platform choices.
+    environment.setdefault("QT_QPA_PLATFORM", "wayland" if environment.get("WAYLAND_DISPLAY") else "xcb")
     if ("XDG_CURRENT_DESKTOP" in environment or "QT_QPA_PLATFORMTHEME" in environment or
             environment["QT_QPA_PLATFORM"].split(":", 1)[0] not in {"xcb", "wayland", "wayland-egl"}):
         return environment

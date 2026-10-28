@@ -88,8 +88,11 @@ log; recent diagnostics stay in memory until a failure. Fatal reports retain
 preview context and native fault details across restarts. An unreportable kill
 or power loss is recorded as an unclean exit on the next launch.
 
-The supported display path is X11/XWayland (`QT_QPA_PLATFORM=xcb`). Native
-Wayland 3D embedding is unsupported. Explicit platform overrides are respected.
+Source launches use native Wayland (`QT_QPA_PLATFORM=wayland`) when the caller
+provides `WAYLAND_DISPLAY`, and X11 (`xcb`) otherwise. Explicit platform
+overrides are respected. `tools/test.sh wayland-gpu` checks rendering without
+an X11 display in a private KWin compositor nested inside headless Gamescope.
+Published 0.0.2 packages retain their original X11/XWayland requirements.
 
 ## Commands
 
@@ -192,11 +195,14 @@ eligible images into the bounded cache; other files receive a bounded read to
 warm the OS cache, without starting hidden renderers, players or generators.
 
 **Overview** in the layout picker, or **Ctrl+0**, shows all open assets as compact
-thumbnails. Click a tile or press Enter to open it in Single view. Only visible
-image, model and material thumbnails prepare lazily, one at a time at low priority,
-including assets you have never opened. Model/material jobs render a finite
-offscreen frame and reuse the thumbnail cache. Other assets reuse a frame from
-their opened view. Overview starts no players or asset generators.
+thumbnails. Click a tile or press Enter to open it in Single view. Two image
+workers and a separate model worker prepare thumbnails at low priority, with
+visible images first. After a quiet period, nearby and other open assets warm
+the bounded thumbnail cache, including while using Projects or Single view.
+Loading ordinary previews pauses warming; hiding cancels it. Model/material jobs
+render one finite offscreen frame. Other asset kinds reuse a frame from their
+opened view. Thumbnail work starts no players or asset generators. Projects also
+prefetches the next/previous member after settling on a visible project.
 
 Small decoded images and waveforms reuse a bounded cache: **32 MiB per payload,
 128 MiB total**, including a **16 MiB thumbnail allowance**. Self-pruning disk

@@ -33,6 +33,7 @@ private:
     struct Scene;
     bool load(QString&);
     void cleanup();
+    void paintFrame(GLuint framebuffer);
     void options();
     void restoreCamera(const QJsonObject&);
     void rememberCamera(bool persist=true);

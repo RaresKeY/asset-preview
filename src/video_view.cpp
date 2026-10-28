@@ -15,6 +15,7 @@
 #include <stdexcept>
 
 #include "mpv_player.h"
+#include "gl_framebuffer.h"
 using namespace preview::media;
 
 struct VideoView::Player {
@@ -80,6 +81,12 @@ bool VideoView::reload(const QJsonObject& cfg, QString& error) {
 #if QT_CONFIG(xcb)
         if (auto* native=qGuiApp->nativeInterface<QNativeInterface::QX11Application>())
             params[2]={MPV_RENDER_PARAM_X11_DISPLAY,native->display()};
+#endif
+#if QT_VERSION >= QT_VERSION_CHECK(6, 5, 0)
+#if QT_CONFIG(wayland)
+        if (auto* native=qGuiApp->nativeInterface<QNativeInterface::QWaylandApplication>())
+            params[2]={MPV_RENDER_PARAM_WL_DISPLAY,native->display()};
+#endif
 #endif
         checked(mpv_render_context_create(&next->render,next->client,params));
         const std::pair<const char*,mpv_format> observed[]={
@@ -161,8 +168,12 @@ QJsonObject VideoView::metrics() const {
     }
     return result;
 }
-void VideoView::paintGL() {
+void VideoView::paintGL() { paintFrame(defaultFramebufferObject()); }
+void VideoView::paintFrame(GLuint framebuffer) {
     ++renders;
+    auto* gl=context()->functions();
+    gl->glBindFramebuffer(GL_FRAMEBUFFER,framebuffer);
+    gl->glViewport(0,0,int(width()*devicePixelRatio()),int(height()*devicePixelRatio()));
     bool replace=false;
     if (candidate) {
         candidate->frameDue|=bool(mpv_render_context_update(candidate->render)&MPV_RENDER_UPDATE_FRAME);
@@ -171,7 +182,7 @@ void VideoView::paintGL() {
     Player* p=replace?candidate.get():current.get();
     if (p) {
         if (!replace) mpv_render_context_update(p->render);
-        mpv_opengl_fbo fbo{int(defaultFramebufferObject()),int(width()*devicePixelRatio()),int(height()*devicePixelRatio()),0};
+        mpv_opengl_fbo fbo{int(framebuffer),int(width()*devicePixelRatio()),int(height()*devicePixelRatio()),0};
         int flip=1,block=0;
         mpv_render_param params[]={{MPV_RENDER_PARAM_OPENGL_FBO,&fbo},{MPV_RENDER_PARAM_FLIP_Y,&flip},
             {MPV_RENDER_PARAM_BLOCK_FOR_TARGET_TIME,&block},{MPV_RENDER_PARAM_INVALID,nullptr}};
@@ -183,11 +194,11 @@ void VideoView::paintGL() {
             QTimer::singleShot(0,this,[this] { if (loaded) loaded(true,{}); });
         }
     } else {
-        auto* gl=context()->functions(); gl->glClearColor(.075f,.09f,.115f,1); gl->glClear(GL_COLOR_BUFFER_BIT);
+        gl->glClearColor(.075f,.09f,.115f,1); gl->glClear(GL_COLOR_BUFFER_BIT);
     }
 }
 QImage VideoView::snapshot() {
-    makeCurrent(); paintGL(); QImage image=grabFramebuffer(); doneCurrent(); return image;
+    return preview::captureFramebuffer(*this,[this](GLuint framebuffer) { paintFrame(framebuffer); });
 }
 void VideoView::mousePressEvent(QMouseEvent* e) { if (activated) activated(); if (focusSurface) focusSurface(); requestActivate(); e->accept(); }
 bool VideoView::eventFilter(QObject* watched, QEvent* e) {

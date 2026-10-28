@@ -85,8 +85,10 @@ notice dismissal and idle rendering, with captures under ASSET_PREVIEW_EVIDENCE_
 `tools/test.sh video-controls` checks narrow and condensed layouts with short/long
 durations at 10, 18 and 26 point fonts, plus fullscreen notice capture clipping.
 
-The render API uses the owning Qt OpenGL context, supplies the X11 display for
-interop, requests `hwdec=auto-safe` and permits codec/driver software fallback.
+The render API uses the owning Qt OpenGL context and supplies the active native
+display for interop: X11 under `xcb`, Wayland under `wayland` with Qt 6.5+.
+Qt 6.4 retains context-only Wayland rendering. It requests `hwdec=auto-safe` and
+permits codec/driver software fallback.
 GPU renderer and decoder identity are reported separately. Frame/event callbacks
 coalesce onto the GUI thread without calling mpv APIs inside callbacks. Core
 commands/property writes use asynchronous APIs; event handling observes properties

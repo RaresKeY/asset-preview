@@ -4,9 +4,9 @@ Measurements describe the development checkout on 2026-10-27 with Qt 6.12,
 F3D 4 and NVIDIA GeForce RTX 2080 Ti, using headless Gamescope. They do not
 describe the older downloadable release artifacts or every Linux/GPU setup.
 
-The follow-up optimization removes a repeated 25 ms wait between successful
+The 2026-10-27 optimization removed a repeated 25 ms wait between successful
 Overview thumbnails. Initial and changed viewports retain their 25 ms debounce;
-settled jobs yield for 1 ms. Preparation remains serial and low priority, with
+settled jobs yield for 1 ms. Preparation in those measurements was serial and low priority, with
 no ordinary views, players or generators activated by Overview.
 
 | Registered assets | Visible thumbnails prepared | Median readiness before → after |
@@ -30,6 +30,51 @@ sizes; no further speedup is claimed for those paths. A project presentation
 cache was tested and removed because completed-load results were inconsistent.
 The retained direct project-count accessor removes unnecessary geometry JSON
 construction without a standalone timing claim.
+
+## Bounded parallel thumbnails (2026-10-28)
+
+The window-owned scheduler uses two low-priority image slots and one independent
+finite model child. Images lead within each priority tier; quiet warming covers
+nearby and remaining open registrations. Ordinary loading takes priority.
+Background deadlines cannot delay foreground continuations, image completion
+avoids rebuilding watchers, and Projects neighbor preload waits for 250 ms on one
+target so a pointer sweep does not decode every full neighbor.
+
+| Workload | Before | After |
+| --- | ---: | ---: |
+| First image after a preceding model registration | 1836 ms | 174 ms |
+| All eight images in that fixture | 1971 ms | 340 ms |
+| Model thumbnail in that fixture | 1822 ms | 2505 ms |
+| Mixed-workload ping p95 | 3.38 ms | 3.32 ms |
+| Mixed-workload parent PSS peak | 53.1 MiB | 60.5 MiB |
+| 96-image registry: visible Overview readiness | 264 ms | 200 ms |
+| 96-image registry: return to Overview | 83 ms | 63 ms |
+| Thumbnail files after the quiet background phase | 12 | 96 |
+
+The mixed fixture uses one model registered before eight 1024px images, three
+runs per binary in before/after/after/before/before/after order. The navigation
+fixture uses 96 1024px PNGs and two runs per binary in before/after/after/before
+order. Both use fresh private state/cache, retain OS/driver caches and desktop
+load, and verify the actual RTX 2080 Ti renderer. Mixed cache bytes are identical
+(384,000); parent PSS includes Qt and native allocations outside retained-cache accounting.
+The extra allocation was not separately attributed; child/GPU peaks were not
+separately measured.
+
+The mixed case ran under substantial CPU contention (load around eight on eight
+logical CPUs); model-thumbnail completion can be slower when images take
+priority. Projects timings vary between runs, so no standalone Projects or model
+speedup is claimed. Socket p95 is event-loop RTT, not display cadence. Raw
+profiles, binary hashes, busy-host samples and review remain under
+`.local/thumbnail-queue/` and `evidence/thumbnail-queue/`.
+
+For the mixed comparison, keep a saved prepared server with matching backend
+modules beside it, then run:
+
+```sh
+tools/offscreen.sh python tools/profile_thumbnails.py \
+  --baseline /absolute/saved-build/asset-preview-server \
+  --output /tmp/asset-preview-mixed-profile
+```
 
 ## Reproduce
 

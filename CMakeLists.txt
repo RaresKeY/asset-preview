@@ -28,7 +28,7 @@ foreach(contract IN LISTS ASSET_PREVIEW_BACKEND_CONTRACTS)
 endforeach()
 string(SHA256 ASSET_PREVIEW_BACKEND_ABI "${ASSET_PREVIEW_BACKEND_CONTRACT}")
 configure_file(src/backend_abi_config.h.in generated/backend_abi_config.h @ONLY)
-add_executable(asset-preview-server src/main.cpp src/thumbnail_job.cpp src/crash_log.cpp src/service.cpp src/viewer.cpp src/model_surface.cpp src/preview_cache.cpp src/preview_preload.cpp src/cache_diagnostics.cpp src/overview_grid.cpp src/project_grid.cpp src/material_graph.cpp src/video_controls.cpp src/animation_controls.cpp src/fullscreen_notice.cpp
+add_executable(asset-preview-server src/main.cpp src/thumbnail_job.cpp src/thumbnail_queue.cpp src/crash_log.cpp src/service.cpp src/viewer.cpp src/model_surface.cpp src/preview_cache.cpp src/preview_preload.cpp src/cache_diagnostics.cpp src/overview_grid.cpp src/project_grid.cpp src/material_graph.cpp src/video_controls.cpp src/animation_controls.cpp src/fullscreen_notice.cpp
     src/inspection/document.cpp src/inspection/service.cpp src/inspection/panel.cpp
     src/codex_panel.cpp src/reference_editor.cpp)
 target_link_libraries(asset-preview-server PRIVATE Qt6::Widgets Qt6::Network)

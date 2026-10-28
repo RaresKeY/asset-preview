@@ -186,8 +186,21 @@ class DesktopEnvironment(unittest.TestCase):
         with patch.dict(os.environ, caller, clear=True), patch.object(client.subprocess, 'run', return_value=result):
             environment = client.viewer_environment()
             self.assertEqual(dict(os.environ), caller)
-        self.assertEqual(environment, {**caller, 'QT_QPA_PLATFORM': 'xcb', 'XDG_CURRENT_DESKTOP': 'KDE',
+        self.assertEqual(environment, {**caller, 'QT_QPA_PLATFORM': 'wayland', 'XDG_CURRENT_DESKTOP': 'KDE',
                                        'KDE_FULL_SESSION': 'true', 'KDE_SESSION_VERSION': '6'})
+
+    def test_native_display_selection_retains_explicit_platforms(self):
+        for display in ({'DISPLAY': ':0'}, {'WAYLAND_DISPLAY': ''},
+                        {'WAYLAND_DISPLAY': 'wayland-1'}, {'WAYLAND_DISPLAY': '/run/user/1000/wayland-1'}):
+            for override in (None, 'xcb', 'wayland', 'offscreen', 'minimal'):
+                caller = {'XDG_CURRENT_DESKTOP': 'KDE', **display}
+                if override is not None:
+                    caller['QT_QPA_PLATFORM'] = override
+                with self.subTest(caller=caller), patch.dict(os.environ, caller, clear=True), \
+                        patch.object(client.subprocess, 'run') as query:
+                    expected = override or ('wayland' if display.get('WAYLAND_DISPLAY') else 'xcb')
+                    self.assertEqual(client.viewer_environment(), {**caller, 'QT_QPA_PLATFORM': expected})
+                    query.assert_not_called()
 
     def test_explicit_desktop_theme_and_headless_platforms_do_not_query_session(self):
         for caller in ({'XDG_CURRENT_DESKTOP': 'GNOME'}, {'XDG_CURRENT_DESKTOP': ''},

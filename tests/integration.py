@@ -758,7 +758,7 @@ class PreviewIntegration(unittest.TestCase):
         eventually(lambda:row("sample").get("metrics",{}).get("engine"))
         self.assertEqual(row("sample")["metrics"]["triangles"],12)
         client.rpc({"method":"settings","id":"sample","settings":{"shape":"plane"}})
-        self.assertEqual(row("sample")["metrics"]["triangles"],2)
+        eventually(lambda:row("sample")["metrics"]["triangles"]==2)
         with self.assertRaisesRegex(RuntimeError,"Boolean setting required"):
             client.rpc({"method":"settings","id":"sample","settings":{"triangles":"yes"}})
         client.rpc({"method":"hide"}); self.assertNotIn("metrics",row("sample"))
