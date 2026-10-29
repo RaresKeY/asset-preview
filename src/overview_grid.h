@@ -33,6 +33,7 @@ protected:
     void resizeEvent(QResizeEvent*) override;
     void showEvent(QShowEvent*) override;
     void hideEvent(QHideEvent*) override;
+    void scrollContentsBy(int dx,int dy) override;
     void mousePressEvent(QMouseEvent*) override;
     void mouseMoveEvent(QMouseEvent*) override;
     void keyPressEvent(QKeyEvent*) override;
@@ -40,10 +41,14 @@ protected:
 private:
     int columns() const;
     QRect tile(int index) const;
+    QRect paintArea(int index) const;
     QRect checkbox(int index) const;
-    void reflow();
+    struct ScrollAnchor { QString id; int top=0; };
+    ScrollAnchor scrollAnchor(const QSet<QString>& surviving={}) const;
+    void reflow(const ScrollAnchor&);
     void pruneKeys();
     void updateTile(const QString&);
+    void updateHover(QPoint);
     void syncDemand();
     void thumbnailState();
     preview::PreviewCache* cache;
@@ -53,8 +58,11 @@ private:
     QList<QRect> tiles;
     struct Heading { QString id,label; QRect rect; };
     QList<Heading> headings;
+    int layoutColumns=1;
+    bool reflowing=false;
     QSet<QString> checked;
     int hover=-1;
+    QPoint hoverPosition{-1,-1};
     QMap<QString,QString> keys;
     QTimer spinner;
     QSet<QString> loading;

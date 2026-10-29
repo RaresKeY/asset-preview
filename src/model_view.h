@@ -6,6 +6,7 @@
 #include <QTimer>
 #include <f3d/engine.h>
 #include <optional>
+#include <vector>
 
 class ModelScene final : public ModelWorker {
 public:
@@ -27,17 +28,26 @@ public:
     void exposed(bool) override;
     void scroll(double) override;
     void drag(QPointF,bool) override;
+    void gpuContext(std::shared_ptr<ModelGpuContext>) override;
+    void prepare() override;
+    bool renderPending() const override { return framePending; }
+    void present() override;
 private:
     int width() const { return extent.width(); }
     int height() const { return extent.height(); }
     double devicePixelRatioF() const { return ratio; }
     bool isExposed() const { return visible; }
-    void update();
+    void update(int delay=0);
     void paintGL();
     QSize extent{100,100};
     double ratio=1;
     bool visible=true,framePending=false;
     bool pendingLoadNotice=false;
+    std::shared_ptr<ModelGpuContext> gpu;
+    std::vector<std::shared_ptr<ModelGpuFrame>> gpuFrames;
+    quint64 frameSerial=0;
+    bool cameraDirty=false;
+    std::shared_ptr<ModelGpuFrame> renderGpuFrame();
     bool load(QString& error, bool retainAnimation=false);
     struct Animation {
         QStringList clips;

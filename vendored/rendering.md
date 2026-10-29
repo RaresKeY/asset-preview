@@ -20,17 +20,29 @@ at process startup. CMake links that dependency after libstdc++ and libc; F3D/VT
 lazy and the application's allocator remains glibc. This is a package compatibility
 requirement, not an allocator migration.
 
-F3D supplies scene import, materials, camera and rendering behind an external
-OpenGL context. The owning Qt window supplies that context. The view is a
-QOpenGLWindow child inside a QWidget container. This avoids the framebuffer
-and depth-state corruption observed with the installed F3D/Qt QOpenGLWidget path.
-Paint explicitly restores the external color/depth/blend contract. There are no
-separate desktop windows for individual previews and no display readback/copy loop;
-CPU framebuffer readback is used for requested captures and a finite departure
-thumbnail before a visible preview unloads; no background renderer is retained.
-The verified desktop path is `xcb` (XWayland on KDE Wayland). Native Wayland
-embedding failed the current hardware check, so the launcher uses `xcb` unless
-the caller explicitly overrides it. This setting is local to the daemon.
+F3D supplies ordinary scene import, materials, camera and rendering on one native
+worker thread. Each visible scene owns an offscreen producer GL context. F3D's
+external-context API renders into shared GPU textures; an independent native
+QOpenGLWindow context blits the latest texture directly for display. A bounded
+three-target pool, replaceable mailbox and producer/display GL fences avoid
+per-frame CPU readback, image conversion and upload. Requested screenshots read
+the completed texture; departure thumbnails are downsized on the GPU before
+their small readback. Pending mouse motion
+is applied in bounded ordered batches before rendering so intermediate pointer
+positions do not each incur that cost. Static scenes schedule no continuing
+render/copy loop; off-page ordinary engines are destroyed.
+Video and component inspection retain embedded QOpenGLWindow surfaces and use
+an explicit capture framebuffer for requested snapshots. Native Wayland and
+`xcb` are hardware-verified; the launcher prefers the caller's Wayland session
+and preserves explicit platform overrides. See [Preview](../specs/preview.md)
+and [Models](../specs/models.md) for current lifecycle and verification contracts.
+Native overlays use Qt's public ancestor/sibling isolation attributes; Overview
+stays in the main raster backing store. On the installed Qt 6.12 Wayland path,
+promoting it to a native child reproduced enlarged/cropped content at 125% and
+stale frame fragments; compositor/source comparisons pass with raster isolation.
+The relevant upstream paths are [native widget promotion](https://github.com/qt/qtbase/blob/6.12/src/widgets/kernel/qwidget.cpp)
+and [Wayland child backing-store flush](https://github.com/qt/qtbase/blob/6.12/src/plugins/platforms/wayland/qwaylandshmbackingstore.cpp).
+No Qt fork or additional render/copy loop is introduced.
 Built-in reader plugins are restricted to native and Assimp. This reuses mature scene loading while
 retaining control of activation and scheduling. Qt Quick 3D's runtime loader is a
 viable alternative for OBJ/glTF, but would add a QML scene framework to this small

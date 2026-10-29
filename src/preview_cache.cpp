@@ -12,6 +12,7 @@
 #include <QSaveFile>
 #include <QStandardPaths>
 #include <QSet>
+#include <QHash>
 #include <algorithm>
 #include <cmath>
 #include <list>
@@ -85,6 +86,7 @@ struct PreviewCache::Impl {
     CacheDiagnostics diagnostics;
     struct Item { QString key; CachedPayload payload; bool thumbnail=false; };
     std::list<Item> items;
+    QHash<QString,std::list<Item>::iterator> index;
     qint64 bytes=0,thumbnailBytes=0,diskBytes=0;
     int diskEntries=0;
     quint64 hits=0,misses=0,diskHits=0,evictions=0,rejected=0;
@@ -177,9 +179,13 @@ struct PreviewCache::Impl {
             diagnostics.record("small_disk","write",key,data.size(),previous?"replace":"new",timer.nsecsElapsed()/1000);
         }
     }
-    auto find(const QString& key) { return std::find_if(items.begin(),items.end(),[&](const Item& i) { return i.key==key; }); }
+    auto find(const QString& key) {
+        const auto it=index.constFind(key);
+        return it!=index.cend()?it.value():items.end();
+    }
     void erase(std::list<Item>::iterator i) {
         const auto n=i->payload.bytes(); bytes-=n; if (i->thumbnail) thumbnailBytes-=n;
+        index.remove(i->key);
         items.erase(i);
     }
     void insert(QString key,CachedPayload payload,bool thumb) {
@@ -205,15 +211,16 @@ struct PreviewCache::Impl {
         }
         bytes+=size; if (thumb) thumbnailBytes+=size;
         items.push_back({std::move(key),std::move(payload),thumb});
-        diagnostics.record("ram","admit",items.back().key,size,thumb?"thumbnail":"view_unload");
+        auto inserted=std::prev(items.end());
+        index.insert(inserted->key,inserted);
+        diagnostics.record("ram","admit",inserted->key,size,thumb?"thumbnail":"view_unload");
     }
 };
 PreviewCache::PreviewCache():d(std::make_unique<Impl>()) {}
 PreviewCache::~PreviewCache()=default;
 bool PreviewCache::hasImage(const QString& key) const {
-    return std::any_of(d->items.cbegin(),d->items.cend(),[&](const auto& item) {
-        return item.key==key && !item.thumbnail && !item.payload.image.isNull();
-    });
+    const auto i=d->find(key);
+    return i!=d->items.end() && !i->thumbnail && !i->payload.image.isNull();
 }
 bool PreviewCache::allowsPreload() const { return !lowMemory(); }
 CachedPayload PreviewCache::take(const QString& key,bool waveform) {
@@ -223,7 +230,7 @@ CachedPayload PreviewCache::take(const QString& key,bool waveform) {
         d->diagnostics.record("ram","take",key,i->payload.bytes(),"visible_view");
         ++d->hits; auto value=std::move(i->payload);
         // Account before erase: the payload has already moved.
-        d->bytes-=value.bytes(); d->items.erase(i); return value;
+        d->bytes-=value.bytes(); d->index.remove(i->key); d->items.erase(i); return value;
     }
     ++d->misses;
     d->diagnostics.record("ram","miss",key,0,"visible_view");
@@ -276,7 +283,10 @@ QImage PreviewCache::peekThumbnail(const QString& key) const {
 }
 void PreviewCache::putThumbnail(const QString& key,QImage image) {
     if (key.isEmpty() || image.isNull()) return;
-    image=image.scaled(ThumbnailWidth,ThumbnailHeight,Qt::KeepAspectRatio,Qt::SmoothTransformation).convertToFormat(QImage::Format_RGBA8888);
+    if (image.size()!=image.size().scaled(ThumbnailWidth,ThumbnailHeight,Qt::KeepAspectRatio))
+        image=image.scaled(ThumbnailWidth,ThumbnailHeight,Qt::KeepAspectRatio,Qt::SmoothTransformation);
+    if (image.format()!=QImage::Format_RGBA8888)
+        image=image.convertToFormat(QImage::Format_RGBA8888);
     QByteArray data="IMG1"; QDataStream stream(&data,QIODevice::Append); stream<<qint32(image.width())<<qint32(image.height());
     data.append(reinterpret_cast<const char*>(image.constBits()),image.sizeInBytes());
     d->write(key,data); trimForPressure();
@@ -287,7 +297,7 @@ void PreviewCache::clear(bool disk,const QString& reason) {
     QElapsedTimer timer; timer.start();
     const auto freed=d->bytes; const int count=d->items.size();
     for (const auto& item:d->items) d->diagnostics.record("ram","discard",item.key,item.payload.bytes(),reason);
-    d->items.clear(); d->absent.clear(); d->bytes=0; d->thumbnailBytes=0; d->scanned=false;
+    d->items.clear(); d->index.clear(); d->absent.clear(); d->bytes=0; d->thumbnailBytes=0; d->scanned=false;
     if (count) d->diagnostics.record("ram","clear",{},freed,reason,timer.nsecsElapsed()/1000,{{"items",count}});
     if (disk && d->prepare()) {
         QLockFile lock(QDir(d->root).filePath("cache.lock")); lock.setStaleLockTime(0);

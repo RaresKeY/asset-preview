@@ -18,6 +18,9 @@
 #include <QUrl>
 #include <QMouseEvent>
 #include <QPainter>
+#include <QOpenGLExtraFunctions>
+#include <QOpenGLFramebufferObject>
+#include <QMutexLocker>
 #include <QScopeGuard>
 #include <QWheelEvent>
 #include <algorithm>
@@ -199,8 +202,15 @@ ModelScene::~ModelScene() {
 }
 void ModelScene::cleanup() {
     animationTick.stop(); animationClock.invalidate();
+    prepare();
     engine.reset();
+    gpuFrames.clear();
 }
+void ModelScene::gpuContext(std::shared_ptr<ModelGpuContext> context) { gpu=std::move(context); prepare(); }
+void ModelScene::prepare() {
+    if(gpu && !gpu->context->makeCurrent(gpu->surface))throw std::runtime_error("Cannot activate model GPU producer");
+}
+void ModelScene::present() { framePending=false; if(engine)paintGL(); }
 ModelScene::Animation ModelScene::prepareAnimation(f3d::engine& target,double position) {
     Animation next;
     if (config["kind"]!="model") return next;
@@ -281,10 +291,10 @@ void ModelScene::viewport(QSize size,double scale) {
     if (engine) engine->getWindow().setSize(std::max(1,int(width()*ratio)),std::max(1,int(height()*ratio)));
     update();
 }
-void ModelScene::update() {
+void ModelScene::update(int delay) {
     if (framePending || !visible) return;
     framePending=true;
-    QTimer::singleShot(0,this,[this] {
+    QTimer::singleShot(delay,this,[this] {
         if (!framePending) return;
         framePending=false;
         if (visible && engine)try { paintGL(); }
@@ -382,7 +392,9 @@ bool ModelScene::load(QString& error,bool retainAnimation) {
             timing[name]=double(now-previous)/1e6; previous=now;
         };
         // Construct a replacement first: malformed partial saves keep the last good scene.
-        auto makeEngine=[] {
+        auto makeEngine=[this] {
+            if(gpu)return std::make_unique<f3d::engine>(f3d::engine::createExternal(
+                [this](const char* name) { return gpu->context->getProcAddress(name); }));
 #if defined(ASSET_PREVIEW_F3D4) && defined(Q_OS_LINUX)
             // EGL owns no hidden X11 window. A hidden GLX window can still
             // affect compositor input/focus when scenes are reopened.
@@ -597,7 +609,11 @@ void ModelScene::resetView() {
     update(); rememberCamera();
 }
 QJsonObject ModelScene::metrics() const {
-    QJsonObject result{{"loads", loads}, {"renders", renders}, {"engine", bool(engine)}, {"renderer", renderer},{"render_pending",framePending}};
+    QJsonObject result{{"loads", loads}, {"renders", renders}, {"engine", bool(engine)}, {"renderer", renderer},{"render_pending",framePending},
+        {"frame_transport",gpu?"shared_gpu_texture":"cpu_image"},{"gpu_frame_serial",qint64(frameSerial)},{"gpu_buffer_limit",3}};
+    qint64 colorBytes=0;
+    for(const auto& frame:gpuFrames)colorBytes+=qint64(frame->size.width())*frame->size.height()*4;
+    result["gpu_buffers"]=int(gpuFrames.size()); result["gpu_color_bytes"]=colorBytes;
     result["triangles"]=engine && triangles ? QJsonValue(*triangles) : QJsonValue(QJsonValue::Null);
     if(config["kind"]=="material")result["material_model"]=publishedMaterialModel;
     if (engine) {
@@ -632,7 +648,8 @@ void ModelScene::orbit(double yawDelta, double pitchDelta) {
     double d[3]; for (int i=0;i<3;++i) d[i]=state.position[i]-state.focalPoint[i];
     const double radius=std::sqrt(d[0]*d[0]+d[1]*d[1]+d[2]*d[2]);
     if (radius<1e-9) return;
-    double yaw=std::atan2(d[0],d[horizontal])+yawDelta;
+    // atan2(x,y) on the XY floor runs opposite to azimuth about +Z.
+    double yaw=std::atan2(d[0],d[horizontal])+(zUp?-yawDelta:yawDelta);
     double pitch=std::clamp(std::asin(std::clamp(d[vertical]/radius,-1.0,1.0))+pitchDelta,
         -std::numbers::pi*0.49,std::numbers::pi*0.49);
     d[0]=radius*std::cos(pitch)*std::sin(yaw);
@@ -642,15 +659,21 @@ void ModelScene::orbit(double yawDelta, double pitchDelta) {
     state.viewUp=worldUp(); camera.setState(state);
 }
 void ModelScene::paintGL() {
+    prepare();
     QElapsedTimer frameClock; frameClock.start();
-    ++renders;
     try { advanceAnimation(); }
     catch (const std::exception& error) {
         animation.paused=true; animationTick.stop(); animationClock.invalidate();
         qWarning("Animation playback stopped: %s",error.what());
     }
     QImage pixels;
-    if (engine) {
+    std::shared_ptr<ModelGpuFrame> direct;
+    if(engine && gpu) {
+        direct=renderGpuFrame();
+        if(!direct) { update(1); return; }
+        const auto* name=gpu->context->functions()->glGetString(GL_RENDERER);
+        renderer=name?QString::fromUtf8(reinterpret_cast<const char*>(name)):QString("unknown");
+    } else if (engine) {
         const auto frame=engine->getWindow().renderToImage();
         const auto channels=frame.getChannelCount();
         if (frame.getChannelType()==f3d::image::ChannelType::BYTE && (channels==3 || channels==4))
@@ -668,18 +691,73 @@ void ModelScene::paintGL() {
         const auto* name=getString?getString(0x1F01):nullptr;
         renderer=name?QString::fromUtf8(reinterpret_cast<const char*>(name)):QString("unknown");
     }
+    if(engine)++renders;
     if(engine && firstFramePending) {
         loadTiming["first_render_ms"]=double(frameClock.nsecsElapsed())/1e6;
         loadTiming["load_to_first_render_ms"]=double(loadClock.nsecsElapsed())/1e6;
         firstFramePending=false;
     }
+    if(cameraDirty) { cameraDirty=false; rememberCamera(false); }
+    if(direct && gpuFrameReady)gpuFrameReady(std::move(direct));
     if (frameReady && !pixels.isNull()) frameReady(std::move(pixels));
     if(pendingLoadNotice) { pendingLoadNotice=false; if(loaded)loaded(true,{}); }
     scheduleAnimation();
     if (!animation.clips.isEmpty() && (!notificationClock.isValid() || notificationClock.elapsed()>=100 || animation.eof))
         notifyPlayback();
 }
+std::shared_ptr<ModelGpuFrame> ModelScene::renderGpuFrame() {
+    const QSize size(std::max(1,int(width()*ratio)),std::max(1,int(height()*ratio)));
+    auto available=std::find_if(gpuFrames.begin(),gpuFrames.end(),[](const auto& frame) { return frame.use_count()==1; });
+    if(available!=gpuFrames.end() && (*available)->size!=size) { gpuFrames.erase(available); available=gpuFrames.end(); }
+    if(available==gpuFrames.end()) {
+        // Display and mailbox can each retain one frame; the third is writable.
+        if(gpuFrames.size()>=3)return {};
+        auto* target=new QOpenGLFramebufferObject(size,QOpenGLFramebufferObject::CombinedDepthStencil);
+        if(!target->isValid()) { delete target; throw std::runtime_error("Cannot allocate model GPU frame"); }
+        auto frame=std::shared_ptr<ModelGpuFrame>(new ModelGpuFrame,[owner=gpu,target](ModelGpuFrame* frame) {
+            QMetaObject::invokeMethod(owner->context,[owner,target,frame] {
+                owner->context->makeCurrent(owner->surface);
+                auto* f=owner->context->extraFunctions();
+                if(frame->ready)f->glDeleteSync(frame->ready);
+                if(frame->consumed)f->glDeleteSync(frame->consumed);
+                delete target; delete frame;
+            },Qt::QueuedConnection);
+        });
+        frame->texture=target->texture(); frame->framebuffer=target->handle(); frame->size=size;
+        gpuFrames.push_back(std::move(frame)); available=std::prev(gpuFrames.end());
+    }
+    auto frame=*available; QMutexLocker lock(&frame->mutex);
+    auto* f=gpu->context->extraFunctions();
+    if(frame->consumed) { f->glWaitSync(frame->consumed,0,GL_TIMEOUT_IGNORED); f->glDeleteSync(frame->consumed); frame->consumed=nullptr; }
+    if(frame->ready) { f->glDeleteSync(frame->ready); frame->ready=nullptr; }
+    f->glBindFramebuffer(GL_FRAMEBUFFER,frame->framebuffer);
+    f->glViewport(0,0,size.width(),size.height());
+    f->glDisable(GL_SCISSOR_TEST); f->glDisable(GL_BLEND); f->glEnable(GL_DEPTH_TEST);
+    f->glDepthMask(GL_TRUE); f->glColorMask(GL_TRUE,GL_TRUE,GL_TRUE,GL_TRUE);
+    f->glClearDepthf(1); f->glClearStencil(0);
+    const bool light=config["settings"].toObject()["background"]=="light";
+    f->glClearColor(light?.8f:.075f,light?.8f:.09f,light?.8f:.115f,1);
+    f->glClear(GL_COLOR_BUFFER_BIT|GL_DEPTH_BUFFER_BIT|GL_STENCIL_BUFFER_BIT);
+    engine->getWindow().render();
+    frame->serial=++frameSerial;
+    frame->ready=f->glFenceSync(GL_SYNC_GPU_COMMANDS_COMPLETE,0); f->glFlush();
+    return frame;
+}
 QImage ModelScene::snapshot() {
+    prepare();
+    if(gpu) {
+        const auto frame=renderGpuFrame(); if(!frame)return {};
+        QMutexLocker lock(&frame->mutex);
+        auto* f=gpu->context->extraFunctions();
+        f->glBindFramebuffer(GL_FRAMEBUFFER,frame->framebuffer);
+        QImage image(frame->size,QImage::Format_RGBA8888);
+        f->glReadPixels(0,0,frame->size.width(),frame->size.height(),GL_RGBA,GL_UNSIGNED_BYTE,image.bits());
+#if QT_VERSION >= QT_VERSION_CHECK(6,9,0)
+        return image.flipped(Qt::Vertical).convertToFormat(QImage::Format_RGB32);
+#else
+        return image.mirrored().convertToFormat(QImage::Format_RGB32);
+#endif
+    }
     QImage image;
     auto callback=std::move(frameReady);
     const auto restore=qScopeGuard([&] { frameReady=std::move(callback); });
@@ -721,7 +799,7 @@ void ModelScene::drag(QPointF d,bool pan) {
     } else if (config["settings"].toObject()["lock_horizon"].toBool(true)) {
         orbit(-d.x()*.4*std::numbers::pi/180,d.y()*.4*std::numbers::pi/180);
     } else { c.azimuth(-d.x()*.4).elevation(d.y()*.4); }
-    update(); rememberCamera(false);
+    cameraDirty=true; update();
 }
 extern "C" Q_DECL_EXPORT ModelWorker* asset_preview_create_model_worker(QJsonObject config) {
     return new ModelScene(std::move(config));

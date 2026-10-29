@@ -1,4 +1,5 @@
 #include "fullscreen_notice.h"
+#include "native_overlay.h"
 #include <QEvent>
 #include <QHBoxLayout>
 #include <QLabel>
@@ -10,7 +11,7 @@
 #include <algorithm>
 
 FullscreenNotice::FullscreenNotice(QWidget* parent) : QFrame(parent), slide(this,"pos") {
-    setObjectName("fullscreenNotice"); setAttribute(Qt::WA_NativeWindow);
+    setObjectName("fullscreenNotice"); setNativeOverlay(this);
     setAccessibleName("Full screen. Press Esc or F11 to exit.");
     setStyleSheet(
         "QFrame#fullscreenNotice {background:#293943;border:1px solid #e8edf3;border-radius:10px;}"

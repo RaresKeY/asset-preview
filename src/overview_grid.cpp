@@ -1,12 +1,14 @@
 #include "overview_grid.h"
 #include "thumbnail_queue.h"
 #include "project_identity.h"
+#include <QHash>
 #include <QJsonArray>
 #include <QKeyEvent>
 #include <QMouseEvent>
 #include <QPainter>
 #include <QPaintEvent>
 #include <QScrollBar>
+#include <QScopedValueRollback>
 #include <QStyle>
 #include <QStyleOptionButton>
 #include <QToolTip>
@@ -16,12 +18,18 @@
 namespace { constexpr int Gap=12,TileWidth=172,TileHeight=146; }
 OverviewGrid::OverviewGrid(preview::PreviewCache* store,const QString& jobDirectory,QWidget* parent):QAbstractScrollArea(parent),cache(store),queue(new ThumbnailQueue(store,jobDirectory,this)) {
     setObjectName("overviewGrid"); setFrameShape(QFrame::NoFrame);
+    setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
     setFocusPolicy(Qt::StrongFocus); setAccessibleName("All open previews");
     viewport()->setAttribute(Qt::WA_OpaquePaintEvent); viewport()->setMouseTracking(true);
     queue->keyFor=[this](const QString& id) { return keyFor?keyFor(id):QString(); };
     queue->configFor=[this](const QString& id) { return configFor?configFor(id):QJsonObject{}; };
     queue->changed=[this](const QString& id,const QString& key) {
-        if(isVisible() && visibleIds().contains(id)) { keys[id]=key; updateTile(id); }
+        if(!isVisible())return;
+        for(int i=0;i<items.size();++i)if(items[i].id==id) {
+            const auto r=tile(i);
+            if(r.intersects(viewport()->rect())) { keys[id]=key; updateTile(id); }
+            break;
+        }
     };
     queue->activityChanged=[this] { thumbnailState(); };
     queue->sourcesChanged=[this] { if(viewportChanged)viewportChanged(); };
@@ -31,15 +39,21 @@ OverviewGrid::OverviewGrid(preview::PreviewCache* store,const QString& jobDirect
         for(const auto& id:loading)updateTile(id);
     });
     connect(verticalScrollBar(),&QScrollBar::valueChanged,this,[this] {
-        pruneKeys(); viewport()->update(); syncDemand(); if(viewportChanged)viewportChanged();
+        if(reflowing)return;
+        updateHover(hoverPosition); pruneKeys(); viewport()->update(); syncDemand(); if(viewportChanged)viewportChanged();
     });
 }
 OverviewGrid::~OverviewGrid() {
     queue->changed={}; queue->activityChanged={}; queue->sourcesChanged={}; delete queue;
 }
-int OverviewGrid::columns() const { return std::max(1,(viewport()->width()-Gap)/(TileWidth+Gap)); }
+int OverviewGrid::columns() const { return layoutColumns; }
 QRect OverviewGrid::tile(int i) const {
     return tiles.value(i).translated(0,-verticalScrollBar()->value());
+}
+QRect OverviewGrid::paintArea(int i) const {
+    // Antialiased strokes can touch physical pixels outside the logical tile,
+    // especially at fractional scale. Every partial invalidation must cover them.
+    return tile(i).adjusted(-2,-2,2,2);
 }
 QRect OverviewGrid::checkbox(int i) const {
     const auto r=tile(i);
@@ -54,12 +68,21 @@ void OverviewGrid::setItems(QList<Item> next,const QString& id,bool groups) {
     grouped=groups;
     if (!changed) for (int i=0;i<items.size();++i) if (items[i].id!=next[i].id || items[i].path!=next[i].path || items[i].label!=next[i].label || items[i].kind!=next[i].kind || items[i].project!=next[i].project || items[i].projectLabel!=next[i].projectLabel) { changed=true; break; }
     if (changed) {
+        QSet<QString> surviving;
+        for(const auto& item:next)surviving.insert(item.id);
+        const auto anchor=scrollAnchor(surviving);
+        QHash<QString,int> previousIndex; previousIndex.reserve(items.size());
+        for (int i=0;i<items.size();++i) previousIndex.insert(items[i].id,i);
         QMap<QString,QString> retained;
-        for (const auto& item:next) for (const auto& previous:items)
-            if (item.id==previous.id && item.path==previous.path && item.kind==previous.kind && keys.contains(item.id)) {
-                retained.insert(item.id,keys.value(item.id)); break;
+        for (const auto& item:next) {
+            const auto it=previousIndex.constFind(item.id);
+            if (it!=previousIndex.cend()) {
+                const auto& previous=items[*it];
+                if (item.path==previous.path && item.kind==previous.kind && keys.contains(item.id))
+                    retained.insert(item.id,keys.value(item.id));
             }
-        items=std::move(next); keys=std::move(retained); reflow();
+        }
+        items=std::move(next); keys=std::move(retained); reflow(anchor);
     }
     QString target=id;
     if (std::none_of(items.begin(),items.end(),[&](const auto& item) { return item.id==target; })) target=items.isEmpty()?QString():items.first().id;
@@ -82,24 +105,49 @@ void OverviewGrid::select(const QString& id,bool reveal) {
     if(previous!=current) { updateTile(previous); updateTile(current); }
 }
 void OverviewGrid::updateTile(const QString& id) {
-    for(int i=0;i<items.size();++i)if(items[i].id==id) { viewport()->update(tile(i)); break; }
+    for(int i=0;i<items.size();++i)if(items[i].id==id) { viewport()->update(paintArea(i)); break; }
 }
-void OverviewGrid::reflow() {
-    tiles.clear(); headings.clear();
-    const int cols=columns(), width=(viewport()->width()-Gap*(cols+1))/cols;
-    int y=Gap,col=0; QString previous; bool first=true;
-    for (const auto& item:items) {
-        if (grouped && (first || item.project!=previous)) {
-            if (col) { y+=TileHeight+Gap; col=0; }
-            headings.append({item.project,item.projectLabel,QRect(Gap,y,viewport()->width()-2*Gap,28)}); y+=34;
+OverviewGrid::ScrollAnchor OverviewGrid::scrollAnchor(const QSet<QString>& surviving) const {
+    for(int i=0;i<items.size() && i<tiles.size();++i)
+        if((surviving.isEmpty() || surviving.contains(items[i].id)) && tile(i).intersects(viewport()->rect()))
+            return {items[i].id,tile(i).top()};
+    return {};
+}
+void OverviewGrid::reflow(const ScrollAnchor& anchor) {
+    if(reflowing)return;
+    const QScopedValueRollback guard(reflowing,true);
+    QSize extent;
+    do {
+        extent=viewport()->size();
+        const int cols=std::max(1,(extent.width()-Gap)/(TileWidth+Gap));
+        const int available=std::max(cols,extent.width()-Gap*(cols+1));
+        QList<QRect> nextTiles; QList<Heading> nextHeadings;
+        nextTiles.reserve(items.size());
+        int y=Gap,col=0; QString previous; bool first=true;
+        for(const auto& item:items) {
+            if(grouped && (first || item.project!=previous)) {
+                if(col) { y+=TileHeight+Gap; col=0; }
+                nextHeadings.append({item.project,item.projectLabel,QRect(Gap,y,std::max(1,extent.width()-2*Gap),28)}); y+=34;
+            }
+            // Divide edges, so rounding remainder is distributed across columns.
+            const int left=Gap+col*Gap+col*available/cols;
+            const int right=Gap+col*Gap+(col+1)*available/cols;
+            nextTiles.append(QRect(left,y,right-left,TileHeight));
+            if(++col==cols) { col=0; y+=TileHeight+Gap; }
+            previous=item.project; first=false;
         }
-        tiles.append(QRect(Gap+col*(width+Gap),y,width,TileHeight));
-        if (++col==cols) { col=0; y+=TileHeight+Gap; }
-        previous=item.project; first=false;
+        if(col)y+=TileHeight+Gap;
+        tiles=std::move(nextTiles); headings=std::move(nextHeadings); layoutColumns=cols;
+        verticalScrollBar()->setPageStep(extent.height());
+        verticalScrollBar()->setSingleStep(std::max(16,fontMetrics().height()+Gap));
+        verticalScrollBar()->setRange(0,std::max(0,y-extent.height()));
+        // Showing/hiding the vertical bar can synchronously resize the viewport.
+        // Commit one consistent geometry before publishing demand or painting.
+    } while(extent!=viewport()->size());
+    if(!anchor.id.isEmpty())for(int i=0;i<items.size();++i)if(items[i].id==anchor.id) {
+        verticalScrollBar()->setValue(tiles[i].top()-anchor.top); break;
     }
-    if (col) y+=TileHeight+Gap;
-    verticalScrollBar()->setPageStep(viewport()->height()); verticalScrollBar()->setSingleStep(TileHeight+Gap);
-    verticalScrollBar()->setRange(0,std::max(0,y-viewport()->height()));
+    updateHover(hoverPosition);
     pruneKeys();
     // Reflow can move every tile/header, including inside an existing viewport.
     viewport()->update();
@@ -111,7 +159,8 @@ QStringList OverviewGrid::visibleIds() const {
 }
 void OverviewGrid::pruneKeys() {
     // Sources are watched only while visible; validate them anew on return.
-    const auto visible=visibleIds();
+    const auto visibleList=visibleIds();
+    const QSet<QString> visible(visibleList.begin(),visibleList.end());
     for (auto it=keys.begin();it!=keys.end();) {
         if (!visible.contains(it.key())) it=keys.erase(it); else ++it;
     }
@@ -129,7 +178,7 @@ void OverviewGrid::paintEvent(QPaintEvent* event) {
         p.setPen(pal.color(QPalette::Mid)); p.drawLine(r.bottomLeft(),r.bottomRight());
     }
     for (int i=0;i<items.size();++i) {
-        const auto r=tile(i); if (!event->region().intersects(r)) continue;
+        const auto r=tile(i); if (!event->region().intersects(paintArea(i))) continue;
         const auto& item=items[i]; const bool active=item.id==current;
         p.setBrush(pal.brush(QPalette::AlternateBase));
         p.setPen(QPen(active?pal.color(QPalette::Highlight):pal.color(QPalette::Mid),active?2:1));
@@ -156,13 +205,18 @@ void OverviewGrid::paintEvent(QPaintEvent* event) {
         const auto box=checkbox(i);
         p.fillRect(box,pal.brush(QPalette::Window));
         QStyleOptionButton option; option.initFrom(this); option.rect=box.adjusted(5,5,-5,-5);
+        // These are painted cells, not one shared checkbox widget. Keep hover
+        // and style animation state local to the cell under the pointer.
+        option.state&=~(QStyle::State_MouseOver|QStyle::State_HasFocus|QStyle::State_Sunken);
+        if(hover==i && box.contains(hoverPosition))option.state|=QStyle::State_MouseOver;
+        option.styleObject=nullptr;
         option.state|=checked.contains(item.id)?QStyle::State_On:QStyle::State_Off;
-        style()->drawPrimitive(QStyle::PE_IndicatorCheckBox,&option,&p,this);
+        style()->drawPrimitive(QStyle::PE_IndicatorCheckBox,&option,&p,nullptr);
     }
 }
 void OverviewGrid::warmItems(QList<Item> all,QStringList next,QSet<QString> shown,bool ready,bool enabled) {
     hasWarmItems=true; nearby=std::move(next); active=std::move(shown); warmReady=ready; warmEnabled=enabled;
-    QList<ThumbnailQueue::Item> targets;
+    QList<ThumbnailQueue::Item> targets; targets.reserve(all.size());
     for(const auto& item:all)targets.append({item.id,item.path,item.kind});
     queue->setItems(targets); syncDemand();
 }
@@ -176,7 +230,9 @@ void OverviewGrid::syncDemand() {
 }
 void OverviewGrid::thumbnailState() {
     const auto previous=loading; loading=queue->loadingIds();
-    const auto visible=visibleIds(); bool animate=false;
+    const auto visibleList=visibleIds();
+    const QSet<QString> visible(visibleList.begin(),visibleList.end());
+    bool animate=false;
     for(const auto& id:loading)if(isVisible() && visible.contains(id)) { animate=true; break; }
     if(animate && !spinner.isActive())spinner.start(); else if(!animate)spinner.stop();
     for(const auto& id:previous-loading)updateTile(id);
@@ -188,10 +244,17 @@ void OverviewGrid::refresh() {
     pruneKeys(); queue->refresh(); viewport()->update(); syncDemand();
 }
 void OverviewGrid::resizeEvent(QResizeEvent* e) {
-    QAbstractScrollArea::resizeEvent(e); reflow(); syncDemand(); if(viewportChanged)viewportChanged();
+    QAbstractScrollArea::resizeEvent(e);
+    if(reflowing)return;
+    reflow(scrollAnchor()); syncDemand(); if(viewportChanged)viewportChanged();
 }
-void OverviewGrid::showEvent(QShowEvent* e) { QAbstractScrollArea::showEvent(e); reflow(); syncDemand(); }
-void OverviewGrid::hideEvent(QHideEvent* e) { keys.clear(); spinner.stop(); QAbstractScrollArea::hideEvent(e); syncDemand(); }
+void OverviewGrid::showEvent(QShowEvent* e) { QAbstractScrollArea::showEvent(e); reflow(scrollAnchor()); syncDemand(); }
+void OverviewGrid::hideEvent(QHideEvent* e) { keys.clear(); hover=-1; hoverPosition={-1,-1}; spinner.stop(); QAbstractScrollArea::hideEvent(e); syncDemand(); }
+void OverviewGrid::scrollContentsBy(int,int) {
+    // Repaint from the logical scroll origin instead of shifting rounded device
+    // pixels, which can drift relative to later partial paints at fractional DPR.
+    viewport()->update();
+}
 void OverviewGrid::mousePressEvent(QMouseEvent* e) {
     if (e->button()!=Qt::LeftButton) return;
     setFocus(Qt::MouseFocusReason);
@@ -206,15 +269,22 @@ void OverviewGrid::mousePressEvent(QMouseEvent* e) {
     }
 }
 void OverviewGrid::mouseMoveEvent(QMouseEvent* e) {
-    int next=-1; for (int i=0;i<items.size();++i) if (tile(i).contains(e->position().toPoint())) { next=i; break; }
-    if (hover!=next) { const auto previous=hover; hover=next; if(previous>=0)viewport()->update(tile(previous)); if(hover>=0)viewport()->update(tile(hover)); }
+    updateHover(e->position().toPoint());
+}
+void OverviewGrid::updateHover(QPoint position) {
+    const bool wasOverCheckbox=hover>=0 && checkbox(hover).contains(hoverPosition);
+    hoverPosition=position;
+    int next=-1;
+    if(viewport()->rect().contains(position))for(int i=0;i<items.size();++i)if(tile(i).contains(position)) { next=i; break; }
+    if(hover!=next) { const auto previous=hover; hover=next; if(previous>=0)viewport()->update(paintArea(previous)); if(hover>=0)viewport()->update(paintArea(hover)); }
+    else if(hover>=0 && wasOverCheckbox!=checkbox(hover).contains(position))viewport()->update(paintArea(hover));
 }
 bool OverviewGrid::viewportEvent(QEvent* event) {
     if (event->type()==QEvent::ToolTip) {
         if (hover>=0 && hover<items.size()) QToolTip::showText(QCursor::pos(),items[hover].label+"\n"+items[hover].path+"\nClick to open · Checkbox / Ctrl+click to select · Shift+click for a range",viewport());
         return true;
     }
-    if (event->type()==QEvent::Leave) { const auto previous=hover; hover=-1; if(previous>=0)viewport()->update(tile(previous)); }
+    if (event->type()==QEvent::Leave)updateHover({-1,-1});
     return QAbstractScrollArea::viewportEvent(event);
 }
 void OverviewGrid::keyPressEvent(QKeyEvent* e) {
@@ -248,7 +318,15 @@ QJsonObject OverviewGrid::describe(QWidget* window) const {
     QJsonArray groups; for (const auto& heading:headings) groups.append(QJsonObject{{"id",heading.id},{"label",heading.label}});
     auto result=queue->metrics();
     result["visible"]=isVisible(); result["grouped"]=grouped; result["groups"]=groups;
+    result["native"]=bool(internalWinId());
+    int nativeAncestors=0;
+    for(auto* parent=parentWidget();parent && !parent->isWindow();parent=parent->parentWidget())
+        if(parent->internalWinId())++nativeAncestors;
+    result["native_ancestors"]=nativeAncestors;
     result["items"]=items.size(); result["columns"]=columns(); result["tiles"]=visible;
+    const auto origin=viewport()->mapTo(window,QPoint());
+    result["viewport"]=QJsonObject{{"x",origin.x()},{"y",origin.y()},{"width",viewport()->width()},{"height",viewport()->height()}};
+    result["scroll"]=verticalScrollBar()->value(); result["scroll_max"]=verticalScrollBar()->maximum();
     result["loading_id"]=loading.isEmpty()?QString():*loading.begin(); result["spinner_active"]=spinner.isActive();
     return result;
 }

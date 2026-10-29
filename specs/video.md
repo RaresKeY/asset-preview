@@ -9,6 +9,9 @@ Image/background-only sessions do not map libmpv. Visible videos own independent
 mpv cores and native embedded QOpenGLWindows, with fitted aspect ratio. The module
 remains resident after use, while every off-page/hidden player, decoder and render
 context is destroyed. No subprocess player, CPU frame-copy loop or video polling.
+Native paints and requested captures explicitly bind their framebuffer and select
+its color buffer through `gl_framebuffer.h`; binding FBO 0 alone may leave EGL
+output disabled. The Wayland lane checks actual compositor pixels against captures.
 The service restores `LC_NUMERIC=C` after Qt startup so desktop numeric locales
 such as `en_US.UTF-8` do not make `mpv_create()` reject audio/video playback.
 

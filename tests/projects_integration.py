@@ -235,6 +235,8 @@ class ProjectsIntegration(OverviewIntegration):
         self.rpc({'method':'layout','project_grid_size':0}); resize(700,500); capture('projects-narrow')
         self.assertLessEqual(self.state()['presentation']['projects']['columns'],3)
         self.rpc({'method':'layout','layout':'overview','project_filter':'materials','group_projects':True}); capture('overview-filtered')
+        self.assertFalse(self.state()['presentation']['overview']['native'])
+        self.assertEqual(self.state()['presentation']['overview']['native_ancestors'],0)
         tiles=self.state()['presentation']['overview']['tiles']
         box=tiles[0]['checkbox']; input.click(box['x']+10,box['y']+10)
         input.key('Shift_L',1); box=tiles[1]['checkbox']; input.click(box['x']+10,box['y']+10); input.key('Shift_L',0); input.x.XFlush(input.display)

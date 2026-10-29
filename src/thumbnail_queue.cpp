@@ -79,13 +79,16 @@ void ThumbnailQueue::demand(QStringList front,QStringList next,QSet<QString> omi
     const auto oldNearby=nearby; const auto oldExcluded=excluded;
     visible=std::move(front); nearby=std::move(next); excluded=std::move(omit); enabled=active; warm=background;
     quiet.restart();
+    const QSet<QString> oldVisibleSet(oldVisible.begin(),oldVisible.end());
+    const QSet<QString> oldNearbySet(oldNearby.begin(),oldNearby.end());
+    const QSet<QString> visibleSet(visible.begin(),visible.end());
     // A key may have changed while its source was offscreen/unwatched.
-    for(const auto& id:visible)if(!oldVisible.contains(id)) { dirty.insert(id); hydrated.remove(id); }
-    for(const auto& id:nearby)if(!oldNearby.contains(id)) { dirty.insert(id); hydrated.remove(id); }
+    for(const auto& id:visible)if(!oldVisibleSet.contains(id)) { dirty.insert(id); hydrated.remove(id); }
+    for(const auto& id:nearby)if(!oldNearbySet.contains(id)) { dirty.insert(id); hydrated.remove(id); }
     for(const auto& id:oldExcluded)if(!excluded.contains(id)) { dirty.insert(id); hydrated.remove(id); }
     for(auto& job:decodes)
-        if(!eligible(job.id) || (!visible.contains(job.id) && !warm)) *job.cancelled=true;
-    if(process && (!eligible(renderId) || (renderForeground && !visible.contains(renderId)) || (!visible.contains(renderId) && !warm)))cancelRender();
+        if(!eligible(job.id) || (!visibleSet.contains(job.id) && !warm)) *job.cancelled=true;
+    if(process && (!eligible(renderId) || (renderForeground && !visibleSet.contains(renderId)) || (!visibleSet.contains(renderId) && !warm)))cancelRender();
     if (!enabled) {
         dispatch.stop();
         // Hidden RAM is cleared by the owner. A later show rehydrates disk.
@@ -112,16 +115,28 @@ void ThumbnailQueue::work() {
     // Visible images first, then visible models; nearby/remaining work follows
     // only after a finite quiet period. No queued worker backlog can outrank a
     // newly visible request. The two decode slots are independent of F3D.
-    QStringList order;
+    QStringList order; order.reserve(items.size());
+    QSet<QString> seen; seen.reserve(items.size());
+    const QSet<QString> visibleSet(visible.begin(),visible.end());
     auto append=[&](const QStringList& ids) {
-        for(bool images:{true,false})for(const auto& id:ids)
-            if(eligible(id) && (byId.value(id).kind=="image")==images && !order.contains(id))order.append(id);
+        for(bool images:{true,false})for(const auto& id:ids) {
+            if(seen.contains(id) || excluded.contains(id))continue;
+            const auto it=byId.constFind(id);
+            if(it!=byId.cend() && (it->kind=="image")==images) { seen.insert(id); order.append(id); }
+        }
     };
     append(visible);
-    if(warm && !backgroundSuppressed) { append(nearby); QStringList rest; for(const auto& item:items)rest.append(item.id); append(rest); }
+    if(warm && !backgroundSuppressed) {
+        append(nearby);
+        for(bool images:{true,false})for(const auto& item:items)
+            if(!seen.contains(item.id) && !excluded.contains(item.id) && (item.kind=="image")==images) {
+                seen.insert(item.id); order.append(item.id);
+            }
+    }
     QElapsedTimer slice; slice.start(); int prepared=0;
     for(const auto& id:order) {
-        const auto item=byId.value(id); const bool front=visible.contains(id);
+        const auto it=byId.constFind(id); if(it==byId.cend())continue;
+        const auto& item=*it; const bool front=visibleSet.contains(id);
         if(!front && quiet.elapsed()<BackgroundDelay) { schedule(BackgroundDelay-int(quiet.elapsed()),false); break; }
         if(!front && item.kind!="image" && item.kind!="model" && item.kind!="material")continue;
         if(dirty.contains(id) || !keys.contains(id) || !hydrated.contains(id)) {
@@ -154,9 +169,12 @@ void ThumbnailQueue::work() {
             attempted.insert(key); render(item,key,front);
         } else attempted.insert(key);
     }
-    // Superseded source identities must not accumulate across save cycles.
-    QSet<QString> retained; for(const auto& key:keys)retained.insert(key);
-    attempted.intersect(retained);
+    if(prepared) {
+        // Superseded source identities must not accumulate across save cycles.
+        QSet<QString> retained; retained.reserve(keys.size());
+        for(const auto& key:keys)retained.insert(key);
+        attempted.intersect(retained);
+    }
 }
 void ThumbnailQueue::notify() { if(activityChanged)activityChanged(); }
 void ThumbnailQueue::publish(const QString& key,const QImage& image) {

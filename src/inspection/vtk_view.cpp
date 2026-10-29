@@ -416,6 +416,7 @@ void InspectionVtkView::options() {
     const auto s=config["settings"].toObject();
     const bool light=s["background"].toString()=="light";
     scene->renderer->SetBackground(light?.8:.075,light?.8:.09,light?.8:.115);
+    scene->renderer->SetBackgroundAlpha(1.0);
     scene->renderer->GetActiveCamera()->SetParallelProjection(s["orthographic"].toBool());
     for(auto& [actor,original]:scene->originalProperties) {
         copyProperty(actor->GetProperty(),original);
@@ -442,7 +443,7 @@ void InspectionVtkView::paintGL() { paintFrame(defaultFramebufferObject()); }
 void InspectionVtkView::paintFrame(GLuint framebuffer) {
     ++renders;
     auto* f=context()->functions();
-    f->glBindFramebuffer(GL_FRAMEBUFFER,framebuffer);
+    preview::bindColorFramebuffer(*context(),framebuffer);
     f->glViewport(0,0,int(width()*devicePixelRatio()),int(height()*devicePixelRatio()));
     f->glDisable(GL_SCISSOR_TEST); f->glEnable(GL_DEPTH_TEST); f->glDepthMask(GL_TRUE);
     f->glColorMask(GL_TRUE,GL_TRUE,GL_TRUE,GL_TRUE);
@@ -503,7 +504,8 @@ void InspectionVtkView::orbit(double yawDelta,double pitchDelta) {
     const auto* p=c->GetPosition(); const auto* f=c->GetFocalPoint();
     double d[3]{p[0]-f[0],p[1]-f[1],p[2]-f[2]}; const double radius=c->GetDistance();
     if(radius<1e-9) return;
-    const double yaw=std::atan2(d[0],d[horizontal])+yawDelta;
+    // atan2(x,y) on the XY floor runs opposite to azimuth about +Z.
+    const double yaw=std::atan2(d[0],d[horizontal])+(zUp?-yawDelta:yawDelta);
     const double pitch=std::clamp(std::asin(std::clamp(d[vertical]/radius,-1.0,1.0))+pitchDelta,-std::numbers::pi*.49,std::numbers::pi*.49);
     d[0]=radius*std::cos(pitch)*std::sin(yaw); d[horizontal]=radius*std::cos(pitch)*std::cos(yaw); d[vertical]=radius*std::sin(pitch);
     c->SetPosition(f[0]+d[0],f[1]+d[1],f[2]+d[2]); c->SetViewUp(0,zUp?0:1,zUp?1:0);

@@ -2,6 +2,9 @@
 import json
 import os
 from pathlib import Path
+import shutil
+import subprocess
+import struct
 import tempfile
 import time
 import unittest
@@ -9,7 +12,7 @@ from unittest.mock import patch
 
 from integration import audio, client, eventually, memory, png, png_pixel, row, video
 from inspection_fixture import PARTS, write_fixture
-from inspection_integration import capture_pixels
+from inspection_integration import capture_pixels, png_rgb
 
 
 class WaylandIntegration(unittest.TestCase):
@@ -28,6 +31,8 @@ class WaylandIntegration(unittest.TestCase):
                            ASSET_PREVIEW_SMALL_CACHE=str(self.root / 'small-cache'),
                            ASSET_PREVIEW_TEXTURE_CACHE=str(self.root / 'texture-cache'),
                            ASSET_PREVIEW_TEST_NULL_AUDIO='1')
+        if self._testMethodName == 'test_overview_stays_raster_after_native_layouts':
+            environment.update(QT_SCALE_FACTOR='1.25', QT_STYLE_OVERRIDE='Breeze')
         scope = patch.dict(os.environ, environment, clear=True)
         scope.start()
         self.addCleanup(scope.stop)
@@ -70,6 +75,27 @@ class WaylandIntegration(unittest.TestCase):
         self.assertGreater(len(set(pixels)), 10, 'Rendered content must contain visible geometry/video')
         return pixels
 
+    def compositor_capture(self, key, label):
+        # The service's capture composites the source texture into QWidget::grab.
+        # Only a compositor screenshot catches display draw-buffer, alpha or
+        # stacking failures when the source texture itself is correct.
+        self.assertTrue(shutil.which('spectacle'), 'Wayland display checks require installed Spectacle')
+        eventually(lambda: not row(key)['metrics'].get('command_pending'), timeout=30)
+        path = self.output / f'{label}-compositor.png'
+        subprocess.run(['spectacle', '-b', '-n', '-a', '-e', '-S', '-o', str(path)],
+                       check=True, capture_output=True, timeout=15)
+        state = client.rpc({'method': 'list'})
+        width, height = struct.unpack('>II', path.read_bytes()[16:24])
+        self.assertEqual((width, height), (state['presentation']['width'], state['presentation']['height']))
+        pixels = capture_pixels(path, row(key)['viewport'])
+        self.assertGreater(len(set(pixels)), 10, 'The compositor must display the native scene, not a blank card')
+        expected = self.capture(key, f'{label}-texture')
+        self.assertEqual(len(pixels), len(expected))
+        errors = [max(abs(a-b) for a, b in zip(actual, reference)) for actual, reference in zip(pixels, expected)]
+        self.assertLess(sum(error > 3 for error in errors) / len(errors), .02,
+                        'Composited native content must match the rendered scene')
+        return pixels
+
     def receipt(self, **fields):
         (self.output / 'result.json').write_text(json.dumps({
             'passed': True, 'platform': client.rpc({'method': 'ping'})['platform'],
@@ -95,26 +121,44 @@ class WaylandIntegration(unittest.TestCase):
         client.rpc({'method': 'select', 'id': 'model'})
         eventually(lambda: row('model').get('metrics', {}).get('engine'), timeout=30)
         renderer = self.hardware('model')
+        self.assertEqual(row('model')['metrics']['frame_transport'], 'shared_gpu_texture')
+        self.assertEqual(row('model')['metrics']['display_readbacks'], 0)
+        self.compositor_capture('model', 'model-initial')
         before = self.capture('model', 'model')
+        reads = row('model')['metrics']['display_readbacks']
         camera = row('model')['metrics']['camera']
         renders = row('model')['metrics']['renders']
         client.rpc({'method': 'camera_view', 'id': 'model', 'view': 'front'})
         eventually(lambda: row('model')['metrics']['camera'] != camera)
         eventually(lambda: row('model')['metrics']['renders'] > renders and not row('model')['metrics']['command_pending'])
+        self.assertEqual(row('model')['metrics']['display_readbacks'], reads, 'Live camera frames must remain on the GPU')
         self.assertTrue(before != self.capture('model', 'model-front'), 'Camera change must publish a new visible frame')
+        self.compositor_capture('model', 'model-front')
 
         self.add('material', image, kind='material', settings={'shape': 'cube'})
         client.rpc({'method': 'select', 'id': 'material'})
         eventually(lambda: row('material').get('metrics', {}).get('engine'), timeout=30)
         self.hardware('material')
+        self.compositor_capture('material', 'material')
         self.capture('material', 'material')
         client.rpc({'method': 'settings', 'id': 'material', 'settings': {'shape': 'plane'}})
         eventually(lambda: row('material')['metrics']['triangles'] == 2)
         eventually(lambda: not row('material')['metrics']['command_pending'])
+        self.compositor_capture('material', 'material-plane')
+        client.rpc({'method': 'layout', 'layout': 'overview'})
+        eventually(lambda: client.rpc({'method': 'list'})['active'] == 0)
+        client.rpc({'method': 'layout', 'layout': 'single'})
+        client.rpc({'method': 'select', 'id': 'model'})
+        eventually(lambda: row('model').get('metrics', {}).get('engine'), timeout=30)
+        self.compositor_capture('model', 'model-from-overview')
+        client.rpc({'method': 'hide'})
+        client.rpc({'method': 'show'})
+        eventually(lambda: row('model').get('metrics', {}).get('engine'), timeout=30)
+        self.compositor_capture('model', 'model-reopened')
         time.sleep(1)
-        renders = row('material')['metrics']['renders']
+        renders = row('model')['metrics']['renders']
         time.sleep(.6)
-        self.assertEqual(row('material')['metrics']['renders'], renders)
+        self.assertEqual(row('model')['metrics']['renders'], renders)
         client.rpc({'method': 'hide'})
         self.assertTrue(all('metrics' not in entry for entry in client.rpc({'method': 'list'})['entries']))
         self.receipt(renderer=renderer, checks=['image refresh pixels', 'model pixels and camera', 'material shape', 'idle rendering', 'hidden unload'])
@@ -133,6 +177,7 @@ class WaylandIntegration(unittest.TestCase):
         client.rpc({'method': 'seek', 'id': 'video', 'seconds': 2})
         eventually(lambda: abs(row('video')['metrics'].get('position', 0) - 2) < .2)
         self.capture('video', 'video-paused')
+        self.compositor_capture('video', 'video-paused')
 
         sound = self.root / 'tone.wav'
         audio(sound)
@@ -149,6 +194,7 @@ class WaylandIntegration(unittest.TestCase):
         eventually(lambda: row('model').get('metrics', {}).get('engine'), timeout=30)
         self.hardware('model')
         self.capture('video', 'mixed-grid')
+        self.compositor_capture('model', 'mixed-grid-model')
         client.rpc({'method': 'hide'})
         self.assertEqual(client.rpc({'method': 'list'})['active'], 0)
         self.assertTrue(all('metrics' not in entry for entry in client.rpc({'method': 'list'})['entries']))
@@ -167,15 +213,81 @@ class WaylandIntegration(unittest.TestCase):
         eventually(lambda: row('model').get('metrics', {}).get('renders', 0) > 0)
         self.assertEqual(inspect()['part_count'], len(PARTS))
         renderer = self.hardware('model')
+        self.compositor_capture('model', 'parts-native')
         before = self.capture('model', 'parts')
         loads = row('model')['metrics']['loads']
         inspect('cut', axis='x', position=0, keep='positive', enabled=True)
         after = self.capture('model', 'cuts')
+        self.compositor_capture('model', 'cuts-native')
         self.assertGreater(sum(a != b for a, b in zip(before, after)), 100)
         self.assertEqual(row('model')['metrics']['loads'], loads)
         client.rpc({'method': 'hide'})
         self.assertFalse(inspect()['loaded'])
         self.receipt(renderer=renderer, checks=['part inventory', 'inspection pixels', 'cut pixels', 'no reimport', 'hidden unload'])
+
+    def test_overview_stays_raster_after_native_layouts(self):
+        model = self.root / 'model.glb'
+        write_fixture(model)
+        self.add('model', model, project='models')
+        clip = self.root / 'clip.mp4'
+        video(clip, duration=1)
+        self.add('video', clip, project='media', settings={'paused': True, 'muted': True})
+        for i in range(16):
+            image = self.root / f'image-{i}.png'
+            png(image, (40 + i * 10, 110, 190, 255))
+            self.add(f'image-{i}', image, project='references')
+        client.rpc({'method': 'theme', 'mode': 'dark'})
+        client.rpc({'method': 'layout', 'layout': 'projects', 'project_grid_size': 2})
+        client.rpc({'method': 'show'})
+        eventually(lambda: row('model').get('metrics', {}).get('engine'), timeout=30)
+        eventually(lambda: row('video').get('metrics', {}).get('loads'), timeout=30)
+        renderer = self.hardware('model')
+        checks = []
+        for layout in ('projects', 'single', 'grid'):
+            if layout != 'projects':
+                client.rpc({'method': 'layout', 'layout': layout})
+                client.rpc({'method': 'select', 'id': 'model'})
+                eventually(lambda: row('model').get('metrics', {}).get('engine'), timeout=30)
+            client.rpc({'method': 'layout', 'layout': 'overview', 'group_projects': False})
+            eventually(lambda: client.rpc({'method': 'list'})['presentation']['overview']['visible_ready'])
+            time.sleep(.2)
+            state = client.rpc({'method': 'list'})
+            overview = state['presentation']['overview']
+            self.assertEqual(state['active'], 0)
+            self.assertFalse(overview['native'])
+            self.assertEqual(overview['native_ancestors'], 0)
+            actual = self.output / f'from-{layout}-compositor.png'
+            environment = {key: value for key, value in os.environ.items() if key != 'QT_SCALE_FACTOR'}
+            subprocess.run(['spectacle', '-b', '-n', '-a', '-e', '-S', '-o', str(actual)],
+                           env=environment, check=True, capture_output=True, timeout=15)
+            expected = self.output / f'from-{layout}-reference.png'
+            client.rpc({'method': 'capture', 'path': str(expected)})
+            actual_size = struct.unpack('>II', actual.read_bytes()[16:24])
+            expected_size = struct.unpack('>II', expected.read_bytes()[16:24])
+            self.assertTrue(all(abs(a-b) <= 1 for a, b in zip(actual_size, expected_size)))
+            scale = actual_size[0] / state['presentation']['width']
+            self.assertAlmostEqual(scale, 1.25, places=2)
+            # QWidget::grab and the compositor round the outer fractional frame
+            # differently. Check unique thumbnail colors at independent layout
+            # coordinates; the raster harness compares partial/clean pixels.
+            viewport = overview['viewport']
+            points = []
+            for tile in overview['tiles']:
+                if not tile['id'].startswith('image-'):
+                    continue
+                y = tile['y'] + 50
+                if not viewport['y'] + 2 < y < viewport['y'] + viewport['height'] - 2:
+                    continue
+                index = int(tile['id'].split('-')[1])
+                points.append((int((tile['x'] + tile['width'] / 2) * scale), int(y * scale), (40 + index * 10, 110, 190)))
+            self.assertGreaterEqual(len(points), 4)
+            for path in (actual, expected):
+                _, _, rows = png_rgb(path)
+                for x, y, color in points:
+                    self.assertLessEqual(max(abs(a-b) for a, b in zip(rows[y][x*3:x*3+3], color)), 3,
+                                         f'{path.name}: thumbnail at ({x}, {y}) must match its asset')
+            checks.append(f'{layout} to Overview: fractional compositor thumbnail positions and raster ancestry')
+        self.receipt(renderer=renderer, scale=scale, checks=checks)
 
 
 if __name__ == '__main__':

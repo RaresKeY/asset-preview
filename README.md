@@ -92,6 +92,8 @@ Source launches use native Wayland (`QT_QPA_PLATFORM=wayland`) when the caller
 provides `WAYLAND_DISPLAY`, and X11 (`xcb`) otherwise. Explicit platform
 overrides are respected. `tools/test.sh wayland-gpu` checks rendering without
 an X11 display in a private KWin compositor nested inside headless Gamescope.
+That lane uses installed Spectacle to verify actual compositor pixels as well
+as the source textures.
 Published 0.0.2 packages retain their original X11/XWayland requirements.
 
 ## Commands

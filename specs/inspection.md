@@ -3,6 +3,9 @@
 Source ownership: `src/inspection/`, inspection branches in `src/service.*` and
 `src/viewer.*`, `bin/asset-preview`, the canonical preview skill, and
 `tests/inspection_*`. This spec describes the implemented initial scope.
+Native painting explicitly selects its framebuffer color buffer and configures
+an opaque renderer background. Wayland checks compare actual compositor pixels
+with requested Parts/Cuts captures, including the background.
 
 ## Entry and lifetime
 
@@ -96,6 +99,8 @@ their established input conventions. Picking observes hidden actors and cut
 planes. Transparent surfaces are picked by their frontmost geometry. A mapped
 surface hit supplies component-local position and normal for a pin; selecting a
 tree item supplies a whole-part target. Model comments use an empty target list.
+Horizontal orbit matches F3D azimuth for both up axes and horizon-lock modes,
+including the XY-floor handedness correction shared with ordinary Preview.
 
 Hide, Show, Isolate, Undo and Restore All change visibility without reimporting.
 Partial source mappings disable isolation that would pretend all geometry was

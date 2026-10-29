@@ -504,6 +504,9 @@ class PreviewIntegration(unittest.TestCase):
         renderer=row("model")["metrics"]["renderer"]
         self.assertFalse(any(s in renderer.lower() for s in ("llvmpipe","softpipe","software","unknown")),renderer)
         time.sleep(.5); initial=row("model")["metrics"]; time.sleep(1)
+        self.assertEqual(initial["frame_transport"],"shared_gpu_texture")
+        self.assertEqual(initial["display_readbacks"],0)
+        self.assertGreater(initial["presented_frames"],0)
         self.assertEqual(row("model")["metrics"]["renders"],initial["renders"])
         obj.write_text(obj.read_text().replace("v -1.0","v -1.5"))
         eventually(lambda:row("model")["metrics"]["loads"]>initial["loads"],timeout=15)
@@ -637,6 +640,53 @@ class PreviewIntegration(unittest.TestCase):
             input.click(view["x"]+view["width"]//2,view["y"]+view["height"]//2)
             input.press("Left"); eventually(lambda:client.rpc({"method":"list"})["selected"]=="orbit")
         finally: input.close()
+
+    @unittest.skipUnless(GPU and os.environ.get("QT_QPA_PLATFORM")!="wayland","Hardware Gamescope X11 input lane")
+    def test_horizontal_orbit_direction_matches_f3d_across_up_axes(self):
+        from inspection_fixture import write_fixture
+        asset=self.root/'orbit-direction.glb'; write_fixture(asset)
+        client.rpc({'method':'add','entry':{'id':'direction','path':str(asset),'settings':{'grid':False}}})
+        self.show()
+        eventually(lambda:row('direction').get('metrics',{}).get('engine'),timeout=30)
+        input=XInput(); observations=[]
+        try:
+            for inspection in (False,True):
+                if inspection:
+                    client.rpc({'method':'inspect','id':'direction','action':'open','review':str(self.root/'direction-review.json')})
+                    eventually(lambda:client.rpc({'method':'inspect','id':'direction','action':'state'}).get('loaded'),timeout=30)
+                renderer=row('direction')['metrics']['renderer']
+                self.assertFalse(any(word in renderer.lower() for word in ('llvmpipe','softpipe','software','unknown')),renderer)
+                for axis in ('y','z'):
+                    for locked in (False,True):
+                        client.rpc({'method':'settings','id':'direction','settings':{'up_axis':axis,'lock_horizon':locked}})
+                        eventually(lambda: not row('direction')['metrics'].get('command_pending') and not row('direction')['metrics'].get('loading'),timeout=30)
+                        for dx in (40,-40):
+                            with self.subTest(inspection=inspection,up_axis=axis,locked=locked,dx=dx):
+                                client.rpc({'method':'camera_view','id':'direction','view':'front'})
+                                eventually(lambda: not row('direction')['metrics'].get('command_pending'))
+                                before=row('direction')['metrics']['camera']
+                                view=row('direction')['viewport']
+                                input.drag(view['x']+view['width']//2,view['y']+view['height']//2,dx,0)
+                                eventually(lambda:row('direction')['metrics']['camera']!=before)
+                                eventually(lambda:not row('direction')['metrics'].get('command_pending'))
+                                after=row('direction')['metrics']['camera']
+                                a=[p-f for p,f in zip(before['position'],before['focal'])]
+                                b=[p-f for p,f in zip(after['position'],after['focal'])]
+                                vertical=1 if axis=='y' else 2
+                                a[vertical]=b[vertical]=0
+                                cross=[a[1]*b[2]-a[2]*b[1],a[2]*b[0]-a[0]*b[2],a[0]*b[1]-a[1]*b[0]]
+                                yaw=math.degrees(math.atan2(cross[vertical],sum(x*y for x,y in zip(a,b))))
+                                # F3D/VTK azimuth is right-handed about world up;
+                                # rightward pointer movement applies negative azimuth.
+                                self.assertAlmostEqual(yaw,-dx*.4,places=5)
+                                self.assertEqual(after['focal'],before['focal'])
+                                self.assertAlmostEqual(math.dist(after['position'],after['focal']),math.dist(before['position'],before['focal']),places=5)
+                                observations.append({'inspection':inspection,'up_axis':axis,'locked':locked,'dx':dx,'yaw_degrees':yaw})
+        finally:
+            input.close()
+        if os.environ.get('ASSET_PREVIEW_EVIDENCE_DIR'):
+            output=Path(os.environ['ASSET_PREVIEW_EVIDENCE_DIR']); output.mkdir(parents=True,exist_ok=True)
+            (output/'orbit-direction.json').write_text(json.dumps(observations,indent=2)+'\n')
 
     @unittest.skipUnless(GPU and os.environ.get("QT_QPA_PLATFORM")!="wayland","Hardware Gamescope X11 input lane")
     def test_25_zoom_and_orbit_preserve_focal_point(self):

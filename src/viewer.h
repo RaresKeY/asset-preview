@@ -30,6 +30,7 @@ public:
     virtual QJsonObject metrics() const = 0;
     virtual std::shared_ptr<const preview::AudioWaveform> audioWaveform() const { return {}; }
     virtual QImage snapshot() { return {}; }
+    virtual QImage thumbnailSnapshot(QSize bound) { return snapshot().scaled(bound,Qt::KeepAspectRatio,Qt::SmoothTransformation); }
     virtual bool loading() const { return false; }
     virtual bool seek(double, QString& error) { error="This preview has no seekable playback"; return false; }
     virtual bool stepAnimation(int,int,QString& error) { error="This preview has no frame stepping"; return false; }

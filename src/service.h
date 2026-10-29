@@ -157,6 +157,7 @@ private:
     FullscreenNotice* fullscreenNotice = nullptr;
     bool fullscreenFocus = false, fullscreenMode = false;
     bool thumbnailWatchScheduled=false,thumbnailPrepareScheduled=false;
+    QTimer thumbnailInputQuiet;
     Qt::WindowStates windowedState;
     QRect windowedGeometry;
 };

@@ -14,6 +14,9 @@
 #include <cmath>
 
 ProjectGrid::ProjectGrid(QWidget* parent):QScrollArea(parent),content(new QWidget) {
+    // Embedded GL views need native scroll clipping here, but that requirement
+    // must stop at this branch instead of promoting the shared canvas.
+    setAttribute(Qt::WA_DontCreateNativeAncestors);
     emptyState=new QLabel("No projects to show\nAgents can create a project or send a preview to get started.",content);
     emptyState->setAlignment(Qt::AlignCenter); emptyState->setWordWrap(true);
     setObjectName("projectGrid"); setFrameShape(QFrame::NoFrame); setWidget(content);

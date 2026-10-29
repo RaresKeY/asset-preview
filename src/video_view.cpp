@@ -172,7 +172,7 @@ void VideoView::paintGL() { paintFrame(defaultFramebufferObject()); }
 void VideoView::paintFrame(GLuint framebuffer) {
     ++renders;
     auto* gl=context()->functions();
-    gl->glBindFramebuffer(GL_FRAMEBUFFER,framebuffer);
+    preview::bindColorFramebuffer(*context(),framebuffer);
     gl->glViewport(0,0,int(width()*devicePixelRatio()),int(height()*devicePixelRatio()));
     bool replace=false;
     if (candidate) {

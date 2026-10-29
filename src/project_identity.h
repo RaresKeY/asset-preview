@@ -1,4 +1,5 @@
 #pragma once
+#include <QHash>
 #include <QIcon>
 #include <QPainter>
 #include <QPixmap>
@@ -6,6 +7,9 @@
 
 // Project mark v1: FNV-1a over the stable namespaced ID; never label/order/status.
 inline QIcon projectIcon(const QString& id) {
+    static QHash<QString,QIcon> cache;
+    if (const auto it=cache.constFind(id); it!=cache.cend()) return *it;
+    if (cache.size()>=256) cache.clear();
     quint32 hash=2166136261u;
     for (const auto c:QString("project:"+id)) hash=(hash^c.unicode())*16777619u;
     const char* tones[]={"#ce6c9f","#a495bd","#cfad37","#5596e6","#d8636c","#64b58b","#4aabb8","#cf8755"};
@@ -20,5 +24,8 @@ inline QIcon projectIcon(const QString& id) {
         else p.drawPolygon(QPolygonF({{0,-9},{6,-3},{1,1},{-2,-2}}));
         p.restore();
     }
-    return QIcon(pix);
+    p.end();
+    QIcon icon(pix);
+    cache.insert(id,icon);
+    return icon;
 }

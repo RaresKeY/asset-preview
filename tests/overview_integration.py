@@ -561,6 +561,25 @@ class OverviewIntegration(unittest.TestCase):
         self.assertEqual(self.rpc({'method':'list'})['cache']['bytes'],0)
 
     @unittest.skipUnless(harness.GPU,harness.GPU_REASON)
+    def test_live_input_preempts_background_thumbnail_work(self):
+        self.image('live',size=512); self.rpc({'method':'show'}); self.loaded('live')
+        source=self.root/'background-input.obj'
+        source.write_text('v -1 -1 0\nv 1 -1 0\nv 0 1 0\nf 1 2 3\n')
+        self.rpc({'method':'add','entry':{'id':'background-input','kind':'model','path':str(source)}})
+        child=int(harness.eventually(lambda:self.rpc({'method':'list'})['presentation']['overview'].get('worker_pid')))
+        os.kill(child,signal.SIGSTOP)
+        self.addCleanup(lambda:os.kill(child,signal.SIGKILL) if Path(f'/proc/{child}').exists() else None)
+        input=XInput()
+        try:
+            view=self.row('live')['viewport']
+            input.drag(view['x']+view['width']//2,view['y']+view['height']//2,30,15)
+            harness.eventually(lambda:not Path(f'/proc/{child}').exists())
+            self.assertFalse(self.rpc({'method':'list'})['presentation']['overview']['warming'])
+            harness.eventually(lambda:self.rpc({'method':'list'})['presentation']['overview']['rendered']==1,timeout=30)
+            self.assertFalse(self.row('background-input')['active'])
+        finally:input.close()
+
+    @unittest.skipUnless(harness.GPU,harness.GPU_REASON)
     def test_background_obj_manifest_revalidates_new_texture_membership_on_navigation(self):
         self.image('current'); self.rpc({'method':'show'}); self.loaded('current')
         first=self.root/'first-map.png'; second=self.root/'second-map.png'
@@ -638,6 +657,37 @@ class OverviewIntegration(unittest.TestCase):
         self.assertEqual(self.rpc({"method":"list"})["active"],0)
 
     @unittest.skipUnless(harness.GPU,harness.GPU_REASON)
+    def test_overview_new_assets_keep_visible_cards_anchored(self):
+        self.fixture.add_model(); self.rpc({'method':'show'}); self.loaded('model')
+        for project in ('early','late'):
+            self.rpc({'method':'project','id':project,'label':project.title()})
+            for i in range(20):self.image(f'{project}-{i}',project=project)
+        self.rpc({'method':'layout','layout':'overview','group_projects':True})
+        self.settled()
+        controls=XInput(); self.addCleanup(controls.close)
+        controls.press('End')
+        harness.eventually(lambda:self.rpc({'method':'list'})['presentation']['overview']['scroll']>0)
+        before=self.rpc({'method':'list'})['presentation']['overview']
+        self.assertFalse(before['native'])
+        self.assertEqual(before['native_ancestors'],0)
+        anchor=before['tiles'][0]
+        positions={tile['id']:(tile['x'],tile['y']) for tile in before['tiles']}
+        for i in range(5):
+            self.image(f'new-{i}',project='early')
+            state=self.rpc({'method':'list'})
+            self.assertEqual(state['active'],0)
+            current=state['presentation']['overview']
+            tile=next(tile for tile in current['tiles'] if tile['id']==anchor['id'])
+            self.assertEqual((tile['x'],tile['y']),(anchor['x'],anchor['y']))
+            for tile in current['tiles']:
+                if tile['id'] in positions:self.assertEqual((tile['x'],tile['y']),positions[tile['id']])
+        self.settled()
+        state=self.rpc({'method':'list'})
+        final=next(tile for tile in state['presentation']['overview']['tiles'] if tile['id']==anchor['id'])
+        self.assertEqual(final['y'],anchor['y'])
+        self.rpc({'method':'capture','path':str(self.root/'overview-stable-arrivals.png')})
+
+    @unittest.skipUnless(harness.GPU,harness.GPU_REASON)
     def test_native_overview_frames_click_keyboard_scroll_and_responsive(self):
         self.fixture.add_model(); self.rpc({"method":"show"}); model=self.loaded("model")
         renderer=model["metrics"]["renderer"]
@@ -653,6 +703,8 @@ class OverviewIntegration(unittest.TestCase):
         harness.eventually(lambda:self.rpc({"method":"list"})["layout"]=="overview")
         harness.eventually(lambda:self.rpc({"method":"list"})["cache"]["disk_entries"]>=8)
         state=self.settled(); self.assertEqual(state["active"],0)
+        self.assertFalse(state['presentation']['overview']['native'])
+        self.assertEqual(state['presentation']['overview']['native_ancestors'],0)
         self.assertTrue(all("metrics" not in r for r in state["entries"]))
         capture=self.root/"overview-light.png"; self.rpc({"method":"capture","path":str(capture)})
         tile=next(t for t in state["presentation"]["overview"]["tiles"] if t["id"]=="texture-0")

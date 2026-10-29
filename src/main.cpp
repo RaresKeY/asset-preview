@@ -26,6 +26,8 @@ int main(int argc,char** argv) {
     format.setVersion(3,3); format.setProfile(QSurfaceFormat::CoreProfile);
     format.setDepthBufferSize(24); format.setStencilBufferSize(8); format.setSamples(0);
     QSurfaceFormat::setDefaultFormat(format);
+    // A native overlay must not make unrelated raster siblings native too.
+    QCoreApplication::setAttribute(Qt::AA_DontCreateNativeWidgetSiblings);
     QApplication app(argc,argv);
     // Qt adopts the desktop locale; libmpv requires C numeric formatting.
     std::setlocale(LC_NUMERIC,"C");

@@ -4,9 +4,11 @@
 #include <QEvent>
 #include <QJsonArray>
 #include <QLibrary>
+#include <QMouseEvent>
 #include <QScopeGuard>
 #include <QTemporaryDir>
 #include <QThread>
+#include <QWheelEvent>
 #include <iostream>
 #include <stdexcept>
 
@@ -31,6 +33,7 @@ static void modelPublication() {
     const auto handle=createModel(cfg,nullptr,[&](bool ok,QString) { require(ok,"Fixture failed loading"); ++completions; },
         [&](const QJsonObject&,bool) { ++cameraChanges; });
     std::unique_ptr<QWidget> surface(handle.surface);
+    auto* receiver=dynamic_cast<QObject*>(handle.view);
     const auto unblock=qScopeGuard([&] { allow(99); });
     handle.view->playbackSettingsRequested=[&](QJsonObject) { ++playbackChanges; };
     require(handle.view->reload(cfg,error),"First reload rejected");
@@ -41,7 +44,7 @@ static void modelPublication() {
     cfg["test_stage"]=2; handle.view->reload(cfg,error);
     // Run the surface's deferred reload without delivering qApp's older
     // coalesced completion. Barriers make this race deterministic.
-    QCoreApplication::sendPostedEvents(surface.get(),QEvent::MetaCall);
+    QCoreApplication::sendPostedEvents(receiver,QEvent::MetaCall);
     waitFor([&] { return entered()==2; },false);
     QCoreApplication::sendPostedEvents(qApp,QEvent::MetaCall);
     require(handle.view->loading(),"Old completion finished a newer import");
@@ -51,7 +54,7 @@ static void modelPublication() {
     waitFor([&] { return completions==1 && !handle.view->loading(); });
 
     cfg["test_stage"]=3; handle.view->reload(cfg,error);
-    QCoreApplication::sendPostedEvents(surface.get(),QEvent::MetaCall);
+    QCoreApplication::sendPostedEvents(receiver,QEvent::MetaCall);
     waitFor([&] { return entered()==3; },false);
     cfg["test_stage"]=4; handle.view->reload(cfg,error);
     QCoreApplication::sendPostedEvents(qApp,QEvent::MetaCall);
@@ -76,8 +79,47 @@ static void imageInputDuringDecode() {
     require(view.inspectionState()["zoom"].toDouble()==1,"Decode overwrote a new Fit request");
     require(view.inspectionState()["pan"].toArray()==QJsonArray{0,0},"Decode overwrote new pan state");
 }
+static void modelMotionBacklog() {
+    QLibrary library(QCoreApplication::applicationDirPath()+"/asset-preview-f3d.so");
+    const auto reads=reinterpret_cast<int (*)()>(library.resolve("fixtureMetricReads"));
+    require(reads,"Missing metrics fixture counter");
+    const QJsonObject cfg{{"kind","model"},{"test_stage",5}}; QString error;
+    bool loaded=false; QJsonObject saved;
+    const auto handle=createModel(cfg,nullptr,[&](bool ok,QString) { require(ok,"Motion fixture failed loading"); loaded=true; },
+        [&](const QJsonObject& camera,bool persist) { if(persist)saved=camera; });
+    std::unique_ptr<QWidget> surface(handle.surface);
+    require(handle.view->reload(cfg,error),"Motion fixture rejected");
+    waitFor([&] { return loaded && !handle.view->metrics()["command_pending"].toBool(); });
+    const auto initialReads=reads();
+    auto mouse=[&](QEvent::Type type,QPointF point,Qt::MouseButton button,Qt::MouseButtons buttons,Qt::KeyboardModifiers modifiers=Qt::NoModifier) {
+        QMouseEvent event(type,point,point,button,buttons,modifiers);
+        QApplication::sendEvent(dynamic_cast<QObject*>(handle.view),&event);
+    };
+    QPointF point(10,10); QString trace;
+    mouse(QEvent::MouseButtonPress,point,Qt::LeftButton,Qt::LeftButton);
+    for(int i=0;i<96;++i) {
+        if(i==48) { handle.view->fit(); trace+='f'; }
+        if(i==24 || i==72) {
+            QWheelEvent event(point,point,{},QPoint(0,120),Qt::NoButton,Qt::NoModifier,Qt::NoScrollPhase,false);
+            QApplication::sendEvent(dynamic_cast<QObject*>(handle.view),&event); trace+='w';
+        }
+        point+=QPointF(1,i%2?-1:1);
+        const bool pan=i%3==0;
+        mouse(QEvent::MouseMove,point,Qt::NoButton,Qt::LeftButton,pan?Qt::ShiftModifier:Qt::NoModifier);
+        trace+=pan?'p':'o';
+    }
+    mouse(QEvent::MouseButtonRelease,point,Qt::LeftButton,Qt::NoButton);
+    waitFor([&] { return !handle.view->metrics()["command_pending"].toBool() && handle.view->snapshot().pixelColor(0,0).red()==96; });
+    require(saved["moves"].toInt()==96 && saved["trace"].toString()==trace,"Motion/release reordered or dropped input across Fit");
+    require(saved["x"].toDouble()==96 && saved["y"].toDouble()==0,"Motion deltas were lost");
+    const auto metrics=handle.view->metrics();
+    std::cout<<"Motion backlog: "<<metrics["renders"].toInt()<<" frames for 96 events\n";
+    require(metrics["renders"].toInt()<=8,"Queued mouse motion rendered stale intermediate frames");
+    std::cout<<"Motion metadata: "<<reads()-initialReads<<" publications\n";
+    require(reads()-initialReads<=16,"Mouse events serialized metadata individually instead of per batch/frame");
+}
 int main(int argc,char** argv) {
     QApplication app(argc,argv);
-    try { modelPublication(); imageInputDuringDecode(); std::cout<<"Async publication and input checks passed\n"; }
+    try { modelPublication(); imageInputDuringDecode(); modelMotionBacklog(); std::cout<<"Async publication and input checks passed\n"; }
     catch(const std::exception& error) { std::cerr<<error.what()<<'\n'; return 1; }
 }

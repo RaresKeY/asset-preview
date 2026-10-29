@@ -4,6 +4,7 @@
 #include "reference_editor.h"
 #include <QDockWidget>
 #include "service.h"
+#include "native_overlay.h"
 #include "loading_label.h"
 #include "material_graph.h"
 #include "model_frame.h"
@@ -169,7 +170,7 @@ public:
         header=new QFrame(this); header->setObjectName("viewOverlay");
         // Small native overlays share the container's stacking context with the
         // embedded OpenGL window. A full-window overlay would intercept orbiting.
-        header->setAttribute(Qt::WA_NativeWindow,native);
+        setNativeOverlay(header,native);
         const QString style="QFrame#viewOverlay {background:#20262e;border:1px solid #414b57;border-radius:4px;}"
             "QFrame#viewOverlay QLabel {color:#e8edf3;background:transparent;border:none;}"
             "QToolButton {color:#e8edf3;background:transparent;border:1px solid transparent;border-radius:3px;padding:2px;}"
@@ -181,7 +182,7 @@ public:
         name=new QLabel(title,header); name->setTextFormat(Qt::PlainText); name->setToolTip(title+"\n"+path);
         name->setSizePolicy(QSizePolicy::Ignored,QSizePolicy::Preferred);
         auto font=name->font(); font.setBold(true); name->setFont(font); row->addWidget(name,1);
-        controls=new QFrame(this); controls->setObjectName("viewOverlay"); controls->setAttribute(Qt::WA_NativeWindow,native);
+        controls=new QFrame(this); controls->setObjectName("viewOverlay"); setNativeOverlay(controls,native);
         controls->setStyleSheet(style);
         auto* buttons=new QHBoxLayout(controls); buttons->setContentsMargins(3,1,3,1); buttons->setSpacing(3);
         fit=new QToolButton(controls); fit->setText("Fit"); fit->setToolTip("Fit camera / image (also double click)");
@@ -195,16 +196,16 @@ public:
         selectBox->setObjectName("selectPreview"); selectBox->setAccessibleName("Select preview: "+title);
         selectBox->setToolTip("Select for Close selected · Ctrl+click to toggle · Shift+click for a range");
         buttons->addWidget(selectBox);
-        footer=new LoadingLabel(this); footer->setTextFormat(Qt::PlainText); footer->setAttribute(Qt::WA_NativeWindow,native);
+        footer=new LoadingLabel(this); footer->setTextFormat(Qt::PlainText); setNativeOverlay(footer,native);
         footer->setTextInteractionFlags(Qt::TextSelectableByMouse);
         footer->setStyleSheet("color:#e8edf3;background:#20262e;border:1px solid #414b57;border-radius:3px;padding:2px 5px;");
-        triangles=new QLabel(this); triangles->setTextFormat(Qt::PlainText); triangles->setAttribute(Qt::WA_NativeWindow,native);
+        triangles=new QLabel(this); triangles->setTextFormat(Qt::PlainText); setNativeOverlay(triangles,native);
         triangles->setStyleSheet(footer->styleSheet()); triangles->setAccessibleName("Triangle count"); triangles->hide();
         if (playbackKind(kind)) {
             playback=new VideoControls(this,kind=="audio");
             if (kind=="audio") playback->setStyleSheet(style);
         }
-        if (kind=="model") { animation=new AnimationControls(this); animation->hide(); }
+        if (kind=="model") { animation=new AnimationControls(this); setNativeOverlay(animation,native); animation->hide(); }
         idle.setSingleShot(true); idle.setInterval(700);
         connect(&idle,&QTimer::timeout,this,[this] {
             if (!videoReady || !isVisible() || QGuiApplication::mouseButtons()!=Qt::NoButton ||
@@ -270,7 +271,8 @@ public:
         if (changed) activity();
     }
     void setSelected(bool selected) {
-        setAccessibleName((selected?"Active preview: ":"Preview: ")+fullTitle);
+        const auto title=(selected?"Active preview: ":"Preview: ")+fullTitle;
+        if (accessibleName()!=title) setAccessibleName(title);
     }
     void setAnimation(const QJsonObject& settings,const QJsonObject& metrics) {
         if (!animation) return;
@@ -884,7 +886,9 @@ QJsonObject Service::select(const QString& id,bool updateViews,bool single,bool 
     // Retain its existing layout and native input focus.
     if(updateViews) {
         if (!promote && oldInspectionId.isEmpty() && previousLayout==layout && e->active && comparison==oldComparison && window) {
-            window->navigation(); preloadReturnTarget(); watchers();
+            const auto oldTargets=preloader.targetPaths();
+            window->navigation(); preloadReturnTarget();
+            if (preloader.targetPaths()!=oldTargets) watchers();
         }
         else reconcile();
     }
@@ -1403,53 +1407,46 @@ void Service::recordPublication(Entry& entry) {
 }
 void Service::watchers() {
     QSet<QString> files, dirs;
+    auto watchPath=[&](const QString& p) {
+        if (QFileInfo(p).isFile()) files.insert(p);
+        QString parent=QFileInfo(p).absolutePath();
+        if (!dirs.contains(parent)) {
+            while (!QFileInfo(parent).isDir() && parent!="/") parent=QFileInfo(parent).absolutePath();
+            dirs.insert(parent);
+        }
+    };
     for (const auto& e:entries) if (e->active) {
         const auto paths=dependencies(*e);
         QMap<QString,QString> retained;
         for (const auto& p:paths) {
             retained[p]=e->stamps.contains(p)?e->stamps[p]:stamp(p);
-            if (QFileInfo(p).isFile()) files.insert(p);
-            QString parent=QFileInfo(p).absolutePath();
-            while (!QFileInfo(parent).isDir() && parent!="/") parent=QFileInfo(parent).absolutePath();
-            dirs.insert(parent);
+            watchPath(p);
         }
         e->stamps=retained;
     }
     if (window && window->isVisible() && !window->isMinimized()) {
-    // Warming watches registered source files/parents, never recursively scans.
-    // Dependency watches belong only to visible or currently running jobs.
-    for (const auto& id:order) {
-        const auto path=entries[id]->config["path"].toString();
-        if(QFileInfo(path).isFile())files.insert(path);
-        auto parent=QFileInfo(path).absolutePath();
-        while(!QFileInfo(parent).isDir() && parent!="/")parent=QFileInfo(parent).absolutePath();
-        dirs.insert(parent);
-    }
-    auto watched=window->overviewIds(); watched.append(window->thumbnailWorkingIds()); watched.removeDuplicates();
-    for (const auto& id:watched) {
-        const auto e=entries.value(id); if (!e) continue;
-        QStringList paths=e->thumbnailDependencies;
-        paths.prepend(e->config["path"].toString());
-        for (const auto& p:paths) {
-            if (QFileInfo(p).isFile()) files.insert(p);
-            QString parent=QFileInfo(p).absolutePath();
-            while (!QFileInfo(parent).isDir() && parent!="/") parent=QFileInfo(parent).absolutePath();
-            dirs.insert(parent);
+        // Warming watches registered source files/parents, never recursively scans.
+        // Dependency watches belong only to visible or currently running jobs.
+        for (const auto& id:order) watchPath(entries[id]->config["path"].toString());
+        auto watched=window->overviewIds(); watched.append(window->thumbnailWorkingIds()); watched.removeDuplicates();
+        for (const auto& id:watched) {
+            const auto e=entries.value(id); if (!e) continue;
+            QStringList paths=e->thumbnailDependencies;
+            paths.prepend(e->config["path"].toString());
+            for (const auto& p:paths) watchPath(p);
         }
     }
-    }
-    for(const auto& path:preloader.targetPaths()) {
-        if (QFileInfo(path).isFile()) files.insert(path);
-        QString parent=QFileInfo(path).absolutePath();
-        while (!QFileInfo(parent).isDir() && parent!="/") parent=QFileInfo(parent).absolutePath();
-        dirs.insert(parent);
-    }
+    for(const auto& path:preloader.targetPaths()) watchPath(path);
     const auto currentFiles=watcher.files(), currentDirs=watcher.directories();
-    for (const auto& p:currentFiles) if (!files.contains(p)) watcher.removePath(p);
-    for (const auto& p:currentDirs) if (!dirs.contains(p)) watcher.removePath(p);
+    const QSet<QString> currentFileSet(currentFiles.begin(),currentFiles.end());
+    const QSet<QString> currentDirSet(currentDirs.begin(),currentDirs.end());
+    QStringList remove;
+    for (const auto& p:currentFiles) if (!files.contains(p)) remove.append(p);
+    for (const auto& p:currentDirs) if (!dirs.contains(p)) remove.append(p);
+    if (!remove.isEmpty()) watcher.removePaths(remove);
     QStringList add;
-    for (const auto& p:files) if (!currentFiles.contains(p)) add.append(p);
-    for (const auto& p:dirs) if (!currentDirs.contains(p)) add.append(p);
+    for (const auto& p:files) if (!currentFileSet.contains(p)) add.append(p);
+    for (const auto& p:dirs) if (!currentDirSet.contains(p)) add.append(p);
     if (!add.isEmpty()) {
         const auto rejected=watcher.addPaths(add);
         if (!rejected.isEmpty()) qWarning("Some watches could not be installed: %s",qPrintable(rejected.join(", ")));
@@ -1708,8 +1705,8 @@ void Service::rememberThumbnail(Entry& entry) {
     }
     else {
         const auto size=entry.surface->size()*entry.surface->devicePixelRatioF();
-        if (qint64(size.width())*size.height()*4>16*1024*1024) return;
-        image=entry.view->snapshot();
+        if (metrics["frame_transport"]!="shared_gpu_texture" && qint64(size.width())*size.height()*4>16*1024*1024) return;
+        image=entry.view->thumbnailSnapshot({preview::PreviewCache::ThumbnailWidth,preview::PreviewCache::ThumbnailHeight});
     }
     if (key==thumbnailKey(entry)) cache.putThumbnail(key,std::move(image));
 }
@@ -2022,6 +2019,8 @@ void PreviewWindow::setupMenus(QToolButton* openButton) {
 }
 
 PreviewWindow::PreviewWindow(Service* s) : service(s) {
+    thumbnailInputQuiet.setSingleShot(true);
+    connect(&thumbnailInputQuiet,&QTimer::timeout,this,&PreviewWindow::scheduleThumbnailPreparation);
     hoverPosition=QCursor::pos();
     setWindowTitle("Asset Preview"); setWindowIcon(QIcon(QStringLiteral(":/icon.svg")));
     setMinimumSize(540,380); resize(1000,720); setAcceptDrops(true);
@@ -2448,7 +2447,7 @@ void PreviewWindow::createCard(Entry& e) {
     e.publicationValid=false; e.publishedOutputs={};
     e.pendingOutputs=service->outputStamps(e);
     const auto kind=e.config["kind"].toString();
-    const bool native=playbackKind(kind) || (service->inspectionId==id && e.config.value("inspection").toObject()["enabled"].toBool());
+    const bool native=playbackKind(kind) || kind=="model" || kind=="material";
     QWidget* parent=canvas;
     if(service->layout=="projects" && service->inspectionId.isEmpty() && service->comparison.isEmpty() && !isolatesPreview())
         if(auto* pane=projectGrid->cardParent(id))parent=pane;
@@ -2644,18 +2643,22 @@ void PreviewWindow::scheduleThumbnailPreparation() {
 void PreviewWindow::prepareThumbnails() {
     if(!overview)return;
     const bool enabled=isVisible() && !isMinimized();
-    bool ready=enabled && !service->activationScheduled;
+    bool ready=enabled && !service->activationScheduled && !thumbnailInputQuiet.isActive();
     QSet<QString> active; QStringList nearby;
-    QList<OverviewGrid::Item> all;
+    QList<OverviewGrid::Item> all; all.reserve(service->order.size());
+    QHash<QString,QStringList> projectMembers;
     for(const auto& id:service->order) {
         const auto entry=service->entries.value(id); const auto& config=entry->config;
         all.append({id,config["label"].toString(),config["path"].toString(),config["kind"].toString(),{}, {}});
+        projectMembers[config.value("project").toString()].append(id);
+    }
+    for(const auto& id:service->order) {
+        const auto entry=service->entries.value(id);
         if(!entry->active)continue;
         active.insert(id);
         ready &= !entry->view || !entry->view->loading();
         ready &= !entry->process || entry->process->state()==QProcess::NotRunning;
-        const auto group=config["project"].toString(); QStringList members;
-        for(const auto& member:service->order)if(service->entries[member]->config.value("project").toString()==group)members.append(member);
+        const auto& members=projectMembers[entry->config.value("project").toString()];
         const int at=members.indexOf(id);
         if(at+1<members.size())nearby.append(members[at+1]);
         if(at>0)nearby.append(members[at-1]);
@@ -2753,9 +2756,22 @@ bool PreviewWindow::eventFilter(QObject* object,QEvent* event) {
         const bool animated=event->type()==QEvent::KeyPress && entry->config["kind"]=="model" && entry->view &&
             !entry->view->metrics()["animations"].toArray().isEmpty();
         const bool nativeInput=object==entry->surface || object==dynamic_cast<QObject*>(entry->view);
+        if(nativeInput && (event->type()==QEvent::Wheel || event->type()==QEvent::MouseButtonPress ||
+            (event->type()==QEvent::MouseMove && static_cast<QMouseEvent*>(event)->buttons()!=Qt::NoButton))) {
+            const bool wasQuiet=!thumbnailInputQuiet.isActive();
+            thumbnailInputQuiet.start(250);
+            if(wasQuiet)scheduleThumbnailPreparation();
+        }
         if ((event->type()==QEvent::MouseButtonPress || event->type()==QEvent::MouseButtonDblClick) && (nativeInput || object==entry->card)) {
             const auto* mouse=static_cast<QMouseEvent*>(event);
             if (mouse->button()==Qt::LeftButton && (mouse->modifiers() & (Qt::ControlModifier|Qt::ShiftModifier))) {
+                // QWindow delivers the second press and then a companion
+                // double-click event; QWidget replaces the second press.
+                // Apply modified selection once per physical native press.
+                const auto previous=object->property("previewMarkedPressStamp");
+                if(event->type()==QEvent::MouseButtonDblClick && qobject_cast<QWindow*>(object) &&
+                    previous.isValid() && previous.toULongLong()==mouse->timestamp())return true;
+                if(event->type()==QEvent::MouseButtonPress)object->setProperty("previewMarkedPressStamp",qulonglong(mouse->timestamp()));
                 markCard(id,mouse->modifiers()); return true;
             }
         }

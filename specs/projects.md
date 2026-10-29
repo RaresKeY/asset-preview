@@ -65,7 +65,9 @@ slots exist, but only intersecting slots activate a preview. Scrolling, resizing
 filtering, promotion, hide and minimize reconcile ownership. Offscreen views
 release players, renderers and owned generators using the ordinary lifecycle.
 No recurring grid timer or speculative renderer is created. Native captures clip
-preview snapshots/overlays to the scroll viewport.
+preview snapshots/overlays to the scroll viewport. Native ancestor creation stops
+at the Projects branch, preserving the shared canvas/Overview raster backing
+store under [Preview lifecycle](preview.md).
 
 The window-owned thumbnail queue warms nearby members, then other open
 registrations after a quiet period, using two image slots and one finite model

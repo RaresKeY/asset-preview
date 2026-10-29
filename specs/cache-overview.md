@@ -169,8 +169,16 @@ layout changes; thumbnail refreshes do not reset it.
 Loaded thumbnails keep their memoized identities through overlapping scrolls,
 resizes and label/group changes. Source notifications revalidate visible paint
 keys together, so unrelated saves do not flash cached tiles to placeholders.
-The opaque viewport repaints completely after reflow to erase previous tile and
-header positions. Painting remains RAM-only and never validates or reads files.
+Reflow commits integer tile/header rectangles and column count together after
+the vertical scrollbar settles; column edges distribute rounding remainder.
+Registration changes anchor the first surviving visible card at its previous
+viewport offset. Resizing and keyboard navigation use the committed geometry.
+The opaque viewport repaints from its logical origin after scrolling/reflow,
+avoiding rounded backing-pixel shifts at fractional scale. Partial tile damage
+includes antialiased border spill; checkbox hover/style state belongs to each
+painted cell. Painting remains RAM-only and never validates or reads files.
+Overview stays in the top-level raster backing store under the
+[native surface isolation contract](preview.md).
 
 ### Shared thumbnail scheduling
 
@@ -184,8 +192,10 @@ Visible images lead visible models/materials. After 250 ms without a demand or
 source change, nearby project members precede the remaining open registrations.
 All 256 tiny thumbnails fit the existing 16 MiB subquota. Ordinary active views
 are excluded; they provide their own frame on departure. Warming pauses while
-ordinary views are loading or their generators are running. Background image
-work uses only one decode slot, reserving capacity for foreground arrivals.
+ordinary views are loading or their generators are running. Background warming
+also pauses during ordinary preview mouse gestures and resumes after
+250 ms of input quiet; an active background model child is cancelled promptly.
+Background image work uses only one decode slot, reserving capacity for foreground arrivals.
 A newly visible model preempts the exact background child. A formerly visible
 model moved offscreen is cancelled and can retry as background after quiet.
 
@@ -205,8 +215,10 @@ event-driven; settled queues have no polling, rendering or recurring work timer.
 Only visible loading tiles animate the existing spinner.
 
 On departure, a successfully displayed current preview contributes one frame
-before its visible engine/player is destroyed. GPU readback is finite and refused
-above a 16 MiB RGBA surface estimate; images reuse decoded pixels. No idle copies.
+before its visible engine/player is destroyed. Ordinary F3D views downsample the
+shared texture on the GPU and read at most 256×160 pixels, without rerendering.
+Other surface captures are refused above a 16 MiB RGBA estimate; images reuse
+decoded pixels. No idle copies.
 Keys include source/dependency fingerprints and visual settings. Unknown-format
 dependency discovery remains best effort; thumbnails are navigation aids.
 
@@ -261,6 +273,13 @@ alias deduplication, preemption, freshness, hidden cleanup and clear/resume.
 stability. Native integration covers actual model/image overlap, all-open and
 Projects warming, predictive neighbor preload, cache limits and idle settling.
 
+`tools/test.sh overview-paint` compares retained partial paints with clean frames
+at 100%, 125%, 150% and 200% in Fusion/Breeze. `overview-paint-wayland` checks
+actual private-compositor pixels against raster references at the same scales;
+Wayland rotating buffers are not treated as retained-frame references. Both
+exercise scrolling, selection/checkbox hover, resizing and arrivals above the
+viewport. Native integration also checks raster ancestry after 3D/media/Projects.
+
 Run `tools/test.sh preview-cache`, `overview`, `overview-gpu`, `functional` and
 the existing GPU lifecycle/texture lanes. Evidence goes under
 `evidence/cache-overview/`; verify the actual hardware OpenGL renderer.
@@ -272,8 +291,9 @@ fingerprinting, disk lookup and diagnostic events run on finite refresh/work
 transitions, never on hover repaint. Image unloads reuse an existing identical
 thumbnail instead of rescaling and rewriting it. Only the active thumbnail tile
 animates a small spinner; the timer stops when work finishes or Overview hides.
-Image/model cards use ordinary Qt overlays; native overlays are reserved for
-embedded media and component inspection surfaces. Project cards
+Image cards use ordinary Qt overlays; model/material, embedded media and
+component inspection surfaces use isolated native overlays under the
+[Preview lifecycle](preview.md) contract. Project cards
 are created directly in their owning pane. Image workers prepare 160×100 RGBA
 thumbnails during decoding, so unload does not scale full-resolution pixels on
 the UI thread. Cache-hit images reuse existing thumbnails or let Overview prepare

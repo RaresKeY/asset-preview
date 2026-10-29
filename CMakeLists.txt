@@ -18,7 +18,7 @@ find_package(KF6Parts QUIET)
 # every shared C++ contract so it can reject an incompatible factory before any
 # objects, callbacks or vtables cross the module boundary.
 set(ASSET_PREVIEW_BACKEND_CONTRACTS
-    src/viewer.h src/model_worker.h src/audio_waveform.h src/preview_cache.h CMakeLists.txt)
+    src/viewer.h src/model_worker.h src/model_gpu.h src/audio_waveform.h src/preview_cache.h CMakeLists.txt)
 set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS ${ASSET_PREVIEW_BACKEND_CONTRACTS})
 string(TOUPPER "${CMAKE_BUILD_TYPE}" ASSET_PREVIEW_BUILD_TYPE)
 set(ASSET_PREVIEW_BACKEND_CONTRACT "${CMAKE_CXX_COMPILER_ID};${CMAKE_CXX_COMPILER_VERSION};${CMAKE_CXX_STANDARD};${CMAKE_SIZEOF_VOID_P};${Qt6_VERSION};${CMAKE_CXX_FLAGS};${CMAKE_BUILD_TYPE};${CMAKE_CXX_FLAGS_${ASSET_PREVIEW_BUILD_TYPE}}")
@@ -31,7 +31,7 @@ configure_file(src/backend_abi_config.h.in generated/backend_abi_config.h @ONLY)
 add_executable(asset-preview-server src/main.cpp src/thumbnail_job.cpp src/thumbnail_queue.cpp src/crash_log.cpp src/service.cpp src/viewer.cpp src/model_surface.cpp src/preview_cache.cpp src/preview_preload.cpp src/cache_diagnostics.cpp src/overview_grid.cpp src/project_grid.cpp src/material_graph.cpp src/video_controls.cpp src/animation_controls.cpp src/fullscreen_notice.cpp
     src/inspection/document.cpp src/inspection/service.cpp src/inspection/panel.cpp
     src/codex_panel.cpp src/reference_editor.cpp)
-target_link_libraries(asset-preview-server PRIVATE Qt6::Widgets Qt6::Network)
+target_link_libraries(asset-preview-server PRIVATE Qt6::Widgets Qt6::Network Qt6::OpenGL)
 target_include_directories(asset-preview-server PRIVATE "${CMAKE_CURRENT_BINARY_DIR}/generated")
 target_compile_definitions(asset-preview-server PRIVATE ASSET_PREVIEW_VERSION="${PROJECT_VERSION}")
 if(KF6Parts_FOUND)

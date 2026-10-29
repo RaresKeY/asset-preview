@@ -119,11 +119,18 @@ QJsonObject ImageView::metrics() const {
 void ImageView::paintEvent(QPaintEvent*) {
     ++renders;
     QPainter p(this);
-    p.fillRect(rect(), background == "light" ? QColor("#e0e0e0") : QColor("#171c22"));
     if (background == "checker") {
-        for (int y = 0; y < height(); y += 20)
-            for (int x = 0; x < width(); x += 20)
-                if ((x / 20 + y / 20) % 2 == 0) p.fillRect(x, y, 20, 20, QColor("#252c34"));
+        static const QPixmap checker = [] {
+            QPixmap tile(40, 40);
+            tile.fill(QColor("#171c22"));
+            QPainter tp(&tile);
+            tp.fillRect(0, 0, 20, 20, QColor("#252c34"));
+            tp.fillRect(20, 20, 20, 20, QColor("#252c34"));
+            return tile;
+        }();
+        p.drawTiledPixmap(rect(), checker);
+    } else {
+        p.fillRect(rect(), background == "light" ? QColor("#e0e0e0") : QColor("#171c22"));
     }
     if (image.isNull()) return;
     p.setRenderHint(QPainter::SmoothPixmapTransform, !nearest);

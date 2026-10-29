@@ -1,6 +1,6 @@
 # Exported models
 
-Source ownership: `src/model_view.{h,cpp}`, `src/model_surface.cpp`, `src/model_worker.h`, `src/f3d_compat.h`, `src/gltf_import.{h,cpp}`,
+Source ownership: `src/model_view.{h,cpp}`, `src/model_surface.cpp`, `src/model_worker.h`, `src/model_gpu.h`, `src/f3d_compat.h`, `src/gltf_import.{h,cpp}`,
 `src/gltf_pixels.h`, `src/texture_preview.{h,cpp}`, model loader in `src/viewer.cpp`,
 triangle/dependency metadata and model paths in `src/service.cpp`.
 Shared camera, comparison, publication and resource lifetime: [Preview](preview.md).
@@ -13,11 +13,23 @@ previous scene and does not advance successful loads/revisions.
 
 Ordinary models and material samples use one shared native render thread. Lazy
 backend loading, F3D plugin initialization, import, metadata, GL upload, rendering
-and scene destruction all run there. On Linux/F3D4 each scene prefers EGL, avoiding hidden X11 windows, and falls
-back to the installed offscreen context route if unavailable. Each scene owns
-its offscreen GL context;
-only completed image frames and scalar state cross to the QWidget surface.
-Each visible surface has one replaceable frame mailbox. Queued reloads check a
+and scene destruction all run there. Each visible scene has a worker-owned Qt
+OpenGL context and a GUI-created offscreen surface. F3D's external-context API
+renders into a pool of at most three GPU targets. A separate native
+QOpenGLWindow context shares their textures and displays the latest completed
+target. GL fences order producer and display work; there is no per-frame CPU
+readback, pixel flip, QImage transfer or texture upload. A replaceable mailbox
+keeps one pending frame, and a target cannot be reused while display/mailbox
+references hold it. GPU targets/context cleanup runs on the worker; offscreen
+surface creation/destruction stays on the GUI thread. Native overlay widgets
+retain mouse/keyboard access above the embedded window.
+Display painting explicitly selects the drawable color buffer: shared EGL
+contexts can initially select `GL_NONE`, silently discarding successful draws.
+Presentation preserves opaque alpha because F3D's background pixels can have
+zero alpha even when their RGB contains the configured background.
+The headless finite thumbnail/capture route retains the installed offscreen
+F3D context and image output; it is separate from live GPU presentation.
+Queued reloads check a
 revision and lifetime token; obsolete imports cannot publish. An importer already
 running is not interruptible: unloading cancels publication immediately and queues
 scene destruction after that finite operation. No engine is retained for reuse.
@@ -30,6 +42,10 @@ render; readiness is reported after the first frame. Camera/input/settings and
 seek commands enqueue native work, so clients observing their results wait for
 corresponding updated metrics/frames. Screenshots use the latest completed frame,
 retaining the last good scene during a failed replacement.
+Requested full screenshots read the latest shared GPU texture. Departure
+thumbnails first downsample it on the GPU and read only the bounded 256×160
+result. Neither capture rerenders the scene. Metrics expose `frame_transport`,
+`presented_frames`, `presented_serial`, `display_readbacks` and readback bytes.
 
 On F3D4 the model backend also loads the separately installed
 `libf3d-plugin-trellispost.so` for `.post`, `.vxz` and `.ovoxel`. It searches
@@ -149,9 +165,22 @@ private-service matched city runs through `tools/offscreen.sh`; perf attribution
 is kept separate from clean timings. Raw model benchmarks remain local because
 they record asset paths and process details; compare exact binary/model hashes
 and completed workloads when reproducing them.
+`tools/test.sh wayland-gpu` additionally captures actual KWin compositor output
+through installed Spectacle, compares scene pixels with explicit captures, and
+checks camera changes, materials, Overview return, reopening and a mixed grid.
+Texture captures and `frameSwapped` alone do not prove visible presentation.
 
 The render dispatcher yields between finite jobs, prioritizing existing-view
 input, then refreshes, then new imports. Each view retains its own FIFO order.
+Already queued orbit/pan, wheel, release and synchronized-camera commands for
+one view run in a batch before its pending frame callback. Each batch stops at
+the next same-view non-motion command, 256 commands or 4 ms, preserving exact
+motion order/deltas and giving other scenes and timers a turn. It does not
+render and read back every obsolete intermediate pointer position. Priority
+selection scans the queue linearly rather than rescanning it for each view.
+Full metrics publish once per motion batch, while non-persistent drag camera
+notifications publish with rendered frames. Release still saves the exact final
+camera; synchronized comparisons follow those frame notifications.
 Retiring a view removes its queued work and schedules prompt scene destruction.
 An import already executing remains non-interruptible; it can delay another
 scene's next frame, but does not block the GUI event loop. Thumbnail capture
@@ -160,4 +189,5 @@ Coalesced frames and completion notices share one revision; a newer frame cannot
 carry an older completion. Queued camera/playback requests discard superseded
 revisions. Capture restores its live frame callback even when rendering fails.
 `tools/test.sh async-loading` uses an inert worker with deterministic barriers
-to check these races; `model-snapshot-gpu` checks native capture exception recovery.
+to check these races and an artificial slow-frame motion burst across orbit,
+pan, wheel, Fit and release; `model-snapshot-gpu` checks native capture exception recovery.

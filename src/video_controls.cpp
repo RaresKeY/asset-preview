@@ -1,4 +1,5 @@
 #include "video_controls.h"
+#include "native_overlay.h"
 #include "seek_slider.h"
 #include <QEvent>
 #include <QGridLayout>
@@ -48,7 +49,7 @@ QRegion pillRegion(const QRect& box) {
 }
 
 VideoControls::VideoControls(QWidget* parent, bool isAudio) : QFrame(parent), audio(isAudio), media(isAudio?"audio":"video") {
-    setObjectName(audio?"viewOverlay":"videoPlayback"); setAttribute(Qt::WA_NativeWindow);
+    setObjectName(audio?"viewOverlay":"videoPlayback"); setNativeOverlay(this);
     if (!audio) setStyleSheet(
         "QFrame#videoPlayback {background:#20262e;border:none;}"
         "QLabel {color:#e8edf3;background:#20262e;border:none;}"

@@ -7,6 +7,21 @@ Source ownership: `src/viewer.{h,cpp}`, `src/backend_loader.h`, `src/backend_abi
 `examples/generate_cube.py`, `tests/integration.py`, `tools/ui_scenes.py`. Renderer decisions and dependency
 provenance are in [vendored/rendering.md](../vendored/rendering.md).
 
+Native overlays use `src/native_overlay.h`: `WA_DontCreateNativeAncestors`
+keeps them attached to their nearest existing native parent, while application
+attribute `AA_DontCreateNativeWidgetSiblings` prevents unrelated raster siblings
+from becoming native surfaces. The shared canvas and Overview remain ordinary
+widgets in the top-level raster backing store. Projects permits the native
+ancestor chain needed for embedded GL scroll clipping only inside its own branch.
+This avoids the fractional-scale resampling/stale child-surface flush observed
+on Qt 6.12 Wayland while preserving native GL presentation and overlay input.
+
+Native model, video and inspection painting share explicit framebuffer/color
+buffer selection in `gl_framebuffer.h`. Shared/EGL contexts may initially select
+`GL_NONE` for the native drawable, which silently discards otherwise valid draws.
+The Wayland hardware lane compares actual compositor output with source captures;
+successful capture or buffer-swap callbacks alone do not verify displayed pixels.
+
 Single view activates exactly one entry; grids have 2, 3 or 4 columns/rows,
 activating at most 4 (default), 9 or 16 entries on the selected page.
 Left/Right and Alt+Left/Right use the toolbar's navigation path: one preview in
@@ -148,10 +163,12 @@ Images use QImageReader with a 4096-edge decode target and 64 MiB allocation lim
 QPainter fit/zoom/pan and checker/dark/light/pixel options. Models and material
 samples use F3D native/Assimp readers on the shared render worker described in
 [Models](models.md). Material sample geometry has normals and explicitly
-triangulated UV faces. Each scene renders into its own offscreen context,
-preferring EGL on Linux/F3D4, and publishes completed image frames to a QWidget
-surface. Static scenes have no recurring frame copy/render loop. Component
-inspection and video retain embedded QOpenGLWindow surfaces. Startup explicitly
+triangulated UV faces. Each scene renders through F3D's external-context API
+into shared GPU textures on the worker; a native QOpenGLWindow displays the
+latest completed texture with GPU fence synchronization. Only requested captures
+and small departure thumbnails read pixels back to the CPU. Static scenes have
+no recurring frame copy/render loop. Component inspection and video also use
+embedded QOpenGLWindow surfaces. Startup explicitly
 requests desktop OpenGL 3.3 core, avoiding an incompatible default EGL API on
 Wayland. Requested native-surface captures render into a temporary color and
 depth/stencil framebuffer and read that target, avoiding unreliable native
@@ -181,7 +198,10 @@ perspective zoom changes camera distance. Orbit dragging also preserves the
 focal point, including after a pan. Explicit pan, fit and reset can change it.
 
 Turntable orbit defaults to Y-up / XZ floor and a locked horizon. Yaw rotates
-around world up; pitch clamps to ±88.2 degrees, preventing pole flips. Vertical
+around world up; horizontal drag applies the same F3D/VTK azimuth direction in
+Y-up and Z-up, with or without horizon lock, in Preview and Parts/Cuts. The
+locked XY-floor yaw basis compensates for its opposite handedness.
+Pitch clamps to ±88.2 degrees, preventing pole flips. Vertical
 orbit dragging is inverted: dragging down raises camera elevation, in both locked
 and unlocked modes. Z-up / XY
 floor and unlocked orbit are per-view options. Fit, reload and display settings
