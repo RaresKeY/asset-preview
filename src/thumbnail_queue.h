@@ -15,7 +15,7 @@ class QTemporaryDir;
 
 // One window-owned scheduler, shared by Overview and ordinary project layouts.
 // All identities/cache publications stay on the GUI thread; decodes are frozen
-// requests and model jobs retain their independent hard-cancellation boundary.
+// requests and content jobs retain their independent hard-cancellation boundary.
 class ThumbnailQueue final : public QObject {
 public:
     struct Item { QString id,path,kind; bool operator==(const Item&) const = default; };

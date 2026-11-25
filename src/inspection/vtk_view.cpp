@@ -4,6 +4,7 @@
 #include "matching.h"
 #include "../model_frame.h"
 #include <QApplication>
+#include <QColor>
 #include <QJsonArray>
 #include <QMouseEvent>
 #include <QOpenGLContext>
@@ -13,6 +14,12 @@
 #include <vtkActor.h>
 #include <vtkAutoInit.h>
 #include <vtkActorCollection.h>
+#include <vtkAppendPolyData.h>
+#include <vtkCleanPolyData.h>
+#include <vtkClipPolyData.h>
+#include <vtkContourTriangulator.h>
+#include <vtkCutter.h>
+#include <vtkFeatureEdges.h>
 #include <vtkCallbackCommand.h>
 #include <vtkCamera.h>
 #include <vtkCellPicker.h>
@@ -30,10 +37,14 @@
 #include <vtkPlane.h>
 #include <vtkPlaneCollection.h>
 #include <vtkPolyDataMapper.h>
+#include <vtkPolyData.h>
 #include <vtkProperty.h>
 #include <vtkRenderer.h>
+#include <vtkReverseSense.h>
 #include <vtkSphereSource.h>
 #include <vtkSmartPointer.h>
+#include <vtkTransform.h>
+#include <vtkTransformFilter.h>
 #include <algorithm>
 #include <array>
 #include <cmath>
@@ -99,6 +110,21 @@ bool normalizeCuts(const QJsonArray& cuts,QJsonArray& result,QString& error) {
     }
     return true;
 }
+bool validDisplay(const QJsonValue& value,QString& error) {
+    if(!value.isObject()) { error="Inspection display must be an object"; return false; }
+    const auto display=value.toObject();
+    for(const auto* key:{"part_colors","cap_cuts"}) if(display.contains(key) && !display[key].isBool()) {
+        error="Inspection display toggles must be boolean"; return false;
+    }
+    if(display.contains("explosion") && (!display["explosion"].isDouble() || !std::isfinite(display["explosion"].toDouble()) ||
+        display["explosion"].toDouble()<0 || display["explosion"].toDouble()>2)) {
+        error="Part explosion must be between 0 and 2"; return false;
+    }
+    for(auto it=display.begin();it!=display.end();++it) if(it.key()!="part_colors" && it.key()!="cap_cuts" && it.key()!="explosion") {
+        error="Unknown inspection display option"; return false;
+    }
+    return true;
+}
 void copyProperty(vtkProperty* destination,vtkProperty* source) {
     // VTK 9.7.1 DeepCopy copies texture pointers without registering them.
     // Use public scalar accessors and SetAllTextures to preserve ownership.
@@ -131,6 +157,21 @@ struct InspectionVtkView::Scene {
     std::map<QString,std::vector<vtkActor*>> actors;
     std::map<vtkActor*,int> actorSources;
     std::map<vtkActor*,vtkSmartPointer<vtkProperty>> originalProperties;
+    std::map<vtkActor*,vtkSmartPointer<vtkMatrix4x4>> originalMatrices;
+    std::map<vtkActor*,vtkSmartPointer<vtkMatrix4x4>> originalWorldMatrices;
+    std::map<QString,QColor> colors;
+    std::map<QString,std::array<double,3>> directions, offsets;
+    QJsonObject display{{"part_colors",false},{"explosion",0.0},{"cap_cuts",true}};
+    struct Cap {
+        QString id;
+        vtkSmartPointer<vtkPolyData> input;
+        vtkSmartPointer<vtkActor> actor;
+        bool failed=false;
+    };
+    std::vector<Cap> caps;
+    std::map<vtkActor*,QString> capTargets;
+    bool capsPrepared=false;
+    int closedParts=0,openParts=0,capTriangles=0,capBuilds=0;
     std::vector<int> parts;
     QSet<QString> hidden;
     std::vector<QSet<QString>> undo;
@@ -140,12 +181,76 @@ struct InspectionVtkView::Scene {
     vtkSmartPointer<vtkPlaneCollection> clippingPlanes;
     QString highlighted;
     std::vector<vtkSmartPointer<vtkActor>> markers;
+    std::map<vtkActor*,std::pair<QString,std::array<double,3>>> markerPositions;
     QJsonObject home, defaults;
     double bounds[6]{-1,1,-1,1,-1,1};
     int unmapped=0;
     int mappingComparisons=0;
     int mappingStepsRemaining=1000000;
     int cutPlaneUpdates=0,cutMapperBindings=0,selectionActorUpdates=0;
+
+    double extent() const {
+        double size=0; for(int i=0;i<3;++i) size=std::max(size,bounds[i*2+1]-bounds[i*2]);
+        return size;
+    }
+    void clippingRange() { renderer->ResetCameraClippingRange(); }
+    // Prepare cap-only geometry lazily. Exact welding joins duplicated UV and
+    // material seams; open/nonmanifold meshes never receive invented interiors.
+    void prepareCaps() {
+        capsPrepared=true;
+        vtkIdType budget=2000000;
+        auto closed=[&](vtkPolyData* data) -> vtkSmartPointer<vtkPolyData> {
+            if(!data || data->GetNumberOfPolys()==0 || data->GetNumberOfCells()>500000 || data->GetNumberOfCells()>budget) return {};
+            vtkNew<vtkCleanPolyData> clean;
+            clean->SetInputData(data); clean->SetTolerance(0); clean->Update();
+            vtkNew<vtkFeatureEdges> edges;
+            edges->SetInputConnection(clean->GetOutputPort()); edges->BoundaryEdgesOn(); edges->NonManifoldEdgesOn();
+            edges->FeatureEdgesOff(); edges->ManifoldEdgesOff(); edges->Update();
+            if(edges->GetOutput()->GetNumberOfCells()) return {};
+            return clean->GetOutput();
+        };
+        auto add=[&](const QString& id,vtkPolyData* data) {
+            budget-=data->GetNumberOfCells();
+            Cap cap; cap.id=id; cap.input=data;
+            vtkNew<vtkPolyDataMapper> mapper; mapper->ScalarVisibilityOff();
+            cap.actor=vtkSmartPointer<vtkActor>::New(); cap.actor->SetMapper(mapper);
+            cap.actor->GetProperty()->SetInterpolationToFlat(); cap.actor->GetProperty()->LightingOff();
+            cap.actor->UseBoundsOff(); renderer->AddActor(cap.actor); capTargets[cap.actor]=id;
+            caps.push_back(std::move(cap));
+        };
+        for(const auto& [id,items]:actors) {
+            vtkIdType cells=0;
+            for(auto* actor:items) if(actor->GetMapper()->GetInput()) cells+=actor->GetMapper()->GetInput()->GetNumberOfCells();
+            if(cells>500000 || cells>budget) { ++openParts; continue; }
+            vtkNew<vtkAppendPolyData> append;
+            std::vector<vtkSmartPointer<vtkPolyData>> primitives;
+            for(auto* actor:items) {
+                auto* data=vtkPolyData::SafeDownCast(actor->GetMapper()->GetInput());
+                if(!data) continue;
+                vtkNew<vtkTransform> transform; transform->SetMatrix(originalWorldMatrices.at(actor));
+                vtkNew<vtkTransformFilter> world; world->SetTransform(transform); world->SetInputData(data); world->Update();
+                vtkSmartPointer<vtkPolyData> output=vtkPolyData::SafeDownCast(world->GetOutput());
+                // A mirrored instance reverses geometric winding in world
+                // space. Restore it so cavity contours retain their meaning.
+                if(output && originalWorldMatrices.at(actor)->Determinant()<0) {
+                    vtkNew<vtkReverseSense> reverse; reverse->SetInputData(output); reverse->ReverseCellsOn(); reverse->ReverseNormalsOff();
+                    reverse->Update(); output=reverse->GetOutput();
+                }
+                if(output) { primitives.push_back(output); append->AddInputData(output); }
+            }
+            if(primitives.empty()) { ++openParts; continue; }
+            append->Update();
+            if(auto solid=closed(append->GetOutput())) { add(id,solid); ++closedParts; }
+            else {
+                // A part can contain independent closed primitives that touch
+                // at coincident faces. Cap those solids separately.
+                int solids=0;
+                if(primitives.size()>1) for(auto& primitive:primitives) if(auto solid=closed(primitive)) { add(id,solid); ++solids; }
+                if(solids) ++closedParts;
+                if(solids<int(primitives.size())) ++openParts;
+            }
+        }
+    }
 
     bool parseHidden(const QJsonArray& values,QSet<QString>& result,QString& error) const {
         if(values.size()>8192) { error="Inspection view exceeds limits"; return false; }
@@ -297,6 +402,10 @@ struct InspectionVtkView::Scene {
         while(auto* actor=collection->GetNextActor()) {
             vtkNew<vtkProperty> original; copyProperty(original,actor->GetProperty());
             originalProperties[actor]=original;
+            vtkNew<vtkMatrix4x4> matrix,world;
+            if(actor->GetUserMatrix()) matrix->DeepCopy(actor->GetUserMatrix());
+            world->DeepCopy(actor->GetMatrix());
+            originalMatrices[actor]=matrix; originalWorldMatrices[actor]=world;
         }
         return true;
     }
@@ -371,6 +480,27 @@ bool InspectionVtkView::load(QString& error) {
         if(next->bounds[0]>next->bounds[1] || !std::all_of(std::begin(next->bounds),std::end(next->bounds),[](double d) { return std::isfinite(d); })) {
             error="The model has no finite visible bounds"; return false;
         }
+        int colorIndex=0;
+        const double extent=next->extent();
+        for(const auto& [id,actors]:next->actors) {
+            next->colors[id]=QColor::fromHsvF(std::fmod(.56+colorIndex*.61803398875,1.0),.55,.9);
+            double bounds[6]{1e300,-1e300,1e300,-1e300,1e300,-1e300};
+            for(auto* actor:actors) for(int i=0;i<3;++i) {
+                bounds[i*2]=std::min(bounds[i*2],actor->GetBounds()[i*2]);
+                bounds[i*2+1]=std::max(bounds[i*2+1],actor->GetBounds()[i*2+1]);
+            }
+            std::array<double,3> direction{};
+            double length=0;
+            for(int i=0;i<3;++i) { direction[i]=(bounds[i*2]+bounds[i*2+1]-next->bounds[i*2]-next->bounds[i*2+1])*.5; length+=direction[i]*direction[i]; }
+            length=std::sqrt(length);
+            if(length==0 || length<extent*.03) {
+                const double y=1-2*(colorIndex+.5)/next->actors.size(),radius=std::sqrt(std::max(0.0,1-y*y));
+                direction={radius*std::cos(colorIndex*2.3999632297),y,radius*std::sin(colorIndex*2.3999632297)};
+                length=1;
+            }
+            for(auto& value:direction) value=value/length*extent*.35;
+            next->directions[id]=direction; next->offsets[id]={0,0,0}; ++colorIndex;
+        }
         next->picker=vtkSmartPointer<vtkCellPicker>::New();
         next->picker->SetTolerance(0.0005);
         next->picker->PickClippingPlanesOff();
@@ -418,15 +548,7 @@ void InspectionVtkView::options() {
     scene->renderer->SetBackground(light?.8:.075,light?.8:.09,light?.8:.115);
     scene->renderer->SetBackgroundAlpha(1.0);
     scene->renderer->GetActiveCamera()->SetParallelProjection(s["orthographic"].toBool());
-    for(auto& [actor,original]:scene->originalProperties) {
-        copyProperty(actor->GetProperty(),original);
-        actor->GetProperty()->SetEdgeVisibility(s["edges"].toBool());
-        if(!s["textures"].toBool(true) || !s["materials"].toBool(true)) actor->GetProperty()->RemoveAllTextures();
-        if(!s["materials"].toBool(true)) {
-            auto* p=actor->GetProperty(); p->SetColor(.65,.67,.70); p->SetOpacity(1); p->SetMetallic(0); p->SetRoughness(.8);
-            actor->GetMapper()->ScalarVisibilityOff();
-        } else actor->GetMapper()->ScalarVisibilityOn();
-    }
+    for(auto& [actor,original]:scene->originalProperties) { (void)original; styleActor(actor); }
     // The material reset above also removes the previous highlight.
     scene->highlighted.clear();
     if(!scene->lights && scene->renderer->GetLights()->GetNumberOfItems()==0) {
@@ -468,7 +590,7 @@ void InspectionVtkView::restoreCamera(const QJsonObject& saved) {
     c->SetViewUp(u[0].toDouble(),u[1].toDouble(),u[2].toDouble());
     c->SetViewAngle(saved["angle"].toDouble(30));
     if(saved["parallel_span"].toDouble()>0) c->SetParallelScale(saved["parallel_span"].toDouble()*.5);
-    scene->renderer->ResetCameraClippingRange(scene->bounds);
+    scene->clippingRange();
 }
 void InspectionVtkView::rememberCamera(bool persist) {
     const auto saved=cameraState();
@@ -481,7 +603,7 @@ void InspectionVtkView::setCameraState(const QJsonObject& saved) {
 }
 void InspectionVtkView::fit() {
     if(!scene) return;
-    scene->renderer->ResetCamera(scene->bounds); update(); rememberCamera();
+    scene->renderer->ResetCamera(); update(); rememberCamera();
 }
 void InspectionVtkView::resetView() {
     if(!scene) return;
@@ -494,7 +616,7 @@ void InspectionVtkView::cameraView(const QString& view) {
     const auto direction=frame.direction(view),up=(view=="top"||view=="bottom")?-frame.front:frame.up;
     const double distance=c->GetDistance(); const auto* focal=c->GetFocalPoint();
     c->SetPosition(focal[0]+direction[0]*distance,focal[1]+direction[1]*distance,focal[2]+direction[2]*distance);
-    c->SetViewUp(up[0],up[1],up[2]); scene->renderer->ResetCameraClippingRange(scene->bounds);
+    c->SetViewUp(up[0],up[1],up[2]); scene->clippingRange();
     update(); rememberCamera();
 }
 void InspectionVtkView::orbit(double yawDelta,double pitchDelta) {
@@ -519,10 +641,12 @@ QJsonObject InspectionVtkView::state() const {
     QJsonObject result{{"supported",true},{"loaded",true},{"backend","vtk-gltf"},{"revision",scene->source.revision},
         {"dependency_revision",scene->source.dependencyRevision},{"selected",selected},{"selection",selectedTarget},
         {"camera",cameraState()},{"cuts",scene->cuts},{"hidden",hidden},{"bounds",bounds},{"part_count",int(scene->parts.size())},
+        {"display",scene->display},{"sections",QJsonObject{{"prepared",scene->capsPrepared},{"closed_parts",scene->closedParts},{"open_parts",scene->openParts},{"triangles",scene->capTriangles}}},
         {"orthographic",bool(scene->renderer->GetActiveCamera()->GetParallelProjection())},
         {"mapped_actors",int(scene->actorSources.size())},{"unmapped_actors",scene->unmapped},
         {"capabilities",QJsonObject{{"select",true},{"pick",true},{"hide",!scene->actors.empty()},{"cuts",true},{"pins",true},
             {"identity",scene->unmapped==0?"exact":"partial"},{"isolate",scene->unmapped==0 && !scene->actors.empty()},
+            {"part_colors",true},{"explosion",scene->unmapped==0 && !scene->actors.empty()},{"cap_cuts",true},
             {"grid",false},{"axes",false},{"studio_lighting",false},{"edges",true},{"materials",true},{"textures",true},{"orthographic",true},
             {"transparent_pick","frontmost pickable geometry, transparent surfaces are eligible"},
             {"lighting","authored lights or VTK light kit"},{"picker_index_bytes",0}}}};
@@ -540,13 +664,15 @@ QJsonObject InspectionVtkView::metrics() const {
         result["mapping_match_steps"]=1000000-scene->mappingStepsRemaining;
         result["cut_plane_updates"]=scene->cutPlaneUpdates; result["cut_mapper_bindings"]=scene->cutMapperBindings;
         result["selection_actor_updates"]=scene->selectionActorUpdates;
+        result["cap_triangles"]=scene->capTriangles; result["cap_builds"]=scene->capBuilds;
+        result["part_colors"]=scene->display["part_colors"]; result["explosion"]=scene->display["explosion"];
     }
     return result;
 }
 void InspectionVtkView::applyVisibility() {
     for(auto& [id,actors]:scene->actors) for(auto* actor:actors) actor->SetVisibility(!scene->hidden.contains(id));
-    for(auto& marker:scene->markers) marker->SetVisibility(true);
-    applySelection();
+    for(const auto& [actor,placement]:scene->markerPositions) actor->SetVisibility(!scene->hidden.contains(placement.first));
+    applySelection(); applyCaps(false); scene->clippingRange();
 }
 void InspectionVtkView::applyCuts() {
     std::array<bool,3> active{};
@@ -579,21 +705,111 @@ void InspectionVtkView::applyCuts() {
     }
     // A collection does not aggregate the modification times of its items.
     if(changed && scene->clippingPlanes) scene->clippingPlanes->Modified();
+    if(changed) applyCaps();
+}
+void InspectionVtkView::styleActor(vtkActor* actor) {
+    const auto s=config["settings"].toObject();
+    auto* p=actor->GetProperty(); copyProperty(p,scene->originalProperties.at(actor));
+    p->SetEdgeVisibility(s["edges"].toBool());
+    if(!s["textures"].toBool(true) || !s["materials"].toBool(true)) p->RemoveAllTextures();
+    actor->GetMapper()->SetScalarVisibility(s["materials"].toBool(true));
+    const auto source=scene->actorSources.find(actor);
+    const QString id=source==scene->actorSources.end()?QString():scene->source.nodes[source->second].target["id"].toString();
+    const bool highlight=!id.isEmpty() && selected==id;
+    if(highlight || scene->display["part_colors"].toBool() || !s["materials"].toBool(true)) {
+        const QColor color=highlight?QColor("#ffbf47"):scene->display["part_colors"].toBool() && scene->colors.contains(id)?scene->colors.at(id):QColor("#a6abb3");
+        p->RemoveAllTextures(); actor->GetMapper()->ScalarVisibilityOff();
+        p->SetColor(color.redF(),color.greenF(),color.blueF()); p->SetOpacity(1);
+        p->SetInterpolationToPhong(); p->SetAmbient(.25); p->SetDiffuse(.75); p->SetSpecular(.12); p->SetSpecularPower(20);
+        p->SetMetallic(0); p->SetRoughness(.8); p->SetEmissiveFactor(0,0,0);
+        if(highlight) { p->EdgeVisibilityOn(); p->SetEdgeColor(.45,.22,.03); p->SetLineWidth(2); }
+    }
+}
+void InspectionVtkView::applyDisplay(bool rebuildCaps) {
+    bool moved=false;
+    for(const auto& [id,actors]:scene->actors) {
+        std::array<double,3> offset=scene->directions.at(id);
+        for(auto& value:offset) value*=scene->display["explosion"].toDouble();
+        if(offset!=scene->offsets.at(id)) {
+            scene->offsets[id]=offset; moved=true;
+            for(auto* actor:actors) {
+                vtkNew<vtkMatrix4x4> matrix; matrix->DeepCopy(scene->originalMatrices.at(actor));
+                for(int i=0;i<3;++i) matrix->SetElement(i,3,matrix->GetElement(i,3)+offset[i]);
+                actor->SetUserMatrix(matrix);
+            }
+        }
+    }
+    for(const auto& [actor,property]:scene->originalProperties) { (void)property; styleActor(actor); }
+    scene->highlighted=selected;
+    // Pins are source-local; keep them with their owning exploded component.
+    for(const auto& [actor,placement]:scene->markerPositions) {
+        auto position=placement.second;
+        if(const auto offset=scene->offsets.find(placement.first);offset!=scene->offsets.end())
+            for(int i=0;i<3;++i) position[i]+=offset->second[i];
+        actor->SetPosition(position.data()); actor->SetVisibility(!scene->hidden.contains(placement.first));
+    }
+    applyCaps(moved || rebuildCaps); scene->clippingRange();
+}
+void InspectionVtkView::applyCaps(bool geometry) {
+    if(!scene) return;
+    const bool active=std::any_of(scene->activeCuts.begin(),scene->activeCuts.end(),[](bool value) { return value; }) && scene->display["cap_cuts"].toBool(true);
+    if(active && !scene->capsPrepared) { scene->prepareCaps(); geometry=true; }
+    scene->capTriangles=0;
+    for(auto& cap:scene->caps) {
+        const auto offset=scene->offsets.at(cap.id);
+        cap.actor->SetPosition(offset[0],offset[1],offset[2]);
+        if(active && geometry) {
+            std::array<vtkSmartPointer<vtkPlane>,3> planes;
+            for(int i=0;i<3;++i) if(scene->activeCuts[i]) {
+                auto plane=vtkSmartPointer<vtkPlane>::New();
+                const auto* origin=scene->planes[i]->GetOrigin();
+                plane->SetOrigin(origin[0]-offset[0],origin[1]-offset[1],origin[2]-offset[2]);
+                plane->SetNormal(scene->planes[i]->GetNormal()); planes[i]=plane;
+            }
+            cap.failed=false;
+            vtkNew<vtkAppendPolyData> faces;
+            // Section each plane against the original closed surface, then
+            // clip that face by the remaining half-spaces. This avoids
+            // retriangulating previously generated caps at plane intersections.
+            for(int i=0;i<3;++i) if(planes[i]) {
+                vtkNew<vtkCutter> cutter; cutter->SetInputData(cap.input); cutter->SetCutFunction(planes[i]);
+                vtkNew<vtkContourTriangulator> triangulator; triangulator->SetInputConnection(cutter->GetOutputPort());
+                triangulator->Update();
+                if(triangulator->GetTriangulationError()) { cap.failed=true; continue; }
+                vtkSmartPointer<vtkPolyData> face=triangulator->GetOutput();
+                for(int j=0;j<3;++j) if(j!=i && planes[j]) {
+                    vtkNew<vtkClipPolyData> clip; clip->SetInputData(face); clip->SetClipFunction(planes[j]);
+                    clip->Update(); face=clip->GetOutput();
+                }
+                faces->AddInputData(face);
+            }
+            ++scene->capBuilds;
+            if(faces->GetNumberOfInputConnections(0)) {
+                faces->Update(); vtkPolyDataMapper::SafeDownCast(cap.actor->GetMapper())->SetInputData(faces->GetOutput());
+            } else {
+                vtkNew<vtkPolyData> empty; vtkPolyDataMapper::SafeDownCast(cap.actor->GetMapper())->SetInputData(empty);
+            }
+        }
+        const bool visible=active && !scene->hidden.contains(cap.id) && !cap.failed;
+        cap.actor->SetVisibility(visible);
+        const QColor color=selected==cap.id?QColor("#ffbf47"):scene->colors.at(cap.id);
+        cap.actor->GetProperty()->SetColor(color.redF(),color.greenF(),color.blueF());
+        if(visible && cap.actor->GetMapper()->GetInput()) scene->capTriangles+=int(cap.actor->GetMapper()->GetInput()->GetNumberOfCells());
+    }
 }
 void InspectionVtkView::applySelection() {
     if(!scene || scene->highlighted==selected) return;
-    const bool edges=config["settings"].toObject()["edges"].toBool();
     const auto prior=scene->actors.find(scene->highlighted);
     if(prior!=scene->actors.end()) for(auto* actor:prior->second) {
-        const auto& original=scene->originalProperties.at(actor);
-        auto* p=actor->GetProperty(); p->SetEdgeVisibility(edges); p->SetEdgeColor(original->GetEdgeColor()); p->SetLineWidth(original->GetLineWidth());
+        styleActor(actor);
         ++scene->selectionActorUpdates;
     }
     if(const auto found=scene->actors.find(selected);found!=scene->actors.end()) for(auto* actor:found->second) {
-        actor->GetProperty()->EdgeVisibilityOn(); actor->GetProperty()->SetEdgeColor(1,.65,.15); actor->GetProperty()->SetLineWidth(2);
+        styleActor(actor);
         ++scene->selectionActorUpdates;
     }
     scene->highlighted=selected;
+    applyCaps(false);
 }
 QJsonObject InspectionVtkView::pick(double x,double y,QString& error) {
     if(!scene || !std::isfinite(x) || !std::isfinite(y) || x<0 || y<0 || x>=width() || y>=height()) { error="Pick coordinates must lie on the loaded surface"; return {}; }
@@ -610,6 +826,9 @@ QJsonObject InspectionVtkView::pick(double x,double y,QString& error) {
             selected=selectedTarget["id"].toString();
             selectedTarget["anchor"]=QJsonObject{{"kind","surface_point"},{"position_local",triple(scene->picker->GetMapperPosition())},
                 {"normal_local",triple(scene->picker->GetMapperNormal())}};
+        } else if(auto cap=scene->capTargets.find(actor);cap!=scene->capTargets.end()) {
+            selected=cap->second;
+            for(int index:scene->parts) if(scene->source.nodes[index].target["id"].toString()==selected) selectedTarget=scene->source.nodes[index].target;
         } else selectedTarget={{"mapped",false},{"name","Source identity unavailable"},{"position_world",triple(scene->picker->GetPickPosition())}};
     }
     applySelection(); update(); changed(); return state();
@@ -636,6 +855,8 @@ bool InspectionVtkView::applyView(const QJsonObject& view,QString& error) {
     const auto camera=view["camera"].toObject();
     if(!camera.isEmpty() && !validCamera(camera)) { error="Invalid inspection camera"; return false; }
     if(view.contains("orthographic") && !view["orthographic"].isBool()) { error="Inspection projection must be boolean"; return false; }
+    if(view.contains("display") && !validDisplay(view["display"],error)) return false;
+    if(view["display"].toObject()["explosion"].toDouble()>0 && scene->unmapped) { error="Part explosion requires complete source identity mapping"; return false; }
     const auto priorSelection=view["selection"].toObject();
     const auto anchor=priorSelection["anchor"].toObject();
     double normalLength=0; for(const auto& value:anchor["normal_local"].toArray()) normalLength+=std::pow(value.toDouble(),2);
@@ -652,7 +873,9 @@ bool InspectionVtkView::applyView(const QJsonObject& view,QString& error) {
     if(!selected.isEmpty()) for(int index:scene->parts) if(scene->source.nodes[index].target["id"].toString()==selected) { selectedTarget=scene->source.nodes[index].target; break; }
     if(!selected.isEmpty() && priorSelection["id"].toString()==selected && !anchor.isEmpty())
         selectedTarget["anchor"]=QJsonObject{{"kind","surface_point"},{"position_local",anchor["position_local"]},{"normal_local",anchor["normal_local"]}};
-    applyCuts(); applyVisibility(); if(!camera.isEmpty()) restoreCamera(camera);
+    const auto display=view["display"].toObject();
+    for(auto it=display.begin();it!=display.end();++it) scene->display[it.key()]=it.value();
+    applyDisplay(); applyCuts(); applyVisibility(); if(!camera.isEmpty()) restoreCamera(camera);
     return true;
 }
 QJsonObject InspectionVtkView::inspect(const QJsonObject& request,QString& error) {
@@ -664,7 +887,8 @@ QJsonObject InspectionVtkView::inspect(const QJsonObject& request,QString& error
         if(offset<0 || limit<1 || limit>100) { error="Parts require offset >= 0 and limit 1 to 100"; return {}; }
         QJsonArray items; qsizetype bytes=0;
         for(int i=offset;i<std::min(qint64(offset)+limit,qint64(scene->parts.size()));++i) {
-            const auto target=scene->source.nodes[scene->parts[i]].target;
+            auto target=scene->source.nodes[scene->parts[i]].target;
+            if(scene->colors.contains(target["id"].toString())) target["display_color"]=scene->colors.at(target["id"].toString()).name();
             const auto size=QJsonDocument(target).toJson(QJsonDocument::Compact).size();
             if(bytes+size>240*1024) break;
             items.append(target); bytes+=size;
@@ -683,6 +907,16 @@ QJsonObject InspectionVtkView::inspect(const QJsonObject& request,QString& error
         if(!scene->parseHidden(request["hidden"].toArray(),prior,error)) return {};
         scene->rememberHidden(std::move(prior));
         return state();
+    } else if(action=="display") {
+        if(!validDisplay(request["display"],error)) return {};
+        const auto display=request["display"].toObject();
+        if(display["explosion"].toDouble()>0 && scene->unmapped) { error="Part explosion requires complete source identity mapping"; return {}; }
+        bool geometry=false;
+        for(auto it=display.begin();it!=display.end();++it) {
+            geometry=geometry || (it.key()=="cap_cuts" && it.value()!=scene->display[it.key()]);
+            scene->display[it.key()]=it.value();
+        }
+        applyDisplay(geometry);
     } else if(action=="select") {
         const QString id=targetId(request["target"]);
         if(!id.isEmpty() && !scene->actors.contains(id)) { error="Target identity is unavailable in this model revision"; return {}; }
@@ -733,13 +967,18 @@ QJsonObject InspectionVtkView::inspect(const QJsonObject& request,QString& error
           }
         }
         for(auto& marker:scene->markers) scene->renderer->RemoveActor(marker);
-        scene->markers.clear();
+        scene->markers.clear(); scene->markerPositions.clear();
         double extent=0; for(int i=0;i<3;++i) extent=std::max(extent,scene->bounds[i*2+1]-scene->bounds[i*2]);
         vtkNew<vtkSphereSource> sphere; sphere->SetRadius(std::max(extent*.006,1e-5)); sphere->SetThetaResolution(10); sphere->SetPhiResolution(8); sphere->Update();
         vtkNew<vtkPolyDataMapper> mapper; mapper->SetInputData(sphere->GetOutput());
         for(const auto& [node,point]:anchors) {
             double world[3]{}; for(int i=0;i<3;++i) { world[i]=node->world[i*4+3]; for(int j=0;j<3;++j) world[i]+=node->world[i*4+j]*point[j].toDouble(); }
             vtkNew<vtkActor> actor; actor->SetMapper(mapper); actor->SetPosition(world); actor->PickableOff(); actor->UseBoundsOff();
+            const auto id=node->target["id"].toString();
+            scene->markerPositions[actor]={id,{world[0],world[1],world[2]}};
+            if(const auto offset=scene->offsets.find(id);offset!=scene->offsets.end())
+                actor->SetPosition(world[0]+offset->second[0],world[1]+offset->second[1],world[2]+offset->second[2]);
+            actor->SetVisibility(!scene->hidden.contains(id));
             actor->GetProperty()->SetColor(1,.65,.15); actor->GetProperty()->SetAmbient(1); actor->GetProperty()->SetDiffuse(0);
             scene->renderer->AddActor(actor); scene->markers.push_back(actor);
         }
@@ -752,7 +991,7 @@ void InspectionVtkView::wheelEvent(QWheelEvent* e) {
     if(scene) {
         auto* c=scene->renderer->GetActiveCamera(); const double factor=std::pow(1.0015,e->angleDelta().y());
         if(c->GetParallelProjection()) c->SetParallelScale(c->GetParallelScale()/factor); else c->Dolly(factor);
-        scene->renderer->ResetCameraClippingRange(scene->bounds); update(); rememberCamera();
+        scene->clippingRange(); update(); rememberCamera();
     }
     e->accept();
 }
@@ -777,7 +1016,7 @@ void InspectionVtkView::mouseMoveEvent(QMouseEvent* e) {
         c->SetPosition(p[0]+shift[0],p[1]+shift[1],p[2]+shift[2]); c->SetFocalPoint(f[0]+shift[0],f[1]+shift[1],f[2]+shift[2]);
     } else if(config["settings"].toObject()["lock_horizon"].toBool(true)) orbit(-delta.x()*.4*std::numbers::pi/180,delta.y()*.4*std::numbers::pi/180);
     else { c->Azimuth(-delta.x()*.4); c->Elevation(delta.y()*.4); c->OrthogonalizeViewUp(); }
-    scene->renderer->ResetCameraClippingRange(scene->bounds); update(); rememberCamera(false); e->accept();
+    scene->clippingRange(); update(); rememberCamera(false); e->accept();
 }
 void InspectionVtkView::mouseReleaseEvent(QMouseEvent* e) {
     if(scene && !dragged && !doubleClick && e->button()==Qt::LeftButton && e->modifiers()==Qt::NoModifier) {

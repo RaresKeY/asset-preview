@@ -1,7 +1,7 @@
 #pragma once
 #include "audio_waveform.h"
 #include "dependency_metadata.h"
-#include <QCryptographicHash>
+#include "sha256.h"
 #include <QImage>
 #include <QJsonObject>
 #include <memory>
@@ -22,7 +22,7 @@ inline QString sourceCacheKey(const QString& kind,const QString& path) {
         QByteArray::number(s.device)+':'+QByteArray::number(s.inode)+':'+QByteArray::number(s.mode)+':'+
         QByteArray::number(s.size)+':'+QByteArray::number(s.modifiedSeconds)+':'+QByteArray::number(s.modifiedNanoseconds)+':'+
         QByteArray::number(s.changedSeconds)+':'+QByteArray::number(s.changedNanoseconds);
-    return QString::fromLatin1(QCryptographicHash::hash(identity,QCryptographicHash::Sha256).toHex());
+    return QString::fromLatin1(sha256(identity).toHex());
 }
 // The server owns this interface; optional playback modules use its vtable and
 // do not acquire a second cache singleton or add a startup media dependency.

@@ -2,6 +2,8 @@
 
 [Projects](projects.md) owns persistent agent grouping, chosen current previews,
 the interactive Projects grid and Overview grouping/filtering.
+Its two-level project → group/gallery hierarchy reuses this same grid and queue;
+parent headings add no previews, decoders, renderers or background ownership.
 
 Owners: `src/preview_cache.*`, `src/preview_preload.*`, `src/overview_grid.*`, `src/thumbnail_queue.*`, `src/thumbnail_job.*`, cache/layout routes in
 `src/service.*`, image reuse in `src/viewer.*`, waveform reuse in
@@ -10,6 +12,14 @@ Owners: `src/preview_cache.*`, `src/preview_preload.*`, `src/overview_grid.*`, `
 
 `src/cache_diagnostics.*` owns bounded cache/reclamation telemetry. The optional
 3D/media adapters report through the service-owned `CacheStore` interface.
+
+`src/sha256.h` shares a resettable Qt SHA-256 context per calling thread for
+source identities, thumbnail/preload identities and small-disk integrity checks.
+This amortizes provider setup without retaining input byte arrays or memoizing
+file identities. Each call still fingerprints the current filesystem and hashes the
+complete original identity; cache filenames, checksums, quotas and invalidation
+semantics are unchanged. Returned digests own their bytes independently of the
+next reset. Worker threads never share mutable hash state.
 
 ## RAM
 
@@ -20,6 +30,15 @@ payload bytes: 32 MiB each, 128 MiB total, 256 entries. Taking a payload transfe
 ownership/accounting to the visible view. Active views, temporary decodes,
 Qt/driver allocations and loaded libraries are outside this retained-payload
 budget. Engines, players, full PCM and generators are never retained.
+Large native image cache hits prepare their display copy on the ordinary bounded
+image workers before UI publication; they do not decode again. Native hits with
+at most 1 MiB of RGBA display pixels and raster hits transfer immediately. Source identity,
+cancellation and framing follow [Images](images.md).
+
+Queued departure captures obey the same hide/clear cancellation boundary as
+background thumbnails. A later Show or reuse of a closed registration's ID cannot
+revive an older capture. `tools/test.sh thumbnail-publication-gpu` holds native
+worker captures across these transitions and checks both RAM and disk publication.
 
 Keys include normalized path, device/inode/mode/size, nanosecond mtime/ctime and
 algorithm version. Images recheck identity after decode and before retention;
@@ -30,7 +49,13 @@ their own bounds.
 
 Thumbnails share the RAM pool with a 16 MiB subquota and 256 KiB item cap; actual
 stored pixels are at most 160×100 RGBA8 (64 KiB), fitting all 256 possible
-tiles inside the 16 MiB thumbnail budget. Legacy larger derivatives shrink once
+tiles inside the 16 MiB thumbnail budget. Smaller sources keep their native
+dimensions through decode, active-image contribution and disk/RAM admission,
+so Overview, Gallery and the image picker can enlarge their exact pixels.
+Image thumbnails use nearest-neighbor sampling when enlarged in both grouped
+and flat Overview, as well as Gallery and the picker. Shrinking remains smooth.
+Thumbnail identity version 2 skips
+older smoothed enlargements. Legacy larger derivatives shrink once
 on lookup. Thumbnail admission evicts inactive payloads before thumbnails when
 the shared byte/entry limit is reached. The overview does not retain a widget,
 pixmap or engine per registration. RAM clears on hide/minimize, Close all and
@@ -182,22 +207,33 @@ Overview stays in the top-level raster backing store under the
 
 ### Shared thumbnail scheduling
 
+Compare With reuses the Overview tile renderer in selection-only mode: names,
+project labels and thumbnails, without close-selection checkboxes or its own
+thumbnail queue. While its dialog is open, visible comparison candidates take
+over the existing window queue's foreground demand and background warming is
+paused. Closing restores ordinary demand. Search, scroll and registration
+changes update that demand; no candidate becomes an ordinary active preview or
+runs its generator. The existing worker/process limits and source checks apply.
+
 `ThumbnailQueue`, owned by the existing Overview widget for the window lifetime,
 serves all layouts. It admits at most two independent image decodes plus one
-isolated model/material child. Workers run at nice 19 and idle I/O priority;
-model processes retain their independent hard-cancellation and resource limits.
+isolated content child for models, materials, files or video. Workers run at
+nice 19 and idle I/O priority; content processes retain their independent
+hard-cancellation and resource limits.
 There is no queued thread backlog: slots are filled from current demand.
 
-Visible images lead visible models/materials. After 250 ms without a demand or
+Visible images lead visible content jobs. After 250 ms without a demand or
 source change, nearby project members precede the remaining open registrations.
 All 256 tiny thumbnails fit the existing 16 MiB subquota. Ordinary active views
-are excluded; they provide their own frame on departure. Warming pauses while
+are excluded when they provide their own frame on departure. Files and video
+keep canonical first-page/midpoint derivatives and can generate their selected
+Gallery tile while an ordinary preview is active. Warming pauses while
 ordinary views are loading or their generators are running. Background warming
 also pauses during ordinary preview mouse gestures and resumes after
 250 ms of input quiet; an active background model child is cancelled promptly.
 Background image work uses only one decode slot, reserving capacity for foreground arrivals.
-A newly visible model preempts the exact background child. A formerly visible
-model moved offscreen is cancelled and can retry as background after quiet.
+A newly visible content request preempts the exact background child. A formerly
+visible content job moved offscreen is cancelled and can retry after quiet.
 
 Source validation and cache hydration yield after at most four candidates or
 approximately 8 ms per GUI callback. Source identities deduplicate concurrent
@@ -212,15 +248,42 @@ publication, clears RAM through the ordinary service lifecycle, and stops finite
 dispatches. Clearing the cache suppresses background refill until demand changes;
 visible Overview tiles can still regenerate. Completion and invalidation are
 event-driven; settled queues have no polling, rendering or recurring work timer.
-Only visible loading tiles animate the existing spinner.
+Only visible loading tiles animate the existing spinner, using elapsed-time
+rotation and a precise 16 ms timer. Each tick invalidates only the spinner bounds
+with antialiasing spill, preserving the surrounding thumbnail and tile pixels.
 
 On departure, a successfully displayed current preview contributes one frame
-before its visible engine/player is destroyed. Ordinary F3D views downsample the
-shared texture on the GPU and read at most 256×160 pixels, without rerendering.
+before its visible engine/player is destroyed. Ordinary F3D views enqueue a finite
+render at at most 256×160 before worker destruction; navigation does not wait for
+it. Publication rechecks the thumbnail key and visible window.
 Other surface captures are refused above a 16 MiB RGBA estimate; images reuse
 decoded pixels. No idle copies.
+Files and videos use canonical content derivatives instead of departure captures,
+so reading position and playback position do not change their thumbnails.
 Keys include source/dependency fingerprints and visual settings. Unknown-format
 dependency discovery remains best effort; thumbnails are navigation aids.
+
+File derivatives show a first-page 640×400 native document crop, stored at
+160×100. Markdown uses rendered headings/lists/code unless Source is selected;
+other text uses line numbers and syntax colors. The finite child reuses the
+existing document renderer, validates the ordinary 2 MiB UTF-8/line bounds, and
+prepares at most 16 Ki characters / 96 lines. It uses a consistent dark document
+palette and never fetches embedded images or other resources. Invalid/oversized
+documents retain the existing placeholder. No ordinary FileView is activated.
+
+Video derivatives use installed `ffprobe`/`ffmpeg`, one finite local decode at a
+time inside that same owned child group. They select the first video stream near
+half the container duration, falling back to the opening frame when duration is
+unknown or seeking produces no frame. Audio, subtitle/data streams, network
+protocols and playlist demuxers are disabled. Inputs are regular local files up
+to 8 GiB / 32 megapixels; probing is capped at 1 MiB / two seconds of analysis,
+with 4-second probe and 8-second decode waits. Each helper inherits nice 19,
+single-thread settings, job CPU limits and parent-death cancellation. Hide/clear/
+navigation kills the owned group. Only the resulting at-most-160×100 frame is
+retained; no player or media module starts for Overview. Missing tools, malformed
+or over-budget media keep placeholders. New file/video identities invalidate old
+departure screenshots. Tests: `content-thumbnails` / `content-thumbnails-gpu`,
+the file component lane and the shared queue lane.
 
 Missing thumbnails use the bounded lanes above.
 Self-contained raster inputs are limited to 16 MiB files and a 32 MiB decoded
@@ -295,9 +358,9 @@ Image cards use ordinary Qt overlays; model/material, embedded media and
 component inspection surfaces use isolated native overlays under the
 [Preview lifecycle](preview.md) contract. Project cards
 are created directly in their owning pane. Image workers prepare 160×100 RGBA
-thumbnails during decoding, so unload does not scale full-resolution pixels on
-the UI thread. Cache-hit images reuse existing thumbnails or let Overview prepare
-a missing one asynchronously.
+thumbnails during decoding or large cached display preparation, so unload does
+not scale full-resolution pixels on the UI thread. Small cache-hit images reuse
+existing thumbnails or let Overview prepare a missing one asynchronously.
 
 `tools/profile_responsiveness.py` runs a private 96-registration workload under
 `tools/offscreen.sh`: cold/warm 16-project loads, Overview hover/return, left-return
@@ -306,6 +369,12 @@ and CPU time, PSS/RSS, cache/preload counters and concurrent socket ping latency
 Ping RTT measures event-loop service latency, not display frame time. `--perf`
 adds attributed samples; those runs are separate from clean timing comparisons.
 The script owns its state/cache/process and never invokes asset generators.
+Its opt-in `--extended` lane adds generated document/diff, embedded model and
+paused media fixtures, hide/reentry and quiet-state CPU/render checks. Fixture
+video creation uses installed ffmpeg. Idle samples drain background preparation
+and pause observer RPCs. `--captures` saves settled windows outside readiness
+timing and skips hidden windows. Reports distinguish complete runs from failures;
+failed/incomplete runs cannot establish acceptance.
 
 View admission yields between batches of at most two new cards / approximately
 8 ms of construction work. Each finite callback recomputes visibility, so
@@ -316,3 +385,20 @@ thumbnail work memoizes keys until a source/layout/viewport refresh.
 [Performance notes](../docs/performance.md) summarize
 matched 96/256-registration readiness, preparation latency tails and resource
 bounds. The rejected project presentation cache is not part of the implementation.
+
+Gallery reuses the same Overview widget and queue beside one active preview. Its
+visible thumbnail IDs still contribute watched sources and foreground thumbnail
+demand; the selected preview keeps normal full-payload ownership. Cache budgets,
+hide cancellation and event-driven idle behavior are unchanged.
+Grouped Overview headers host native Qt buttons to open the filtered Gallery
+and close the group. Buttons share the raster viewport, follow committed header
+geometry on scroll/reflow, and reserve label width. Both actions match the icon's
+20 px height and 3 px top inset; the closing X mirrors its outer margin.
+Compact Gallery and flat Overview hide these actions.
+`presentation.overview.groups[].gallery_button` and `close_button` expose visible
+button rectangles in window coordinates for native input checks.
+
+In Gallery, an active image contributes its existing decoder thumbnail. A
+full-payload cache hit can derive the bounded thumbnail once from already
+decoded pixels; it does not reopen the source or create another full decode.
+Visible tile metrics expose `thumbnail_ready`, including the selected tile.

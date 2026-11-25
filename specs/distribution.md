@@ -41,7 +41,7 @@ The minimal FFmpeg filter allowlist includes metadata-only `astats` and
 `aspectralstats` for music-reactive audio previews, alongside the existing media
 conversion filters.
 
-Historical release 0.0.1 remains private on GitHub with GHCR tag `0.0.1`.
+Historical release 0.0.1 is available on GitHub with private GHCR tag `0.0.1`.
 Its application snapshot is commit
 `6a1ca605c8f12018649d51193a3b1a1c3803aa7d`; later CI-only fixes prepare the
 GitHub runner's host graphics loaders. `evidence/releases/0.0.1/validation.json`
@@ -84,7 +84,7 @@ control commands retain the ordinary client path. `tools/test.sh packaged` check
 these lifetimes against the prepared native binary in a temporary fixture bundle;
 it does not create distribution artifacts or install dependencies.
 
-Release 0.0.2 is published privately from frozen tag snapshot
+Public GitHub release 0.0.2 uses frozen tag snapshot
 `4bb0516f7825ca3234848470f8a8fb11cdd85db7`, with all desktop formats, the host
 Flatpak bridge, verified PKGBUILD, dependency sources and checksums in GitHub
 Releases. GHCR `0.0.2` and `latest` share digest
@@ -92,7 +92,9 @@ Releases. GHCR `0.0.2` and `latest` share digest
 `evidence/releases/0.0.2/validation.json` records remote hashes, native installs,
 AppImage/Flatpak/container NVIDIA GPU previews and Flatpak host child-group
 cleanup on hide, shutdown, timeout and normal completion. Source on `main` may
-include later UI work beyond the frozen release. Runtime libraries and graphics
+include later UI work beyond the frozen release. The packaging recipe pins VTK
+9.4.2. The optional Parts/Cuts inspector requires VTK 9.7+ and is available in
+compatible source builds. Runtime libraries and graphics
 drivers remain external as described above; native packages are unsigned.
 The temporary OCI transport archive is removed from Releases after private GHCR
 publication; generated local candidates are removed after remote verification.
@@ -104,3 +106,10 @@ for the Codex dock. Existing portable releases do not bundle Konsole. Builds
 without KF6 Parts retain capture/annotation and report terminal unavailability;
 future distribution of the optional terminal must account for its KDE dependency
 closure and component licenses in THIRD_PARTY_NOTICES.md.
+
+The native Markdown compatibility bridge directly links the installed MD4C
+library (also used by Qt Gui on the workstation). CMake requires `pkg-config
+md4c`; future Ubuntu build images install its `libmd4c-dev` headers. The bundle's
+existing dynamic dependency traversal includes the actual library, and `vendored/`
+is copied so its supplemental MD4C license notice accompanies the payload.
+This source change does not rebuild or alter published release artifacts.

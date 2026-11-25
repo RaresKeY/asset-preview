@@ -17,15 +17,15 @@ class Worker final : public ModelWorker {
         QTimer::singleShot(0,this,[this] {
             pending=false;
             QThread::msleep(12); ++renders;
-            if(frameReady)frameReady(snapshot());
+            if(frameRendered)frameRendered();
         });
     }
 public:
     bool reload(const QJsonObject& cfg,QString&) override {
         stage=cfg["test_stage"].toInt(); ++loads;
         // Leave the first completion in the GUI mailbox, then publish a new
-        // revision's frame before its import has completed.
-        if(stage==2 && frameReady)frameReady(snapshot());
+        // revision's render metadata before its import has completed.
+        if(stage==2 && frameRendered)frameRendered();
         if(stage==3) {
             if(inspectionChanged)inspectionChanged({{"obsolete",true}},true);
             if(playbackSettingsRequested)playbackSettingsRequested({{"paused",true}});
@@ -35,8 +35,19 @@ public:
         return true;
     }
     void fit() override { trace+='f'; update(); }
-    void settings(const QJsonObject&) override {}
+    void settings(const QJsonObject&) override {
+        if(stage!=6)return;
+        for(int i=1;i<=20;++i)QTimer::singleShot(i*5,this,[this,i] {
+            ++renders;
+            if(frameRendered)frameRendered();
+            if(i==10 && playbackChanged)playbackChanged();
+        });
+    }
     bool renderPending() const override { return pending; }
+    void present() override {
+        if(stage==7 && framePresented)framePresented();
+        if(frameRendered)frameRendered();
+    }
     QJsonObject cameraState() const override { return {{"moves",moves},{"x",motion.x()},{"y",motion.y()},{"trace",trace}}; }
     QJsonObject metrics() const override { ++metricReads; return {{"engine",true},{"loads",loads},{"renders",renders},{"render_pending",pending},{"camera",cameraState()}}; }
     QImage snapshot() override { QImage image(16,16,QImage::Format_RGBA8888); image.fill(QColor(stage==5?moves:stage,0,0)); return image; }

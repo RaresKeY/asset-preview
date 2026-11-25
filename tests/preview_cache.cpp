@@ -7,11 +7,31 @@
 #include <QDateTime>
 #include <iostream>
 #include <stdexcept>
+#include <atomic>
+#include <thread>
+#include <vector>
 using namespace preview;
 void expect(bool ok,const char* message) { if (!ok) throw std::runtime_error(message); }
 QString key(int i) { return QString::fromLatin1(QCryptographicHash::hash(QByteArray::number(i),QCryptographicHash::Sha256).toHex()); }
 int main(int argc,char** argv) {
     QCoreApplication app(argc,argv); QTemporaryDir temp;
+    expect(sha256({}).toHex()=="e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855","empty SHA-256 known vector");
+    const auto abc=sha256("abc");
+    expect(abc.toHex()=="ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad","SHA-256 known vector");
+    expect(sha256("next input")==QCryptographicHash::hash("next input",QCryptographicHash::Sha256),"successive SHA-256 calls reset the prior input");
+    std::vector<QByteArray> inputs,expected;
+    for(int size:{0,1,55,56,63,64,65,220,4096,1024*1024}) {
+        QByteArray bytes(size,Qt::Uninitialized);
+        for(int i=0;i<size;++i)bytes[i]=char(i*37);
+        inputs.push_back(bytes); expected.push_back(QCryptographicHash::hash(bytes,QCryptographicHash::Sha256));
+    }
+    std::atomic_bool correct=true; std::vector<std::thread> workers;
+    for(int thread=0;thread<4;++thread)workers.emplace_back([&] {
+        for(int pass=0;pass<32;++pass)for(size_t i=0;i<inputs.size();++i)
+            if(sha256(inputs[i])!=expected[i])correct=false;
+    });
+    for(auto& worker:workers)worker.join();
+    expect(correct && abc.toHex()=="ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad","SHA-256 reset, retained result and independent worker contexts");
     qputenv("ASSET_PREVIEW_SMALL_CACHE",(temp.path()+"/cache").toUtf8());
     qputenv("ASSET_PREVIEW_TEXTURE_CACHE",(temp.path()+"/textures").toUtf8());
     PreviewCache cache;

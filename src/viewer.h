@@ -7,6 +7,8 @@
 #include <atomic>
 using InspectionCallback = std::function<void(const QJsonObject&, bool)>;
 namespace preview { struct AudioWaveform; class CacheStore; }
+class QOpenGLWidget;
+class QPainter;
 
 class PreviewView {
 public:
@@ -24,6 +26,7 @@ public:
     std::function<void()> activated;
     InspectionCallback inspectionChanged;
     std::function<void()> playbackChanged;
+    std::function<void()> framePresented;
     std::function<void()> loadingChanged;
     std::function<void(QJsonObject)> playbackSettingsRequested;
     virtual void settings(const QJsonObject& config) = 0;
@@ -31,6 +34,7 @@ public:
     virtual std::shared_ptr<const preview::AudioWaveform> audioWaveform() const { return {}; }
     virtual QImage snapshot() { return {}; }
     virtual QImage thumbnailSnapshot(QSize bound) { return snapshot().scaled(bound,Qt::KeepAspectRatio,Qt::SmoothTransformation); }
+    virtual void requestThumbnail(QSize bound,std::function<void(QImage)> ready) { ready(thumbnailSnapshot(bound)); }
     virtual bool loading() const { return false; }
     virtual bool seek(double, QString& error) { error="This preview has no seekable playback"; return false; }
     virtual bool stepAnimation(int,int,QString& error) { error="This preview has no frame stepping"; return false; }
@@ -46,13 +50,17 @@ public:
     void settings(const QJsonObject&) override;
     QJsonObject metrics() const override;
     QJsonObject inspectionState() const override;
-    QImage snapshot() override { return grab().toImage(); }
+    void setImageView(const QJsonObject& state);
+    void zoomBy(double factor,QPointF anchor);
+    void panBy(QPointF viewportDelta);
+    QImage snapshot() override;
     QImage pixels() const { return image; }
     QImage thumbnail() const { return previewImage; }
     bool loading() const override { return pending; }
     std::function<void(bool,QString)> loaded;
 protected:
     void paintEvent(QPaintEvent*) override;
+    void resizeEvent(QResizeEvent*) override;
     void wheelEvent(QWheelEvent*) override;
     void mousePressEvent(QMouseEvent*) override;
     void mouseReleaseEvent(QMouseEvent*) override;
@@ -60,9 +68,12 @@ protected:
     void mouseDoubleClickEvent(QMouseEvent*) override;
 private:
     QImage image;
+    QImage displayPixels;
     QImage previewImage;
     QSize originalSize;
     QString background = "checker";
+    QJsonValue nearestMode;
+    bool automaticNearest = false;
     bool nearest = false;
     double zoom = 1;
     QPointF pan, last;
@@ -73,7 +84,10 @@ private:
     bool pending=false;
     std::shared_ptr<std::atomic_bool> cancelled;
     QJsonObject loadTiming;
-    void publish(QImage,QSize,const QString&,const QString&);
+    QOpenGLWidget* display=nullptr;
+    void repaintImage();
+    void paintImage(QPainter&,bool accelerated=false);
+    void publish(QImage,QSize,const QString&,const QString&,QImage prepared,bool vectorImage);
     void remember(bool persist=true);
 };
 

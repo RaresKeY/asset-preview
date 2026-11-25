@@ -236,6 +236,29 @@ class AnimationIntegration(unittest.TestCase):
             self.assertEqual(metrics()["loads"],1,"Sampling changes must reuse the loaded engine")
         finally:input.close()
 
+    @unittest.skipUnless(f.GPU,"Smooth direct native playback cadence and idle lifetime")
+    def test_smooth_playback_presents_without_readbacks(self):
+        path=self.root/"smooth.glb";write_animation(path)
+        rpc({"method":"add","entry":{"id":"smooth","path":str(path),
+            "settings":{"paused":False,"loop":True}}})
+        self.show();f.eventually(lambda:f.row("smooth").get("metrics",{}).get("loads")==1,timeout=25)
+        time.sleep(.4)
+        before=f.row("smooth")["metrics"]
+        time.sleep(1.2)
+        after=f.row("smooth")["metrics"]
+        self.assertEqual(after["frame_transport"],"native_window")
+        self.assertEqual(after["display_readbacks"],before["display_readbacks"])
+        self.assertGreater(after["presented_frames"]-before["presented_frames"],45,
+            "Smooth playback must not wait 33 ms after every render")
+        self.assertEqual(after["gpu_buffers"],0)
+        self.assertEqual(after["gpu_color_bytes"],0)
+        self.assertFalse(after["display"]["sharing"])
+        rpc({"method":"settings","id":"smooth","settings":{"paused":True}})
+        time.sleep(.2);settled=f.row("smooth")["metrics"]
+        time.sleep(.2);idle=f.row("smooth")["metrics"]
+        self.assertEqual(idle["renders"],settled["renders"])
+        self.assertFalse(idle["animation_timer"])
+
     @unittest.skipUnless(f.GPU,"Frame-boundary scheduling on the hardware renderer")
     def test_low_rate_playback_sleeps_between_poses(self):
         path=self.root/"cadence.glb";write_animation(path)
@@ -296,6 +319,8 @@ class AnimationIntegration(unittest.TestCase):
         self.assertEqual(current["loads"],before["loads"]);self.assertEqual(current["animations"],before["animations"])
         self.assertAlmostEqual(current["position"],1)
         rpc({"method":"settings","id":"refresh","settings":{"animation":1}})
+        f.eventually(lambda:not f.row("refresh")["metrics"]["loading"] and
+            not f.row("refresh")["metrics"]["command_pending"])
         self.assertEqual(f.row("refresh")["metrics"]["animation"],0,"Rejected clip import keeps the last-good effective clip")
         write_animation(path,"node",duration=3)
         f.eventually(lambda:f.row("refresh")["metrics"]["loads"]==before["loads"]+1,timeout=25)
@@ -306,6 +331,8 @@ class AnimationIntegration(unittest.TestCase):
         self.assertEqual(f.row("refresh")["settings"]["animation_speed"],.5)
         rpc({"method":"seek","id":"refresh","seconds":1.2})
         rpc({"method":"settings","id":"refresh","settings":{"materials":False}})
+        f.eventually(lambda:not f.row("refresh")["metrics"]["loading"] and
+            not f.row("refresh")["metrics"]["command_pending"])
         self.assertAlmostEqual(f.row("refresh")["metrics"]["position"],1.2)
         loads=f.row("refresh")["metrics"]["loads"]
         time.sleep(.8)
@@ -333,6 +360,85 @@ class AnimationIntegration(unittest.TestCase):
         state=f.row("reload")["metrics"]
         self.assertEqual(state["loads"],2,"A delayed watcher event must not reload already imported output")
         self.assertAlmostEqual(state["position"],1.25)
+
+
+class AnimationBadgeIntegration(unittest.TestCase):
+    @unittest.skipUnless(f.GPU,"Native animation badge window stability")
+    def test_triangle_badge_stays_in_place_during_playback(self):
+        import inspection_integration as harness
+        fixture=harness.InspectionIntegration(methodName="runTest")
+        fixture._testMethodName=self._testMethodName
+        self.addCleanup(fixture.doCleanups); fixture.setUp()
+        path=fixture.root/'badge.glb'; write_animation(path)
+        fixture.rpc({'method':'add','entry':{'id':'badge','path':str(path),'settings':{'paused':True,'triangles':True}}})
+        fixture.rpc({'method':'show'})
+        harness.eventually(lambda:fixture.row('badge').get('metrics',{}).get('loads')==1)
+        input=f.XInput(fixture.rpc); self.addCleanup(input.close)
+        x=input.x; display=input.display
+        scalar=ctypes.c_int; unsigned=ctypes.c_uint; window=ctypes.c_ulong
+        x.XGetGeometry.argtypes=[ctypes.c_void_p,window,ctypes.POINTER(window),ctypes.POINTER(scalar),ctypes.POINTER(scalar),
+                                ctypes.POINTER(unsigned),ctypes.POINTER(unsigned),ctypes.POINTER(unsigned),ctypes.POINTER(unsigned)]
+        x.XSelectInput.argtypes=[ctypes.c_void_p,window,ctypes.c_long]
+        x.XPending.argtypes=[ctypes.c_void_p]; x.XPending.restype=scalar
+        class Configure(ctypes.Structure):
+            _fields_=[('type',scalar),('serial',window),('sent',scalar),('display',ctypes.c_void_p),
+                      ('event',window),('window',window),('x',scalar),('y',scalar),('width',scalar),
+                      ('height',scalar),('border',scalar),('above',window),('override_redirect',scalar)]
+        class Event(ctypes.Union):
+            _fields_=[('type',scalar),('configure',Configure),('padding',ctypes.c_long*24)]
+        x.XNextEvent.argtypes=[ctypes.c_void_p,ctypes.POINTER(Event)]
+        def locate(parent,rect):
+            root=window(); above=window(); children=ctypes.POINTER(window)(); count=unsigned()
+            x.XQueryTree(display,parent,ctypes.byref(root),ctypes.byref(above),ctypes.byref(children),ctypes.byref(count))
+            ids=[children[i] for i in range(count.value)]
+            if children:x.XFree(children)
+            for child in ids:
+                left=scalar(); top=scalar(); width=unsigned(); height=unsigned(); border=unsigned(); depth=unsigned()
+                x.XGetGeometry(display,child,ctypes.byref(root),ctypes.byref(left),ctypes.byref(top),
+                               ctypes.byref(width),ctypes.byref(height),ctypes.byref(border),ctypes.byref(depth))
+                x.XTranslateCoordinates(display,child,input.window,0,0,ctypes.byref(left),ctypes.byref(top),ctypes.byref(above))
+                if (left.value,top.value,width.value,height.value)==tuple(rect[k] for k in ('x','y','width','height')):return child
+                if found:=locate(child,rect):return found
+            return None
+        time.sleep(.3)
+        row=fixture.row('badge'); badge=row['overlays']['triangles']; transport=row['overlays']['animation']
+        self.assertTrue(badge['visible']); self.assertLessEqual(badge['y']+badge['height'],transport['y'])
+        native=locate(input.window,badge); self.assertIsNotNone(native,'Locate the actual native triangle badge')
+        x.XSelectInput(display,native,1<<17)
+        def drain():
+            x.XSync(display,0); moves=[]
+            while x.XPending(display):
+                event=Event(); x.XNextEvent(display,ctypes.byref(event))
+                if event.type==22:moves.append((event.configure.x,event.configure.y,event.configure.width,event.configure.height))
+            return moves
+        fixture.rpc({'method':'settings','id':'badge','settings':{'paused':False}})
+        harness.eventually(lambda:fixture.row('badge')['metrics']['presented_frames']>5)
+        drain(); before=fixture.row('badge')['metrics']; moves=[]
+        until=time.monotonic()+1.2
+        while time.monotonic()<until:
+            time.sleep(.04); moves.extend(drain())
+        after=fixture.row('badge')['metrics']
+        self.assertGreater(after['presented_frames']-before['presented_frames'],20)
+        self.assertEqual(after['triangles'],before['triangles'])
+        self.assertFalse(moves,f'Triangle badge moved during playback: {moves[:8]} ({len(moves)} total)')
+        renderer=after['renderer']
+        self.assertFalse(any(token in renderer.lower() for token in ('llvmpipe','softpipe','software','unknown')),renderer)
+        input.press('m')
+        harness.eventually(lambda:not fixture.row('badge')['overlays']['triangles']['visible'])
+        input.press('m')
+        harness.eventually(lambda:fixture.row('badge')['overlays']['triangles']['visible'])
+        x.XResizeWindow.argtypes=[ctypes.c_void_p,window,unsigned,unsigned]
+        x.XResizeWindow(display,input.window,620,520); x.XSync(display,0)
+        harness.eventually(lambda:fixture.rpc({'method':'list'})['presentation']['width']==620)
+        time.sleep(.2); drain(); time.sleep(.4)
+        self.assertEqual(drain(),[],'Narrow animation transport must keep the native badge stationary')
+        row=fixture.row('badge'); badge=row['overlays']['triangles']; transport=row['overlays']['animation']
+        self.assertLessEqual(badge['y']+badge['height'],transport['y'])
+        self.assertEqual(row['metrics']['loads'],1,'M and resizing must preserve the loaded animation')
+        fixture.rpc({'method':'settings','id':'badge','settings':{'paused':True}})
+        fixture.rpc({'method':'capture','path':str(fixture.root/'animation-badge-stable.png')})
+        (fixture.root/'animation-badge-result.json').write_text(json.dumps({'renderer':renderer,'native_badge_moves':len(moves),
+            'presented_frames':after['presented_frames']-before['presented_frames'],'triangles':after['triangles']},indent=2))
 
 
 if __name__=="__main__":unittest.main(verbosity=2)

@@ -10,6 +10,7 @@
 #include <QMap>
 #include <QProcess>
 #include <QPoint>
+#include <QPointer>
 #include <QSet>
 #include <QTimer>
 #include <memory>
@@ -31,6 +32,11 @@ class CodexPanel;
 class Service;
 class OverviewGrid;
 class ProjectGrid;
+class QSplitter;
+class QVBoxLayout;
+class QDialog;
+class QLineEdit;
+class QTreeWidget;
 
 struct PublicationSnapshot {
     QMap<QString,QString> stamps;
@@ -72,7 +78,7 @@ class PreviewWindow final : public QMainWindow {
 public:
     explicit PreviewWindow(Service* service);
     ~PreviewWindow() override;
-    void present();
+    void present(bool activate=true);
     void navigation();
     void arrange(const QStringList& ids);
     void createCard(Entry& entry);
@@ -80,6 +86,9 @@ public:
     void reportError(const QString& error);
     void refreshInspection();
     bool commitInspectionControls();
+    QJsonObject inspectionDraft() const;
+    void restoreInspectionDraft(const QJsonObject&);
+    void restoreWindowState(const QJsonObject&);
     bool isolatesPreview() const { return isFullScreen() && fullscreenFocus; }
     QJsonObject presentation() const;
     QJsonObject referenceControls() const;
@@ -102,6 +111,7 @@ protected:
     void dragEnterEvent(QDragEnterEvent*) override;
     void dropEvent(QDropEvent*) override;
     void resizeEvent(QResizeEvent*) override;
+    void hideEvent(QHideEvent*) override;
     bool eventFilter(QObject*, QEvent*) override;
 private:
     void options(const QString& id);
@@ -115,28 +125,49 @@ private:
     void closeMarked();
     void hoverCard(const QString& id, const QPoint& position, bool explicitInput=false);
     void setupMenus(QToolButton* openButton);
+    void compareWith();
+    void refreshComparisonPicker();
     void toggleFullscreen(bool focusPreview=false);
     void leaveFullscreen();
     void fullscreenChanged();
     void resizeCodex();
-    void populateSettings(QMenu*,const QString&,const QJsonObject&,const std::function<void(QJsonObject)>&,bool defaults=false);
+    void refreshExplorer();
+    void organizeProject(const QString& id,const QPoint& position);
+    void setExplorerVisible(bool visible);
+    QJsonObject explorerPresentation() const;
+    void populateSettings(QMenu*,const QString&,const QJsonObject&,const std::function<void(QJsonObject)>&,bool defaults=false,bool automaticNearest=false);
     QAction *closeAction, *closeSelectedAction, *reopenAction, *saveAction, *copyAction;
     QAction* fitAction;
     QList<QAction*> modelActions;
     QList<QShortcut*> modelShortcuts;
+    QShortcut* toggleImageShortcut = nullptr;
     QCheckBox* syncButton;
     Service* service;
     QWidget* canvas;
+    QWidget* previewBody=nullptr;
     QGridLayout* grid;
     QLabel* position;
     QComboBox* selection=nullptr;
+    QToolButton* explorerToggle=nullptr;
+    QTreeWidget* explorer=nullptr;
+    QSplitter* explorerSplitter=nullptr;
+    QJsonArray explorerSnapshot;
+    QString explorerSelection;
+    int explorerWidth=270;
     QComboBox* inspectionMode=nullptr;
     QToolButton* previous;
     QToolButton* next;
     QComboBox* density;
     QToolButton* closeAllButton;
     OverviewGrid* overview=nullptr;
+    QPointer<QDialog> comparisonPicker;
+    OverviewGrid* comparisonGrid=nullptr;
+    QLineEdit* comparisonSearch=nullptr;
+    QString comparisonSource;
     ProjectGrid* projectGrid=nullptr;
+    QSplitter* gallerySplitter=nullptr;
+    QWidget* galleryBody=nullptr;
+    QVBoxLayout* galleryLayout=nullptr;
     QWidget* projectTools=nullptr;
     QComboBox* projectFilter=nullptr;
     QComboBox* projectDensity=nullptr;
@@ -153,7 +184,6 @@ private:
     InspectionPanel* inspectionPanel = nullptr;
     QAction* inspectAction = nullptr;
     QAction* fullscreenAction = nullptr;
-    QShortcut* exitFullscreen = nullptr;
     FullscreenNotice* fullscreenNotice = nullptr;
     bool fullscreenFocus = false, fullscreenMode = false;
     bool thumbnailWatchScheduled=false,thumbnailPrepareScheduled=false;
@@ -175,6 +205,7 @@ public:
     void inspectionChanged(const QString& id,const QJsonObject& state,bool persist);
     void syncCamera(const QString& id);
     QJsonObject inspectionRequest(const QJsonObject&);
+    QJsonObject restartRequest(const QJsonObject&);
     QJsonObject annotationRequest(const QJsonObject&);
     QJsonObject inspectionState(const QString& id);
     void inspectionEvent(const QString& id);
@@ -185,9 +216,10 @@ public:
     bool syncingCamera=false;
     int projectDirection=1;
     QMap<QString, std::shared_ptr<Entry>> entries;
-    QString selected, layout = "single", socketPath, statePath;
+    QString selected, layout = "overview", socketPath, statePath;
     QString thumbnailDirectory;
     QString inspectionId;
+    QJsonObject restartDraft;
     QJsonObject codexOrigin;
     int gridSize = 2;
     QJsonObject projects;
@@ -198,13 +230,17 @@ public:
     QJsonArray projectRows() const;
     QString projectCurrent(const QString& id) const;
     QStringList overviewOrder() const;
+    QStringList orderedProjects() const;
+    bool matchesProject(const QString& project,const QString& filter) const;
+    QString validateProjectParent(const QString& id,const QJsonValue& parent) const;
     preview::PreviewCache cache;
     std::unique_ptr<PreviewWindow> window;
 private:
     friend class PreviewWindow;
     bool activationScheduled=false;
+    quint64 thumbnailEpoch=0;
     bool eventFilter(QObject*, QEvent*) override;
-    QJsonObject add(QJsonObject config, bool restore = false, bool makeCurrent = true, const QString& projectLabel = {});
+    QJsonObject add(QJsonObject config, bool restore = false, bool makeCurrent = true, const QString& projectLabel = {},bool projectMetadataChanged=false);
     QJsonObject select(const QString& id,bool updateViews=true,bool single=false,bool makeCurrent=false);
     QString closeTarget(const QString& id) const;
     void preloadReturnTarget(bool settled=false);
@@ -234,7 +270,7 @@ private:
     QString pendingProjectPreload;
     QJsonObject preferences;
     QStringList selectionHistory;
-    struct ClosedEntry { QJsonObject config; int index; };
+    struct ClosedEntry { QJsonObject config; int index; QJsonObject project={}; int projectIndex=-1; QJsonObject parent={}; int parentIndex=-1; };
     QList<ClosedEntry> closedEntries;
     QLocalServer server;
     QFileSystemWatcher watcher;

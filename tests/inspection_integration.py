@@ -173,6 +173,11 @@ class InspectionIntegration(unittest.TestCase):
         eventually(self.ping, description="owned inspection server startup")
         self.assertEqual(self.rpc({"method": "ping"})["pid"], self.process.pid)
         self.assertEqual(stat.S_IMODE(self.socket_path.stat().st_mode) & 0o077, 0)
+        state = self.rpc({"method": "list"})
+        self.assertEqual(state["layout"], "overview")
+        self.assertTrue(state["group_projects"])
+        self.assertEqual(state["project_filter"], "")
+        self.rpc({"method": "layout", "layout": "single"})
 
     def retain_evidence(self):
         evidence = os.environ.get("ASSET_PREVIEW_EVIDENCE_DIR")
@@ -180,7 +185,8 @@ class InspectionIntegration(unittest.TestCase):
             return
         target = Path(evidence).resolve() / self._testMethodName
         target.mkdir(parents=True, exist_ok=True)
-        for path in [self.log_path, *self.root.glob("*.png"), *self.root.glob("*.json"), self.review]:
+        for path in [self.log_path, *self.state_dir.glob("crash.log*"),
+                     *self.root.glob("*.png"), *self.root.glob("*.json"), self.review]:
             if path.is_file():
                 shutil.copy2(path, target / path.name)
 
@@ -851,6 +857,30 @@ class InspectionIntegration(unittest.TestCase):
             self.assertLess(math.dist(changed[field], reentered[field]), 1e-5, f"Reentering inspection restored an older camera {field}")
 
     @unittest.skipUnless(GPU, GPU_REASON)
+    def test_projection_shortcuts_work_on_native_inspection(self):
+        self.open_inspection()
+        self.hardware_renderer()
+        input_device=XInput(); numlock=input_device.numlock(True)
+        try:
+            view=self.row()["viewport"]
+            input_device.click(view["x"]+view["width"]//2,view["y"]+view["height"]//2)
+            camera=self.inspect()["camera"]; loads=self.row()["metrics"]["loads"]
+            for button,enabled in (("5",True),("KP_5",False)):
+                input_device.press(button)
+                eventually(lambda:self.inspect()["orthographic"]==enabled,description="inspection projection shortcut")
+                self.assertEqual(self.row()["settings"]["orthographic"],enabled)
+            input_device.numlock(False)
+            for enabled in (True,False):
+                input_device.press("KP_Begin")
+                eventually(lambda:self.inspect()["orthographic"]==enabled,description="Num Lock off projection shortcut")
+            self.assertEqual(self.row()["metrics"]["loads"],loads)
+            for field in ("position","focal","up"):
+                self.assertLess(math.dist(camera[field],self.inspect()["camera"][field]),1e-6)
+            self.assertFalse(self.rpc({"method":"list"})["preferences"]["3d"]["orthographic"])
+        finally:
+            input_device.numlock(numlock); input_device.close()
+
+    @unittest.skipUnless(GPU, GPU_REASON)
     def test_10_restore_projection_and_failed_apply_preserve_settings_and_defaults(self):
         self.open_inspection()
         parts = self.by_node()
@@ -1035,6 +1065,211 @@ class InspectionIntegration(unittest.TestCase):
         self.assertFalse(self.inspect()["loaded"])
         self.assertTrue(self.row()["metrics"]["engine"])
         self.assertIn("asset-preview-f3d.so", self.module_maps())
+
+    @unittest.skipUnless(GPU, GPU_REASON)
+    def test_part_colors_explosion_and_selected_fill(self):
+        self.open_inspection()
+        parts = self.by_node()
+        colors = [part['display_color'] for part in parts.values()]
+        self.assertEqual(len(set(colors)), len(parts))
+        self.rpc({'method': 'camera_view', 'id': 'model', 'view': 'front'})
+        baseline = self.capture('display-materials.png')
+        self.inspect('select', target=parts[2]['id'])
+        selected = self.capture('display-selected.png')
+        amber = lambda pixels: sum(r > 130 and r > b * 1.6 and g > b * 1.4 for r, g, b in pixels)
+        self.assertGreater(amber(selected) - amber(baseline), 100, 'Selection must visibly fill the component')
+        self.inspect('select', target='')
+        self.assertEqual(self.capture('display-deselected.png'), baseline, 'Deselect must restore authored materials exactly')
+        loads = self.row()['metrics']['loads']
+        camera = self.inspect()['camera']
+        self.inspect('display', display={'part_colors': True})
+        colored = self.capture('display-part-colors.png')
+        self.assertGreater(sum(a != b for a, b in zip(baseline, colored)), 200)
+        self.inspect('display', display={'explosion': .55})
+        exploded = self.capture('display-exploded.png')
+        self.assertGreater(sum(a != b for a, b in zip(colored, exploded)), 200)
+        self.assertEqual(self.inspect()['camera'], camera)
+        hits = self.hit_points()
+        self.assertTrue(hits, 'Exploded components must remain source-pickable')
+        for target, (_, _, selection) in hits.items():
+            self.assertIn(target, {part['id'] for part in parts.values()})
+            self.assertTrue(all(math.isfinite(x) for x in selection['anchor']['position_local']))
+        self.inspect('select', target='')
+        self.inspect('display', display={'explosion': 0, 'part_colors': False})
+        self.assertEqual(self.capture('display-reassembled.png'), baseline)
+        self.assertEqual(self.row()['metrics']['loads'], loads)
+        stable = self.settle()
+        time.sleep(.4)
+        self.assertEqual(self.row()['metrics']['renders'], stable)
+        for display in ({'explosion': -1}, {'explosion': 2.1}, {'part_colors': 'yes'}, {'cap_cuts': 1}, {'unknown': True}):
+            with self.assertRaises(RuntimeError):
+                self.inspect('display', display=display)
+
+    @unittest.skipUnless(GPU, GPU_REASON)
+    def test_closed_sections_fill_and_caps_are_source_selectable(self):
+        self.open_inspection()
+        port = self.by_node()[2]['id']
+        self.inspect('isolate', target=port)
+        self.rpc({'method': 'camera_view', 'id': 'model', 'view': 'front'})
+        self.rpc({'method': 'settings', 'id': 'model', 'settings': {'orthographic': True}})
+        # Fit the isolated part without altering its source-space cut bounds.
+        self.inspect('apply', view={**self.inspect(), 'camera': {
+            'position': [-1.65, 0, 5], 'focal': [-1.65, 0, 0], 'up': [0, 1, 0],
+            'angle': 30, 'parallel_span': 2.8}})
+        self.inspect('display', display={'cap_cuts': False})
+        self.inspect('cut', axis='z', position=0, keep='negative', enabled=True)
+        unfilled = self.capture('section-open.png')
+        self.inspect('display', display={'cap_cuts': True})
+        filled = self.capture('section-filled.png')
+        self.assertGreater(self.row()['metrics']['cap_triangles'], 0, self.inspect())
+        self.assertEqual(self.inspect()['sections']['open_parts'], 0)
+        self.assertEqual(self.inspect()['sections']['closed_parts'], len(PARTS))
+        self.assertGreater(sum(a != b for a, b in zip(unfilled, filled)), 200)
+        viewport = self.row()['viewport']
+        hit = self.inspect('pick', x=viewport['width'] / 2, y=viewport['height'] / 2)
+        self.assertEqual(hit['selected'], port)
+        self.assertNotIn('anchor', hit['selection'], 'A generated cap cannot claim an original source-surface pin')
+        self.inspect('select', target='')
+        self.inspect('cut', axis='x', position=-1.65, keep='positive', enabled=True)
+        self.capture('section-two-planes.png')
+        self.assertFalse(self.inspect('pick', x=viewport['width'] * .35, y=viewport['height'] / 2)['selected'])
+        self.assertEqual(self.inspect('pick', x=viewport['width'] * .65, y=viewport['height'] / 2)['selected'], port)
+        self.inspect('hide', target=port)
+        self.assertEqual(self.row()['metrics']['cap_triangles'], 0)
+        self.inspect('show', target=port)
+        self.assertGreater(self.row()['metrics']['cap_triangles'], 0, self.inspect())
+
+    @unittest.skipUnless(GPU, GPU_REASON)
+    def test_open_meshes_do_not_receive_invented_caps(self):
+        from inspection_fixture import fixture_document
+        document, binary = fixture_document()
+        primitive = document['meshes'][0]['primitives'][0]
+        accessor = document['accessors'][primitive['indices']]
+        accessor['byteOffset'] = 12
+        accessor['count'] -= 6
+        encoded = json.dumps(document).encode()
+        encoded += b' ' * (-len(encoded) % 4)
+        binary += b'\0' * (-len(binary) % 4)
+        chunks = struct.pack('<I4s', len(encoded), b'JSON') + encoded + struct.pack('<I4s', len(binary), b'BIN\0') + binary
+        data = struct.pack('<4sII', b'glTF', 2, 12 + len(chunks)) + chunks
+        self.model.write_bytes(data)
+        self.sha = hashlib.sha256(data).hexdigest()
+        self.open_inspection()
+        port = self.by_node()[2]['id']
+        self.inspect('isolate', target=port)
+        self.inspect('cut', axis='z', position=0, keep='negative', enabled=True)
+        self.assertEqual(self.inspect()['sections']['open_parts'], 2)
+        self.assertEqual(self.row()['metrics']['cap_triangles'], 0)
+
+    @unittest.skipUnless(GPU, GPU_REASON)
+    def test_mirrored_closed_parts_keep_filled_sections(self):
+        from inspection_fixture import fixture_document
+        document, binary = fixture_document()
+        document['nodes'][2]['scale'] = [-1, 1, 1]
+        encoded = json.dumps(document).encode(); encoded += b' ' * (-len(encoded) % 4)
+        binary += b'\0' * (-len(binary) % 4)
+        chunks = struct.pack('<I4s', len(encoded), b'JSON') + encoded + struct.pack('<I4s', len(binary), b'BIN\0') + binary
+        data = struct.pack('<4sII', b'glTF', 2, 12 + len(chunks)) + chunks
+        self.model.write_bytes(data); self.sha = hashlib.sha256(data).hexdigest()
+        self.open_inspection()
+        port = self.by_node()[2]['id']
+        self.inspect('isolate', target=port)
+        self.inspect('apply', view={**self.inspect(), 'camera': {
+            'position': [-1.65, 0, 5], 'focal': [-1.65, 0, 0], 'up': [0,1,0],
+            'angle': 30, 'parallel_span': 2.8}, 'orthographic': True})
+        self.inspect('cut', axis='z', position=0, keep='negative', enabled=True)
+        self.capture('section-mirrored.png')
+        self.assertGreater(self.row()['metrics']['cap_triangles'], 0)
+        viewport = self.row()['viewport']
+        hit = self.inspect('pick', x=viewport['width']/2, y=viewport['height']/2)
+        self.assertEqual(hit['selected'], port)
+        self.assertNotIn('anchor', hit['selection'])
+
+    @unittest.skipUnless(GPU, GPU_REASON)
+    def test_section_caps_preserve_an_enclosed_cavity(self):
+        # Two nested, oppositely wound closed shells define a solid wall and
+        # an enclosed void. The section must be a ring, not a filled rectangle.
+        positions = []
+        for scale in (1.0, .55):
+            positions.extend((x * scale, y * scale, z * scale)
+                             for x, y, z in ((-1,-1,-1),(1,-1,-1),(1,1,-1),(-1,1,-1),
+                                             (-1,-1,1),(1,-1,1),(1,1,1),(-1,1,1)))
+        outer = [0,2,1,0,3,2,4,5,6,4,6,7,0,1,5,0,5,4,3,7,6,3,6,2,0,4,7,0,7,3,1,2,6,1,6,5]
+        indices = outer + [outer[i + j] + 8 for i in range(0, len(outer), 3) for j in (0,2,1)]
+        geometry = struct.pack('<' + 'f' * 48, *(v for p in positions for v in p))
+        binary = geometry + struct.pack('<' + 'H' * len(indices), *indices)
+        document = {'asset': {'version': '2.0'}, 'scene': 0, 'scenes': [{'nodes': [0]}],
+                    'nodes': [{'name': 'Hollow solid', 'mesh': 0}],
+                    'meshes': [{'primitives': [{'attributes': {'POSITION': 0}, 'indices': 1, 'material': 0}]}],
+                    'materials': [{'doubleSided': True, 'pbrMetallicRoughness': {'baseColorFactor': [.2,.3,.4,1]}}],
+                    'buffers': [{'byteLength': len(binary)}],
+                    'bufferViews': [{'buffer': 0, 'byteOffset': 0, 'byteLength': len(geometry)},
+                                    {'buffer': 0, 'byteOffset': len(geometry), 'byteLength': len(binary)-len(geometry)}],
+                    'accessors': [{'bufferView': 0, 'componentType': 5126, 'count': 16, 'type': 'VEC3', 'min': [-1,-1,-1], 'max': [1,1,1]},
+                                  {'bufferView': 1, 'componentType': 5123, 'count': len(indices), 'type': 'SCALAR'}]}
+        encoded = json.dumps(document).encode()
+        encoded += b' ' * (-len(encoded) % 4)
+        binary += b'\0' * (-len(binary) % 4)
+        chunks = struct.pack('<I4s', len(encoded), b'JSON') + encoded + struct.pack('<I4s', len(binary), b'BIN\0') + binary
+        data = struct.pack('<4sII', b'glTF', 2, 12 + len(chunks)) + chunks
+        self.model.write_bytes(data); self.sha = hashlib.sha256(data).hexdigest()
+        self.open_inspection()
+        self.inspect('apply', view={'camera': {'position': [0,0,5], 'focal': [0,0,0], 'up': [0,1,0],
+                                                'angle': 30, 'parallel_span': 2.8}, 'orthographic': True})
+        self.inspect('cut', axis='z', position=0, keep='negative', enabled=True)
+        self.capture('section-cavity.png')
+        viewport = self.row()['viewport']
+        middle = self.inspect('pick', x=viewport['width']*.5, y=viewport['height']*.5)
+        self.assertIn('anchor', middle['selection'], 'The cavity should expose its original inner wall')
+        ring = self.inspect('pick', x=viewport['width']*.5, y=viewport['height']*.22)
+        self.assertTrue(ring['selected'])
+        self.assertNotIn('anchor', ring['selection'], 'The surrounding solid wall should have a generated section cap')
+
+    @unittest.skipUnless(GPU, GPU_REASON)
+    def test_restart_preserves_inspection_draft_and_visibility(self):
+        self.open_inspection()
+        parts = self.by_node()
+        self.inspect('select', target=parts[2]['id'])
+        self.inspect('hide', target=parts[8]['id'])
+        self.inspect('display', display={'part_colors': True, 'explosion': .35})
+        self.inspect('cut', axis='z', position=0, keep='negative', enabled=True)
+        session = self.rpc({'method': 'restart_state', 'action': 'capture'})['session']
+        session['panel'] = {'draft': 'Keep this unfinished review through a rebuild.', 'scope': 'model', 'status': 'in_progress'}
+        session['views'][0]['tool'] = 'cuts'
+        self.rpc({'method': 'restart_state', 'action': 'restore', 'session': session})
+        project = self.root / 'restart-project'
+        (project / 'bin').mkdir(parents=True)
+        shutil.copy2(CLI, project / 'bin/asset-preview')
+        shutil.copy2(PROJECT_ROOT / 'VERSION', project / 'VERSION')
+        (project / 'build').symlink_to(BINARY.parent, target_is_directory=True)
+        command = [str(project / 'bin/asset-preview'), 'restart', '--if-running']
+        def restart_visible():
+            result = subprocess.run(command, env=self.env, capture_output=True, text=True, timeout=40)
+            self.assertEqual(result.returncode, 0, result.stderr)
+        def stop_restarted():
+            with contextlib.suppress(OSError, RuntimeError):
+                self.rpc({'method': 'quit'})
+        self.addCleanup(stop_restarted)
+        old = self.rpc({'method': 'ping'})['pid']
+        restart_visible()
+        self.assertNotEqual(self.rpc({'method': 'ping'})['pid'], old)
+        eventually(lambda: self.inspect().get('loaded'), timeout=30, description='restarted inspector')
+        state = self.inspect()
+        self.assertEqual(state['selected'], parts[2]['id'])
+        self.assertIn(parts[8]['id'], state['hidden'])
+        self.assertEqual(state['display']['explosion'], .35)
+        self.assertTrue(state['display']['part_colors'])
+        replay = self.rpc({'method': 'restart_state', 'action': 'capture'})['session']
+        self.assertEqual(replay['panel'], session['panel'])
+        self.assertEqual(self.rpc({'method': 'list'})['presentation']['inspection_mode'], 'cuts')
+        self.rpc({'method': 'hide'})
+        restart_visible()
+        self.assertFalse(self.rpc({'method': 'list'})['window_visible'])
+        self.assertEqual(self.rpc({'method': 'list'})['active'], 0)
+        self.rpc({'method': 'show'})
+        eventually(lambda: self.inspect().get('loaded'), timeout=30)
+        self.assertEqual(self.inspect()['display'], state['display'])
+        self.assertEqual(self.rpc({'method': 'restart_state', 'action': 'capture'})['session']['panel'], session['panel'])
 
     @unittest.skipUnless(GPU and os.environ.get("ASSET_PREVIEW_HAULER_MODEL"), "Optional read-only Hauler model not selected")
     def test_99_real_hauler_annotation_round_trip(self):

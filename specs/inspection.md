@@ -12,9 +12,9 @@ with requested Parts/Cuts captures, including the background.
 View > Inspect 3D and the model options menu enter an optional single-model
 workspace. Return to Preview restores ordinary layout and the F3D backend.
 The main toolbar also offers Preview, Part mode and Cut mode for a selected
-model, including ordinary file opens and drops. Both modes show X/Y/Z cut sliders
-above the component tools. Parts also exposes component tools; Cuts hides those
-tools to focus on sections. Both use the same inspection scene and
+model, including ordinary file opens and drops. Parts shows display and component
+tools first, followed by the shared X/Y/Z cut sliders. Cuts hides the component
+and part-display tools to focus on sections. Both use the same inspection scene and
 retain selection, hidden parts and cuts while switching, without a backend swap,
 reimport or new generator. A pending cut gesture flushes before changing tools,
 returning to Preview or selecting another asset. A failed flush reports the error
@@ -94,7 +94,16 @@ Materials/textures, edges, background, projection and camera controls remain.
 ## Interaction, cuts and peeling
 
 A short left click selects the frontmost geometry and shows its exact source
-name in the native panel. Drag orbit, pan, zoom, fit and cardinal views retain
+name in the native panel. Selection uses an opaque amber fill and darker edge
+lines, replacing textures/vertex colors only on the selected actors. Deselection
+restores the current material or part-color presentation exactly. Part display
+offers consistent solid colors and matching list swatches, plus a 0–200% Explode
+slider and Reassemble. Explosion translates each source component radially,
+including all its material actors; near-concentric centers get deterministic
+separation directions. Source geometry/identity stays unchanged, picks remain
+component-local, and pins follow their owning component. Partial identity
+mapping disables explosion. Fit includes the exploded bounds; moving the slider
+preserves the camera. Drag orbit, pan, zoom, fit and cardinal views retain
 their established input conventions. Picking observes hidden actors and cut
 planes. Transparent surfaces are picked by their frontmost geometry. A mapped
 surface hit supplies component-local position and normal for a pin; selecting a
@@ -111,8 +120,25 @@ entry. Dragging or keyboard-adjusting a slider enables its plane and updates the
 position live; numeric edits and side changes preserve its enabled state.
 Focused sliders keep arrow, Home/End and Page Up/Down keys for position changes
 instead of activating window navigation shortcuts.
-Cuts are visual and open-edged; they do not modify geometry,
-create caps, discover physical layers or invent modeled interiors.
+Cuts are visual and never modify the source geometry. Fill cut faces defaults
+on and draws flat, per-part colors on closed surfaces. On the first enabled cut,
+the adapter derives world-space part geometry, welds exactly coincident UV and
+material seams, and checks boundary/nonmanifold edges. Independent closed material
+primitives may be handled separately when their joined surface is nonmanifold.
+Open/unsupported surfaces stay open; the panel reports closed and unsupported
+part counts. Derived surfaces are limited to 500,000 cells per part and two
+million retained input cells across the scene. These topology checks do not
+certify absence of self-intersections; self-intersecting inputs remain unsupported.
+Each plane sections the original closed surface with VTK's cutter and contour
+triangulator, preserving correctly oriented cavity contours; the triangulated
+face is then clipped by the remaining half-spaces. This avoids retriangulating
+generated faces at intersections. Mirrored instances have their world-space
+winding corrected before sectioning. Triangulation
+errors suppress the affected generated faces. Cap actors preserve source-part
+selection but cannot create original-surface pins. Hidden parts hide their caps;
+explosion offsets are accounted for in both clipping and cap placement. No cap
+pipeline is prepared with all cuts disabled. Only changed planes/explosion rebuild
+cap geometry; color, selection and visibility changes reuse it.
 Cut actions validate only their bounded plane state. Three retained axis planes
 share one clipping collection, bound once per mapper and modified in place.
 Moving a cut preserves camera, selection and hidden targets without reapplying
@@ -126,6 +152,11 @@ comment displays its text; Restore view applies its saved camera, projection,
 selection, hidden set and cuts only for an exact current binding. Unload/reentry
 retains the session view. Revision changes clear unsafe selection/visibility/cuts
 while retaining camera; old notes stay readable and are marked stale.
+The validated `display` view object holds `part_colors`, `explosion` and
+`cap_cuts`. It follows inspection through unload/reentry, ordinary-preview
+switches and saved comment views. `inspect display` changes these options without
+reimporting. Display sliders coalesce through a finite 16 ms timer and flush with
+cut controls at inspection transitions and restart capture.
 Backend switches use the current camera and projection. Hidden setting changes
 override retained projection, and frame changes discard the old retained camera.
 Applying a saved view validates supplied model/dependency revisions, field types
@@ -217,7 +248,7 @@ The [integration checks](../tests/inspection_integration.py) record the actual
 renderer and enforce these limits. Raw captures and runtime logs remain local.
 Latency percentiles and a comparative memory benchmark are not claimed.
 
-Automatic shell discovery, arbitrary plane gizmos, caps, animated mechanism
+Automatic shell discovery, arbitrary plane gizmos, animated mechanism
 control, freehand marks and multi-model annotation are deferred. The durable
 format can preserve explicit layer presets; initial UI peeling uses selected
 parts and saved comment views rather than a layer-authoring editor.

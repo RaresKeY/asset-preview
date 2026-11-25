@@ -148,6 +148,12 @@ def viewer_environment() -> dict[str, str]:
     return environment
 
 def start() -> bool:
+    # Embedded hosts own their viewer's process and lifetime. Their terminals
+    # may reconnect, but must not respawn a detached daemon after Stop/close.
+    if os.environ.get("ASSET_PREVIEW_NO_START") == "1":
+        if running(timeout=1):
+            return False
+        raise RuntimeError("Preview is managed by its host. Launch or restart that tab before publishing.")
     runtime, state = locations()
     private_directory(runtime)
     private_directory(state)
@@ -206,6 +212,79 @@ def start() -> bool:
         with contextlib.suppress(ProcessLookupError):
             os.killpg(process.pid, 15)
         raise RuntimeError(f"Server did not become ready; see {log_path}")
+
+def restart_session() -> dict:
+    try:
+        return rpc({"method": "restart_state", "action": "capture"})["session"]
+    except RuntimeError as error:
+        if str(error) not in ("Unknown method", "Unknown preview: "):
+            raise
+    # One-time migration from viewers that predate session replay.
+    current = rpc({"method": "list"})
+    presentation = current.get("presentation", {})
+    views = []
+    for entry in current["entries"]:
+        if entry.get("inspection", {}).get("enabled"):
+            state = rpc({"method": "inspect", "id": entry["id"], "action": "state"})
+            if state.get("loaded"):
+                view = {key: state[key] for key in ("camera", "cuts", "hidden", "selected", "selection", "revision", "dependency_revision", "orthographic", "display") if key in state}
+                views.append({"id": entry["id"], "path": entry["path"], "view": view,
+                              "tool": "cuts" if presentation.get("inspection_mode") == "cuts" else "parts"})
+    return {"views": views, "panel": {}, "window": {"visible": current["window_visible"],
+            **{key: presentation.get(key, False) for key in ("active", "fullscreen", "single_preview")}}}
+
+def restore_restart_session(session: dict) -> None:
+    try:
+        rpc({"method": "restart_state", "action": "restore", "session": session})
+        return
+    except RuntimeError as error:
+        if str(error) not in ("Unknown method", "Unknown preview: "):
+            raise
+    if session["window"].get("visible"):
+        rpc({"method": "show"})
+        for saved in session["views"]:
+            deadline = time.monotonic() + 30
+            while not rpc({"method": "inspect", "id": saved["id"], "action": "state"}).get("loaded"):
+                if time.monotonic() >= deadline:
+                    raise RuntimeError("Inspection did not become ready after restart")
+                time.sleep(.05)
+            rpc({"method": "inspect", "id": saved["id"], "action": "apply", "view": saved["view"]})
+
+def restart(*, if_running: bool = False, before_start=None) -> bool:
+    if os.environ.get("ASSET_PREVIEW_NO_START") == "1":
+        raise RuntimeError("Preview is managed by its host; its host owns service restarts")
+    runtime, _ = locations()
+    if if_running and not running(timeout=15):
+        if before_start is not None:
+            before_start()
+        return False
+    private_directory(runtime)
+    fd = os.open(runtime / "restart.lock", os.O_CREAT | os.O_RDWR | os.O_NOFOLLOW, 0o600)
+    with os.fdopen(fd, "w") as lock:
+        fcntl.flock(lock, fcntl.LOCK_EX)
+        was_running = running(timeout=15)
+        session = restart_session() if was_running else None
+        if was_running:
+            rpc({"method": "quit"})
+            deadline = time.monotonic() + 15
+            while running():
+                if time.monotonic() >= deadline:
+                    raise RuntimeError("The previous viewer did not stop; replacement cancelled")
+                time.sleep(.05)
+        try:
+            if before_start is not None:
+                before_start()
+        except Exception:
+            if was_running:
+                start()
+                restore_restart_session(session)
+            raise
+        if was_running or not if_running:
+            start()
+            if session is not None:
+                restore_restart_session(session)
+            return True
+        return False
 
 def path(value: str) -> str:
     # Keep the filename rather than resolving a symlink: replacements must remain observable.
@@ -373,6 +452,16 @@ def _review_view(view: object) -> None:
                 raise ValueError(f"Camera {key} is outside its finite range")
     if "orthographic" in view and type(view["orthographic"]) is not bool:
         raise ValueError("View orthographic must be boolean")
+    if "display" in view:
+        display = view["display"]
+        if not isinstance(display, dict):
+            raise ValueError("View display must be an object")
+        for key, value in display.items():
+            if key == "explosion":
+                if not _finite_json_number(value) or not 0 <= value <= 2:
+                    raise ValueError("Part explosion must be between 0 and 2")
+            elif key not in ("part_colors", "cap_cuts") or type(value) is not bool:
+                raise ValueError("Invalid view display option")
     if "cuts" in view:
         if not isinstance(view["cuts"], list) or len(view["cuts"]) > 6:
             raise ValueError("View cuts must be an array of at most 6 planes")
@@ -590,7 +679,7 @@ def project_identity(directory: str | Path | None = None) -> tuple[str, str]:
 
 
 def parser() -> argparse.ArgumentParser:
-    p = argparse.ArgumentParser(description="One live window for images, audio, videos, models and baked materials.")
+    p = argparse.ArgumentParser(description="One live window for images, media, 3D assets, Markdown, code and diffs.")
     p.add_argument("--version", action="version", version="Asset Preview " + (ROOT / "VERSION").read_text().strip())
     sub = p.add_subparsers(dest="action")
     for action, text in [("gui", "Open the preview window"), ("start", "Start the background server"),
@@ -600,12 +689,17 @@ def parser() -> argparse.ArgumentParser:
         q = sub.add_parser(action, help=text)
         if action in {"list", "status"}: q.add_argument("--json", action="store_true")
     opening = sub.add_parser("open", help="Open files in the window; reuse existing previews and select the last file")
-    opening.add_argument("files", nargs="*", metavar="FILE", help="Image, audio, video or model files (also accepted without 'open')")
-    add = sub.add_parser("add", help="Watch an image, audio, video or model output; optionally run a generator on source saves")
+    restarting = sub.add_parser("restart", help="Restart while preserving window visibility and inspection state")
+    restarting.add_argument("--if-running", action="store_true", help="Keep a stopped service stopped")
+    opening.add_argument("files", nargs="*", metavar="FILE", help="Asset, Markdown, code, text or patch files (also accepted without 'open')")
+    add = sub.add_parser("add", help="Watch an asset, document, code or patch output; optionally run a generator on source saves")
     add.add_argument("file")
     add.add_argument("--id", help="Stable ID; reusing it updates that registration")
     add.add_argument("--label")
-    add.add_argument("--kind", choices=["auto", "image", "model", "video", "audio", "graph"], default="auto")
+    add.add_argument("--kind", choices=["auto", "image", "model", "video", "audio", "graph", "file", "selection"], default="auto")
+    add.add_argument("--decisions", metavar="FILE", help="Separate output JSON for a selection's user decisions")
+    add.add_argument("--before", metavar="FILE", help="Compare an earlier file with this output, watching both paths")
+    add.add_argument("--toggle-with", metavar="IMAGE_ID", help="Press T in Single view to switch between two reciprocally linked image previews")
     add.add_argument("--settings", help="Explicit JSON display/playback options; preserve remembered defaults")
     add.add_argument("--watch", action="append", default=[], metavar="SOURCE", help="Additional input/dependency file (repeatable)")
     add.add_argument("--cwd", default=os.getcwd(), help="Working directory for explicit generator")
@@ -621,9 +715,18 @@ def parser() -> argparse.ArgumentParser:
     for action in ["remove", "select", "reload"]:
         sub.add_parser(action).add_argument("id")
     sub.add_parser("close-all", help="Close every preview; keep files and remembered settings")
-    for registration in (add, mat):
+    diff = sub.add_parser("diff", help="Watch a live before/after file comparison without opening the window")
+    diff.add_argument("before"); diff.add_argument("file", metavar="AFTER")
+    diff.add_argument("--id"); diff.add_argument("--label")
+    diff.add_argument("--mode", choices=["inline", "split"], default="inline")
+    diff.add_argument("--watch", action="append", default=[])
+    diff.add_argument("--cwd", default=os.getcwd()); diff.add_argument("--timeout", type=int, default=120)
+    diff.set_defaults(kind="file", settings=None, command=None)
+    for registration in (add, mat, diff):
         registration.add_argument("--project", help="Project ID; defaults to the owning checkout")
         registration.add_argument("--project-label", help="Project display name")
+        registration.add_argument("--group", help="Separate group/gallery within the project")
+        registration.add_argument("--group-label", help="Group/gallery display name")
         registration.add_argument("--no-current", action="store_true", help="Keep the project's current preview when adding supporting assets")
         registration.add_argument("--ungrouped", action="store_true", help="Register without a project")
     project = sub.add_parser("project", help="Create projects and choose their current previews without opening the window")
@@ -631,6 +734,7 @@ def parser() -> argparse.ArgumentParser:
     create = project_commands.add_parser("create")
     create.add_argument("id", nargs="?", help="Defaults to the owning checkout's stable ID")
     create.add_argument("--label")
+    create.add_argument("--parent", help="Place this group/gallery inside an existing project; empty detaches it")
     current = project_commands.add_parser("current")
     current.add_argument("id"); current.add_argument("preview")
     remove = project_commands.add_parser("remove")
@@ -638,17 +742,17 @@ def parser() -> argparse.ArgumentParser:
     listing = project_commands.add_parser("list")
     listing.add_argument("--json", action="store_true")
     layout = sub.add_parser("layout")
-    layout.add_argument("mode", choices=["single", "grid", "overview", "projects"])
+    layout.add_argument("mode", choices=["single", "grid", "overview", "projects", "gallery"])
     layout.add_argument("--size", choices=["auto", "2", "3", "4"], help="Grid size; auto is available for Projects")
     layout.add_argument("--group-projects", action=argparse.BooleanOptionalAction, default=None, help="Group Overview by project")
-    layout.add_argument("--project", help="Filter Overview/Projects by ID; all or ungrouped")
+    layout.add_argument("--project", help="Filter Overview/Projects/Gallery by ID; all or ungrouped")
     cache = sub.add_parser("cache", help="Read bounded cache churn, eviction and reclamation diagnostics without opening a window")
     cache.add_argument("mode", choices=["stats", "events"], nargs="?", default="stats")
     cache.add_argument("--limit", type=int, default=64, help="Maximum recent events (1 to 128)")
     cache.add_argument("--after", type=int, default=0, help="Only events after this sequence number")
     cache.add_argument("--json", action="store_true", help="Print the complete JSON response")
     defaults = sub.add_parser("defaults", help="Update remembered options without changing registered previews")
-    defaults.add_argument("group", choices=["image", "video", "audio", "3d"])
+    defaults.add_argument("group", choices=["image", "video", "audio", "3d", "file"])
     defaults.add_argument("value", help="JSON object")
     settings = sub.add_parser("settings", help="Update per-preview options with a JSON object")
     settings.add_argument("id"); settings.add_argument("value", help='For example: {"grid":false,"light":1.2}')
@@ -657,7 +761,7 @@ def parser() -> argparse.ArgumentParser:
     sub.add_parser("capture", help="Save the current visible window to a new PNG").add_argument("file")
     inspect = sub.add_parser("inspect", help="Opt into 3D inspection for a registered model; never raises the window")
     inspection = inspect.add_subparsers(dest="inspect_action", required=True)
-    for action in ("open", "close", "state", "parts", "select", "hide", "show", "isolate", "restore", "cut"):
+    for action in ("open", "close", "state", "parts", "select", "hide", "show", "isolate", "restore", "cut", "display"):
         operation = inspection.add_parser(action)
         operation.add_argument("id", help="Existing model preview ID")
         operation.add_argument("--json", action="store_true", help="Print the complete JSON response")
@@ -674,6 +778,10 @@ def parser() -> argparse.ArgumentParser:
             choice = operation.add_mutually_exclusive_group(required=True)
             choice.add_argument("--all", action="store_true", help="Restore every hidden part")
             choice.add_argument("--last", action="store_true", help="Undo the last visibility operation")
+        elif action == "display":
+            operation.add_argument("--part-colors", action=argparse.BooleanOptionalAction, default=None)
+            operation.add_argument("--cap-cuts", action=argparse.BooleanOptionalAction, default=None)
+            operation.add_argument("--explosion", type=finite_number, help="Part separation from 0 (assembled) to 2")
         elif action == "cut":
             operation.add_argument("--axis", choices=["x", "y", "z"], required=True)
             operation.add_argument("--position", type=finite_number, required=True, help="Position in exported model units")
@@ -727,6 +835,10 @@ def inspection_request(args: argparse.Namespace) -> dict:
         request["all" if args.all else "last"] = True
     elif args.inspect_action == "cut":
         request.update(axis=args.axis, position=args.position, keep=args.keep, enabled=args.enabled)
+    elif args.inspect_action == "display":
+        request["display"] = {key: getattr(args, key) for key in ("part_colors", "explosion", "cap_cuts") if getattr(args, key) is not None}
+        if args.explosion is not None and not 0 <= args.explosion <= 2:
+            raise ValueError("Part explosion must be between 0 and 2")
     return request
 
 def annotation_request(args: argparse.Namespace) -> dict:
@@ -862,6 +974,10 @@ def main() -> int:
         return 0
     if action == "start":
         created = start(); print("Server started" if created else "Server already running"); return 0
+    if action == "restart":
+        created = restart(if_running=args.if_running)
+        print("Server restarted" if created else "Server remains stopped")
+        return 0
     if action == "project":
         if args.project_action == "list":
             rows = rpc({"method": "project", "action": "list"})["projects"] if running(timeout=15) else []
@@ -872,7 +988,9 @@ def main() -> int:
         if args.project_action == "create":
             identifier, label = project_identity()
             start()
-            result = rpc({"method": "project", "id": args.id or identifier, "label": args.label or (args.id if args.id else label)})
+            request = {"method": "project", "id": args.id or identifier, "label": args.label or (args.id if args.id else label)}
+            if args.parent is not None: request["parent"] = args.parent
+            result = rpc(request)
             print(result["id"])
         else:
             request = {"method": "project", "id": args.id}
@@ -880,11 +998,11 @@ def main() -> int:
             else: request["action"] = "remove"
             rpc(request)
         return 0
-    if action in {"gui", "open", "add", "material"}: start()
+    if action in {"gui", "open", "add", "material", "diff"}: start()
     request = {"method": {"gui": "show", "stop": "quit", "status": "list", "close-all": "close_all"}.get(action, action)}
     if action == "cache": request.update(action=args.mode, limit=args.limit, after=args.after)
     if action == "open": request["paths"] = [path(filename) for filename in args.files]
-    if action in {"add", "material"}:
+    if action in {"add", "material", "diff"}:
         entry = {"path": path(args.albedo if action == "material" else args.file),
                  "kind": "material" if action == "material" else args.kind,
                  "watch": [path(p) for p in args.watch], "cwd": path(args.cwd), "timeout": args.timeout}
@@ -895,10 +1013,20 @@ def main() -> int:
         if action == "material":
             entry["maps"] = {key: path(getattr(args, key)) for key in ("normal", "orm") if getattr(args, key)}
             if args.shape is not None: entry["settings"] = {"shape": args.shape}
+        if action in {"add", "diff"} and args.before is not None:
+            entry["before"] = path(args.before)
+            entry["kind"] = "file"
+        if action == "diff": entry["settings"] = {"file_mode": args.mode}
+        if action == "add" and args.toggle_with is not None:
+            entry["toggle_with"] = args.toggle_with
         if action == "add" and args.settings is not None:
             entry["settings"] = json_value(args.settings)
             if not isinstance(entry["settings"], dict): raise RuntimeError("--settings requires a JSON object")
-        if args.ungrouped and (args.project or args.project_label): raise RuntimeError("--ungrouped cannot be combined with --project or --project-label")
+        if action == "add" and args.decisions is not None:
+            entry["decisions"] = path(args.decisions)
+        if args.ungrouped and (args.project or args.project_label or args.group is not None or args.group_label): raise RuntimeError("--ungrouped cannot be combined with project or group options")
+        if args.group_label and args.group is None: raise RuntimeError("--group-label requires --group")
+        if args.group is not None and not re.fullmatch(r"[A-Za-z0-9_-]{1,64}", args.group): raise RuntimeError("Group ID must use 1..64 letters, digits, underscores or hyphens")
         project_id, project_label = project_identity(args.cwd)
         entry["project"] = "" if args.ungrouped else args.project or project_id
         request = {"method": "add", "entry": entry, "make_current": not args.no_current}
@@ -906,6 +1034,13 @@ def main() -> int:
             # Explicit IDs keep their existing name unless a label is supplied.
             if args.project_label or not args.project:
                 request["project_label"] = args.project_label or project_label
+            if args.group is not None:
+                owner = entry["project"]
+                digest = hashlib.sha256((owner + ":" + args.group).encode()).hexdigest()[:16]
+                entry["project"] = f"{args.group[:40]}-{digest}"
+                request["parent_project"] = owner
+                if "project_label" in request: request["parent_project_label"] = request["project_label"]
+                request["project_label"] = args.group_label or args.group
     if action in {"select", "remove", "reload", "settings", "seek"}: request["id"] = args.id
     if action == "seek": request["seconds"] = args.seconds
     if action == "settings": request["settings"] = json_value(args.value)
@@ -943,7 +1078,7 @@ def main() -> int:
                 print(f'  {suspect["source"] or suspect["identity"]}: refaults={suspect["recent_refaults"]:.0f} '
                       f'unused={suspect["unused_removals"]:.0f} replacements={suspect["replacements"]:.0f}')
         return 0
-    if action in {"add", "material"}: print(result["id"])
+    if action in {"add", "material", "diff"}: print(result["id"])
     elif action == "status":
         result["running"] = True
         if args.json: print(json.dumps(result, indent=2))

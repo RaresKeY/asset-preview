@@ -28,6 +28,12 @@ and ORM are linear.
 ORM channels are occlusion, roughness and metallic, with the latter multipliers
 set to one when an ORM map is present. Scalar roughness/metallic options apply
 to the no-ORM path. Maps participate in output watching and last-good publication.
+Albedo follows the glTF image reader, while built-in sample normal/ORM overrides
+follow F3D's native image reader. Their accepted formats can differ. The native
+regression fixture uses PNG albedo with a MetaImage normal map and external raw
+pixels; the normal-reader probe matches equivalent PNG pixels. A generator that
+changes only the raw sidecar must produce a new successful publication and
+different central material pixels while albedo and MetaImage headers stay intact.
 
 The sample uses F3D's inspection environment. It does not execute Material Maker,
 Godot or other native material graphs. Use the owning baker/exporter, then
@@ -49,6 +55,10 @@ Materials retain the shared model/material camera and display preferences and
 
 Verification: material-map save refresh, sample UV/normal appearance, shading
 restoration and renderer/idle checks in `tools/test.sh gpu`.
+The shading-mode restoration check waits for each new successful asynchronous
+load and cleared loading state before capturing; its existing pixel and camera
+tolerances remain unchanged. A fixed capture delay alone does not establish that
+the requested material mode has finished rebuilding.
 `PreviewIntegration.test_material_sphere_flat_normal_preserves_surface` compares a grid
 of surface pixels using opaque RGBA albedo and a flat normal against an RGB
 unmapped reference in front, right, back, top and isometric views, then requires

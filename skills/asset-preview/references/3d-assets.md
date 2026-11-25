@@ -51,3 +51,16 @@ untextured. Inspect saved settings and source export conventions before blaming
 geometry/material loss. `defaults 3d JSON` changes only future remembered defaults;
 existing entries need their own requested correction. See
 `docs/source-model-settings.md` for the public CLI and preservation test.
+
+Preview Options > 4 View (Ctrl+Alt+Q) shows orbit, front, right and top
+inside one model/material preview. `four_view:true` is a per-registration
+setting, independent of the asset grid and shared 3D defaults. Scroll zooms
+the pointed pane; drag an axis pane to pan. The three axis panes stay
+orthographic and follow the declared source axes. Parts/Cuts stays single-view.
+
+For original mesh quads, use Preview Options > Edge topology > Quads / source
+faces (`edge_topology:source`, `edges:true`). The F3D4 native OBJ/PLY adapter
+retains polygon boundaries and counts quads before triangulation. Triangulated
+faces includes diagonals. GLB/glTF has triangle primitives, so it cannot recover
+original quads after export. The camera layout is **4 View** (`four_view:true`);
+legacy `quad_view` settings are normalized to that camera-layout key.

@@ -25,7 +25,8 @@ int main(int argc,char** argv) {
     const auto events=d.events()["events"].toArray(); bool reason=false;
     for (const auto& event:events) if (event.toObject()["detail"].toObject()["removal_reason"]=="ram_bytes") reason=true;
     expect(reason,"refault includes original limiting constraint");
-    d.record("ram","hit","same",4096,"thumbnail"); const auto before=d.summary()["last_seq"];
+    // operator[] on a temporary QJsonObject leaves a borrowed proxy dangling.
+    d.record("ram","hit","same",4096,"thumbnail"); const auto before=d.summary().value("last_seq");
     for (int i=0;i<1000;++i) d.record("ram","hit","same",4096,"thumbnail");
     expect(d.summary()["last_seq"]==before,"repeated painting hits are counters only");
     for (int i=0;i<400;++i) {

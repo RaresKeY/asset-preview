@@ -147,7 +147,7 @@ struct PreviewCache::Impl {
         if (!lock.tryLock(0)) { diagnostics.record("small_disk","bypass",key,0,"cache_busy"); return {}; }
         if (!scanned) { if (!prune()) return {}; scanned=true; }
         auto data=readFile(path(key),DiskItemLimit);
-        if (data.size()<36 || data.left(4)!="APC1" || data.mid(4,32)!=QCryptographicHash::hash(data.mid(36),QCryptographicHash::Sha256)) {
+        if (data.size()<36 || data.left(4)!="APC1" || data.mid(4,32)!=sha256(QByteArrayView(data).sliced(36))) {
             if (absent.size()>=1024) absent.clear();
             absent.insert(key);
             diagnostics.record("small_disk","miss",key,0,data.isEmpty()?"absent_or_unreadable":"corrupt",timer.nsecsElapsed()/1000);
@@ -167,7 +167,7 @@ struct PreviewCache::Impl {
         if (!lock.tryLock(0)) { diagnostics.record("small_disk","bypass",key,payload.size()+36,"cache_busy"); return; }
         absent.remove(key);
         // Existing valid files need only a last-use touch, avoiding repeated writes.
-        const auto data="APC1"+QCryptographicHash::hash(payload,QCryptographicHash::Sha256)+payload;
+        const auto data="APC1"+sha256(payload)+payload;
         if (readFile(path(key),DiskItemLimit)==data) {
             QFile f(path(key)); if (f.open(QIODevice::ReadOnly)) f.setFileTime(QDateTime::currentDateTimeUtc(),QFileDevice::FileModificationTime);
             diagnostics.record("small_disk","write_unchanged",key,data.size(),"identical_bytes",timer.nsecsElapsed()/1000);
@@ -283,7 +283,7 @@ QImage PreviewCache::peekThumbnail(const QString& key) const {
 }
 void PreviewCache::putThumbnail(const QString& key,QImage image) {
     if (key.isEmpty() || image.isNull()) return;
-    if (image.size()!=image.size().scaled(ThumbnailWidth,ThumbnailHeight,Qt::KeepAspectRatio))
+    if (image.width()>ThumbnailWidth || image.height()>ThumbnailHeight)
         image=image.scaled(ThumbnailWidth,ThumbnailHeight,Qt::KeepAspectRatio,Qt::SmoothTransformation);
     if (image.format()!=QImage::Format_RGBA8888)
         image=image.convertToFormat(QImage::Format_RGBA8888);

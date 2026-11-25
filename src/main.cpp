@@ -1,6 +1,7 @@
 #include "service.h"
 #include "crash_log.h"
 #include "thumbnail_job.h"
+#include "backend_loader.h"
 #include <QApplication>
 #include <QCommandLineParser>
 #include <QDir>
@@ -18,6 +19,21 @@ static int signalWrite=-1;
 static void signalHandler(int) { const char byte=1; if (signalWrite>=0) { const auto ignored=::write(signalWrite,&byte,1); (void)ignored; } }
 int main(int argc,char** argv) {
     if (argc==3 && QByteArray(argv[1])=="--thumbnail-job") return preview::thumbnailJob(argc,argv);
+    if(argc==2 && QByteArray(argv[1])=="--check-backends") {
+        QCoreApplication app(argc,argv);
+        try {
+            for(const auto& [name,symbol]:{std::pair{"f3d","asset_preview_create_model_worker"},
+                std::pair{"mpv","asset_preview_create_video"},std::pair{"mpv","asset_preview_create_audio"}
+#if ASSET_PREVIEW_HAS_INSPECTION
+                ,std::pair{"inspection","asset_preview_create_inspection"}
+#endif
+            }) {
+                QLibrary library(QCoreApplication::applicationDirPath()+"/asset-preview-"+name+".so");
+                library.setLoadHints(QLibrary::PreventUnloadHint); preview::resolveBackend(library,symbol);
+            }
+            return 0;
+        } catch(const std::exception& error) { qCritical("%s",error.what()); return 1; }
+    }
     // Keep the singleton lock until Qt teardown and crash-marker cleanup finish.
     std::unique_ptr<QLockFile> lock;
     preview::CrashLog crash(preview::CrashLog::stateArgument(argc,argv));

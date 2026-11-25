@@ -4,3 +4,5 @@ No dependency source is copied into this project. System packages own the dynami
 libraries. [Rendering decisions](rendering.md) records choices, upstream references
 and compatibility boundaries. [Third-party notices](../THIRD_PARTY_NOTICES.md)
 records dependency license provenance separately from this directory.
+The [Markdown dependency notice](THIRD_PARTY_NOTICES.md) records MD4C's direct
+compatibility-parser use and license.

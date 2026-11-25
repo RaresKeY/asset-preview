@@ -1,8 +1,8 @@
 # Linux installation
 
 Downloads: [release 0.0.2](https://github.com/RaresKeY/asset-preview/releases/tag/0.0.2).
-The repository, release and GHCR package are private; download while signed in
-with access. Download one format plus checksums, for example:
+The GitHub release downloads are public. The GHCR image requires package access.
+For the AppImage and its checksums, run
 
 ```sh
 gh release download 0.0.2 -R RaresKeY/asset-preview \

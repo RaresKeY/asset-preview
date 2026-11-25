@@ -111,7 +111,7 @@ def png_pixel(path, x, y):
 
 class XInput:
     """Input exclusively in this test's Gamescope X server, using installed XTest."""
-    def __init__(self):
+    def __init__(self, rpc=None):
         self.x=ctypes.CDLL("libX11.so.6"); self.xt=ctypes.CDLL("libXtst.so.6")
         pointer=ctypes.c_void_p; ulong=ctypes.c_ulong; uint=ctypes.c_uint; integer=ctypes.c_int
         signatures={"XOpenDisplay":([ctypes.c_char_p],pointer),"XDefaultRootWindow":([pointer],ulong),
@@ -135,14 +135,22 @@ class XInput:
         # Normalize this private fixture window before injecting tiny controls.
         self.x.XMoveWindow(self.display,self.window,0,0); self.x.XSync(self.display,0)
         self.x.XSetInputFocus(self.display,self.window,2,0); self.x.XFlush(self.display)
-    def find(self,parent,depth=0):
+        # XSync only acknowledges the X server. Wait for Qt to observe the
+        # move/exposure/focus before Gamescope routes the first injected input.
+        # Other suites own separate sockets, so readiness callbacks are explicit.
+        if rpc is not None:
+            def ready():
+                state=rpc({"method":"list"})["presentation"]
+                return state["active"] and state["exposed"] and state["x"]==0 and state["y"]==0
+            eventually(ready)
+    def find(self,parent,depth=0,title="Asset Preview"):
         class Attributes(ctypes.Structure):
             _fields_=[("x",ctypes.c_int),("y",ctypes.c_int),("width",ctypes.c_int),("height",ctypes.c_int),("border",ctypes.c_int),("depth",ctypes.c_int),("visual",ctypes.c_void_p),("root",ctypes.c_ulong),("class_",ctypes.c_int),("bit_gravity",ctypes.c_int),("win_gravity",ctypes.c_int),("backing_store",ctypes.c_int),("backing_planes",ctypes.c_ulong),("backing_pixel",ctypes.c_ulong),("save_under",ctypes.c_int),("colormap",ctypes.c_ulong),("map_installed",ctypes.c_int),("map_state",ctypes.c_int),("all_events",ctypes.c_long),("your_events",ctypes.c_long),("do_not_propagate",ctypes.c_long),("override_redirect",ctypes.c_int),("screen",ctypes.c_void_p)]
         self.x.XGetWindowAttributes.argtypes=[ctypes.c_void_p,ctypes.c_ulong,ctypes.POINTER(Attributes)]
         name=ctypes.c_char_p()
         if self.x.XFetchName(self.display,parent,ctypes.byref(name)) and name.value:
             text=name.value.decode(errors="replace"); self.x.XFree(name)
-            if text=="Asset Preview":
+            if text==title:
                 attributes=Attributes(); self.x.XGetWindowAttributes(self.display,parent,ctypes.byref(attributes))
                 if attributes.map_state==2: return parent
         if depth>3: return None
@@ -151,7 +159,7 @@ class XInput:
         ids=[children[i] for i in range(count.value)]
         if children: self.x.XFree(children)
         for child in ids:
-            found=self.find(child,depth+1)
+            found=self.find(child,depth+1,title)
             if found: return found
         return None
     def key(self,name,pressed):
@@ -165,6 +173,19 @@ class XInput:
         for key in keys: self.key(key,1)
         for key in reversed(keys): self.key(key,0)
         self.x.XFlush(self.display)
+    def numlock(self,enabled):
+        self.x.XInternAtom.argtypes=[ctypes.c_void_p,ctypes.c_char_p,ctypes.c_int]
+        self.x.XInternAtom.restype=ctypes.c_ulong
+        self.x.XkbGetNamedIndicator.argtypes=[ctypes.c_void_p,ctypes.c_ulong,ctypes.c_void_p,
+            ctypes.POINTER(ctypes.c_int),ctypes.c_void_p,ctypes.c_void_p]
+        self.x.XkbGetNamedIndicator.restype=ctypes.c_int
+        atom=self.x.XInternAtom(self.display,b"Num Lock",0); state=ctypes.c_int()
+        if not self.x.XkbGetNamedIndicator(self.display,atom,None,ctypes.byref(state),None,None):
+            raise RuntimeError("Cannot query Num Lock on the private test display")
+        previous=bool(state.value)
+        if previous!=enabled:
+            self.press("Num_Lock"); self.x.XSync(self.display,0)
+        return previous
     def motion(self,x,y):
         ox=ctypes.c_int(); oy=ctypes.c_int(); child=ctypes.c_ulong()
         self.x.XTranslateCoordinates(self.display,self.window,self.root,0,0,ctypes.byref(ox),ctypes.byref(oy),ctypes.byref(child))
@@ -232,6 +253,24 @@ class PreviewIntegration(unittest.TestCase):
             state["preferences"]={}; registry.write_text(json.dumps(state))
             client.start(); self.pid=client.rpc({"method":"ping"})["pid"]; type(self).pid=self.pid
 
+    @unittest.skipUnless(GPU and os.environ.get("QT_QPA_PLATFORM")!="wayland", "Native paired image shortcut")
+    def test_paired_image_shortcut(self):
+        self.add("fitted", toggle_with="bare")
+        self.add("bare", toggle_with="fitted")
+        self.add("unrelated")
+        client.rpc({"method":"zoom", "id":"fitted"})
+        self.show()
+        keyboard=XInput(client.rpc)
+        try:
+            for expected in ("bare", "fitted"):
+                keyboard.press("t")
+                eventually(lambda: row(expected)["selected"] and row(expected)["revisions"] > 0)
+            client.rpc({"method":"remove", "id":"bare"})
+            keyboard.press("t")
+            self.assertTrue(row("fitted")["selected"])
+        finally:
+            keyboard.close()
+
     def add(self, key="image", **extra):
         asset=self.root/f"{key}.png"; png(asset)
         entry={"id":key,"path":str(asset),**extra}
@@ -239,6 +278,78 @@ class PreviewIntegration(unittest.TestCase):
         return asset
 
     def show(self): client.rpc({"method":"show"})
+
+    def test_unpaired_video_settings_survive_image_shortcut_lookup(self):
+        video_entry = {"id": "film", "path": str(self.root / "film.mp4")}
+        client.rpc({"method": "add", "entry": video_entry})
+        self.add("still", toggle_with="film")
+        client.rpc({"method": "select", "id": "still"})
+        self.show()
+        self.assertNotIn("toggle_with", row("film"))
+        client.rpc({"method": "select", "id": "film"})
+        for paused in (True, False):
+            client.rpc({"method": "settings", "id": "film", "settings": {"paused": paused}})
+            self.assertEqual(row("film")["settings"]["paused"], paused)
+            self.assertNotIn("toggle_with", row("film"))
+        for partner in (None, "still"):
+            with self.assertRaisesRegex(RuntimeError, "toggle_with"):
+                client.rpc({"method": "add", "entry": {**video_entry, "toggle_with": partner}})
+
+    def test_restore_legacy_null_image_partners(self):
+        registry = self.root / "state/previews.json"
+        entries = [
+            {"id": "film", "path": str(self.root / "old.mp4"), "toggle_with": None, "settings": {"paused": True}},
+            {"id": "single", "path": str(self.root / "single.png"), "toggle_with": None},
+            {"id": "before", "path": str(self.root / "before.png"), "toggle_with": "after"},
+            {"id": "after", "path": str(self.root / "after.png"), "toggle_with": "before"},
+        ]
+        client.rpc({"method": "quit"})
+        eventually(lambda: not client.running())
+        registry.write_text(json.dumps({"version": 1, "entries": entries, "selected": "film"}))
+        client.start()
+        self.pid = type(self).pid = client.rpc({"method": "ping"})["pid"]
+        self.assertTrue(row("film")["selected"])
+        self.assertTrue(row("film")["settings"]["paused"])
+        client.rpc({"method": "settings", "id": "film", "settings": {"paused": False}})
+        saved = json.loads(registry.read_text())["entries"]
+        self.assertEqual([entry["id"] for entry in saved], [entry["id"] for entry in entries])
+        self.assertNotIn("toggle_with", saved[0])
+        self.assertNotIn("toggle_with", saved[1])
+        self.assertEqual([entry["toggle_with"] for entry in saved[2:]], ["after", "before"])
+
+    def test_registration_capacity_survives_restart(self):
+        paths = [str(self.root / f"capacity-{i}.txt") for i in range(513)]
+        ids = [f"capacity-{i}" for i in range(513)]
+        watch = [f"/capacity/{i:03d}/" + "s" * 42 for i in range(128)]
+        entries = [{"id": key, "path": path, "watch": watch} for key, path in zip(ids, paths)]
+        registry = self.root / "state/previews.json"
+        client.rpc({"method": "quit"})
+        eventually(lambda: not client.running())
+        registry.write_text(json.dumps({"version": 1, "layout": "single", "entries": entries[:511]}))
+        client.start()
+
+        full = r"Preview limit reached \(512\)"
+        with self.assertRaisesRegex(RuntimeError, full):
+            client.rpc({"method": "open", "paths": paths[511:]})
+        client.rpc({"method": "add", "entry": entries[511]})
+        client.rpc({"method": "add", "entry": entries[511]})
+        with self.assertRaisesRegex(RuntimeError, full):
+            client.rpc({"method": "add", "entry": entries[512]})
+        self.assertGreater(registry.stat().st_size, 4 * 1024 * 1024)
+        client.restart()
+        self.pid = type(self).pid = client.rpc({"method": "ping"})["pid"]
+        self.assertEqual([e["id"] for e in client.rpc({"method": "list"})["entries"]], ids[:512])
+
+        client.rpc({"method": "remove", "id": ids[511]})
+        self.assertEqual(client.rpc({"method": "reopen"})["id"], ids[511])
+        client.rpc({"method": "remove", "id": ids[511]})
+        client.rpc({"method": "add", "entry": entries[512]})
+        with self.assertRaisesRegex(RuntimeError, full):
+            client.rpc({"method": "reopen"})
+        client.rpc({"method": "remove_many", "ids": ids[:511] + [ids[512]]})
+        Path(paths[511]).write_text("capacity fixture")
+        self.assertEqual(len(client.rpc({"method": "open", "paths": paths[:512]})["ids"]), 512)
+        client.rpc({"method": "close_all"})
 
     def test_open_files_reuses_configuration_selects_and_shows(self):
         first=self.add('open-existing', settings={'nearest':True})
@@ -276,7 +387,7 @@ class PreviewIntegration(unittest.TestCase):
         self.assertEqual(len(client.rpc({'method':'list'})['entries']),2)
         client.rpc({'method':'hide'})
         registry=self.root/'state/previews.json'; before=registry.read_bytes()
-        for paths in [str(other), ['relative.png'], [42], [str(self.root/'new.png'),str(self.root)], [str(other)]*257]:
+        for paths in [str(other), ['relative.png'], [42], [str(self.root/'new.png'),str(self.root)], [str(other)]*513]:
             with self.assertRaises(RuntimeError): client.rpc({'method':'open','paths':paths})
             self.assertEqual(registry.read_bytes(),before)
             self.assertFalse(client.rpc({'method':'list'})['window_visible'])
@@ -288,7 +399,7 @@ class PreviewIntegration(unittest.TestCase):
         client.rpc({'method':'open','paths':[str(model)]})
         key=client.rpc({'method':'list'})['selected']
         eventually(lambda:row(key).get('metrics',{}).get('loads',0)>0,timeout=20)
-        input=XInput()
+        input=XInput(client.rpc)
         def mode(name):
             control=client.rpc({'method':'list'})['presentation']['mode_control']
             self.assertTrue(control['visible']); self.assertTrue(control['enabled'])
@@ -339,7 +450,7 @@ class PreviewIntegration(unittest.TestCase):
                     presentation=client.rpc({'method':'list'})['presentation']
                     self.assertEqual(presentation['inspection_mode'],'parts')
                     control=presentation['mode_control']; self.assertTrue(control['enabled'])
-                    input=XInput()
+                    input=XInput(client.rpc)
                     try:
                         input.click(control['x']+control['width']//2,control['y']+control['height']//2)
                         time.sleep(.1); input.press('Home'); input.press('Return')
@@ -369,7 +480,7 @@ class PreviewIntegration(unittest.TestCase):
         helper=self.root/'drop-source'
         flags=shlex.split(subprocess.check_output(['pkg-config','--cflags','--libs','Qt6Core','x11'],text=True))
         subprocess.run(['c++','-std=c++20','-O2','-fPIC',str(ROOT/'tests/drop_source.cpp'),'-o',str(helper),*flags],check=True,capture_output=True)
-        input=XInput()
+        input=XInput(client.rpc)
         try:
             for target,paths,expected in [(None,[first,second],second),(key,[second],second),(None,[model],model)]:
                 if target: client.rpc({'method':'select','id':target})
@@ -504,7 +615,7 @@ class PreviewIntegration(unittest.TestCase):
         renderer=row("model")["metrics"]["renderer"]
         self.assertFalse(any(s in renderer.lower() for s in ("llvmpipe","softpipe","software","unknown")),renderer)
         time.sleep(.5); initial=row("model")["metrics"]; time.sleep(1)
-        self.assertEqual(initial["frame_transport"],"shared_gpu_texture")
+        self.assertEqual(initial["frame_transport"],"native_window")
         self.assertEqual(initial["display_readbacks"],0)
         self.assertGreater(initial["presented_frames"],0)
         self.assertEqual(row("model")["metrics"]["renders"],initial["renders"])
@@ -520,8 +631,10 @@ class PreviewIntegration(unittest.TestCase):
         eventually(lambda:row("material").get("metrics",{}).get("engine"),timeout=30)
         initial=row("material")["metrics"]["loads"]; png(normal,(150,128,253,255))
         eventually(lambda:row("material")["metrics"]["loads"]>initial,timeout=15)
+        initial=row("material")["metrics"]["loads"]
         client.rpc({"method":"settings","id":"material","settings":{"shape":"cube","axes":True}})
-        self.assertGreater(row("material")["metrics"]["loads"],initial)
+        eventually(lambda:row("material")["metrics"]["loads"]>initial and
+            not row("material")["metrics"].get("loading") and not row("material")["metrics"].get("command_pending"),timeout=30)
         evidence=os.environ.get("ASSET_PREVIEW_EVIDENCE_DIR")
         if evidence:
             target=Path(evidence).resolve(); target.mkdir(parents=True,exist_ok=True)
@@ -541,11 +654,17 @@ class PreviewIntegration(unittest.TestCase):
             client.rpc({"method":"add","entry":{"id":"sphere-normal","path":str(path),"kind":"material",
                 "maps":maps,"settings":{"shape":"sphere","grid":False}}})
             if client.rpc({"method":"list"})["window_visible"]:
-                eventually(lambda:row("sphere-normal").get("metrics",{}).get("engine"),timeout=30)
+                eventually(lambda:row("sphere-normal").get("metrics",{}).get("engine") and
+                    not row("sphere-normal")["metrics"].get("loading") and
+                    not row("sphere-normal")["metrics"].get("command_pending"),timeout=30)
         register(rgb,{})
         self.show(); eventually(lambda:row("sphere-normal").get("metrics",{}).get("engine"),timeout=30)
         view=row("sphere-normal")["viewport"]
         def samples(label):
+            # Camera and material commands publish asynchronously. Capture the
+            # completed pose, including after replacing an already loaded scene.
+            eventually(lambda:not row("sphere-normal")["metrics"].get("loading") and
+                not row("sphere-normal")["metrics"].get("command_pending"),timeout=30)
             target=self.root/f"sphere-{label}.png"
             client.rpc({"method":"capture","path":str(target)})
             return png_pixels(target,[(view["x"]+view["width"]//2+round(view["height"]*dx),
@@ -594,7 +713,7 @@ class PreviewIntegration(unittest.TestCase):
         client.rpc({"method":"add","entry":{"id":"orbit","path":str(obj)}})
         self.add("next"); self.show()
         eventually(lambda:row("orbit").get("metrics",{}).get("engine"))
-        input=XInput()
+        input=XInput(client.rpc)
         try:
             input.shortcut("Right"); eventually(lambda:client.rpc({"method":"list"})["selected"]=="next")
             input.shortcut("Left"); eventually(lambda:client.rpc({"method":"list"})["selected"]=="orbit")
@@ -648,7 +767,7 @@ class PreviewIntegration(unittest.TestCase):
         client.rpc({'method':'add','entry':{'id':'direction','path':str(asset),'settings':{'grid':False}}})
         self.show()
         eventually(lambda:row('direction').get('metrics',{}).get('engine'),timeout=30)
-        input=XInput(); observations=[]
+        input=XInput(client.rpc); observations=[]
         try:
             for inspection in (False,True):
                 if inspection:
@@ -697,7 +816,7 @@ class PreviewIntegration(unittest.TestCase):
         eventually(lambda:row("zoom").get("metrics",{}).get("engine"))
         renderer=row("zoom")["metrics"]["renderer"]
         self.assertFalse(any(s in renderer.lower() for s in ("llvmpipe","softpipe","software","unknown")),renderer)
-        input=XInput()
+        input=XInput(client.rpc)
         try:
             for orthographic in (False,True):
                 for lock_horizon in (True,False):
@@ -755,7 +874,7 @@ class PreviewIntegration(unittest.TestCase):
         client.rpc({"method":"capture","path":str(capture)})
         before=png_pixel(capture,x,y)
         self.assertEqual(before,(23,28,34))
-        input=XInput()
+        input=XInput(client.rpc)
         try:
             renders=row("zoom-image")["metrics"]["renders"]
             input.click(x,y); time.sleep(.1); input.scroll(x,y)
@@ -818,21 +937,52 @@ class PreviewIntegration(unittest.TestCase):
     @unittest.skipUnless(GPU,"Native top settings menu")
     def test_31_top_settings_menu_defaults_and_current(self):
         self.add("menu-image"); self.show()
-        input=XInput()
+        eventually(lambda:row("menu-image").get("metrics",{}).get("loads"))
+        self.assertTrue(row("menu-image")["metrics"]["nearest"])
+        self.assertTrue(row("menu-image")["metrics"]["filtering_auto"])
+        input=XInput(client.rpc)
         try:
             input.shortcut("v")
             eventually(lambda:client.rpc({"method":"list"})["options_open"])
             input.press("o"); time.sleep(.2)
-            input.press("p")
-            eventually(lambda:row("menu-image")["settings"].get("nearest") is True)
+            input.press("a")
+            eventually(lambda:row("menu-image")["settings"].get("nearest") is False)
+            self.assertFalse(row("menu-image")["metrics"]["nearest"])
             input.shortcut("s"); time.sleep(.2)
             input.press("i"); time.sleep(.2)
-            input.press("p")
-            eventually(lambda:client.rpc({"method":"list"})["preferences"]["image"].get("nearest") is False)
-            self.assertTrue(row("menu-image")["settings"]["nearest"])
+            input.press("a")
+            eventually(lambda:client.rpc({"method":"list"})["preferences"]["image"].get("nearest") is True)
+            self.assertFalse(row("menu-image")["settings"]["nearest"])
             self.add("menu-new")
-            self.assertFalse(row("menu-new")["settings"]["nearest"])
+            self.assertTrue(row("menu-new")["settings"]["nearest"])
+            client.rpc({"method":"select","id":"menu-image"})
+            input.shortcut("v"); time.sleep(.2); input.press("o"); time.sleep(.2); input.press("a")
+            eventually(lambda:row("menu-image")["settings"].get("nearest") is True)
+            self.assertTrue(row("menu-image")["metrics"]["nearest"])
+            input.shortcut("v"); time.sleep(.2); input.press("o"); time.sleep(.2); input.press("u")
+            eventually(lambda:row("menu-image")["settings"].get("nearest")=="auto")
+            self.assertTrue(row("menu-image")["metrics"]["filtering_auto"])
+            self.assertTrue(row("menu-image")["metrics"]["nearest"])
         finally: input.close()
+
+    def test_image_automatic_filtering_settings_persist(self):
+        self.add("auto-image",settings={"nearest":"auto"}); self.show()
+        eventually(lambda:row("auto-image").get("metrics",{}).get("loads"))
+        self.assertTrue(row("auto-image")["metrics"]["nearest"])
+        client.rpc({"method":"settings","id":"auto-image","settings":{"nearest":False}})
+        self.assertFalse(row("auto-image")["metrics"]["nearest"])
+        client.rpc({"method":"settings","id":"auto-image","settings":{"nearest":"auto"}})
+        client.rpc({"method":"defaults","group":"image","settings":{"nearest":"auto"}})
+        self.add("auto-new")
+        self.assertEqual(row("auto-new")["settings"]["nearest"],"auto")
+        for value in ("yes",None,1):
+            with self.assertRaisesRegex(RuntimeError,"Boolean setting required"):
+                client.rpc({"method":"settings","id":"auto-image","settings":{"nearest":value}})
+        client.rpc({"method":"quit"}); eventually(lambda:not client.running()); client.start()
+        self.assertEqual(row("auto-image")["settings"]["nearest"],"auto")
+        self.assertEqual(client.rpc({"method":"list"})["preferences"]["image"]["nearest"],"auto")
+        self.show(); eventually(lambda:row("auto-image").get("metrics",{}).get("loads"))
+        self.assertTrue(row("auto-image")["metrics"]["nearest"])
 
     def test_30_explicit_defaults_are_independent_and_persisted(self):
         self.add("existing")
@@ -1009,7 +1159,14 @@ class PreviewIntegration(unittest.TestCase):
         self.show(); eventually(lambda:row("modes").get("metrics",{}).get("engine"),timeout=30)
         eventually(lambda:row("modes")["metrics"]["renders"]>0)
         state=row("modes"); view=state["viewport"]; camera=state["metrics"]["camera"]
+        lastLoad=0
         def color(name):
+            nonlocal lastLoad
+            # Material toggles rebuild asynchronously. A fixed capture delay
+            # alone can compare the previous mode when the worker is busy.
+            eventually(lambda:row("modes")["metrics"].get("loads",0)>lastLoad and
+                       not row("modes")["metrics"].get("loading"),timeout=30)
+            lastLoad=row("modes")["metrics"]["loads"]
             time.sleep(.2)
             target=self.root/f"mode-{name}.png"; target.unlink(missing_ok=True)
             client.rpc({"method":"capture","path":str(target)})
@@ -1173,7 +1330,7 @@ class PreviewIntegration(unittest.TestCase):
         client.rpc({"method":"add","entry":{"id":"music-controls","path":str(asset),"label":"Music controls"}})
         self.show(); eventually(lambda:row("music-controls").get("metrics",{}).get("loads",0)==1,timeout=20)
         eventually(lambda:row("music-controls")["controls"]["timeline"].get("waveform"))
-        input=XInput()
+        input=XInput(client.rpc)
         try:
             def click(name,fraction=.5):
                 control=row("music-controls")["controls"][name]
@@ -1324,7 +1481,7 @@ class PreviewIntegration(unittest.TestCase):
         eventually(lambda:row("clip")["metrics"]["paused"] is True)
         # Let the finite 700 ms control concealment finish before measuring
         # paused rendering. Uncovering the native video can paint once.
-        idle_input=XInput()
+        idle_input=XInput(client.rpc)
         try:
             view=row("clip")["viewport"]
             idle_input.motion(view["x"]+view["width"]//2,view["y"]+view["height"]//2)
@@ -1340,7 +1497,7 @@ class PreviewIntegration(unittest.TestCase):
         eventually(lambda:abs(row("clip")["metrics"].get("position",0)-2)<.2)
         with self.assertRaises(RuntimeError): client.rpc({"method":"seek","id":"clip","seconds":-1})
         # Controls work on the actual native child and retain global navigation.
-        input=XInput()
+        input=XInput(client.rpc)
         try:
             view=row("clip")["viewport"]; input.click(view["x"]+view["width"]//2,view["y"]+view["height"]//2)
             time.sleep(.15)
@@ -1432,7 +1589,7 @@ class PreviewIntegration(unittest.TestCase):
         renderer=row("controls")["metrics"]["renderer"]
         self.assertFalse(any(s in renderer.lower() for s in ("llvmpipe","softpipe","software","unknown")),renderer)
         self.assertEqual(row("controls")["controls"]["time"]["text"],"0:00 / 0:12")
-        input=XInput()
+        input=XInput(client.rpc)
         def click(name):
             control=row("controls")["controls"][name]
             input.motion(control["x"]+control["width"]//2,control["y"]+control["height"]//2); input.x.XFlush(input.display)
@@ -1522,7 +1679,7 @@ class PreviewIntegration(unittest.TestCase):
         eventually(lambda:row("fullscreen-video").get("metrics",{}).get("loads",0)==1,timeout=25)
         renderer=row("fullscreen-video")["metrics"]["renderer"]
         self.assertFalse(any(s in renderer.lower() for s in ("llvmpipe","softpipe","software","unknown")),renderer)
-        input=XInput()
+        input=XInput(client.rpc)
         def state(): return client.rpc({"method":"list"})["presentation"]
         def center():
             view=row("fullscreen-video")["viewport"]
@@ -1649,7 +1806,7 @@ class PreviewIntegration(unittest.TestCase):
     def test_47_close_missing_failed_and_loaded_video_under_pointer(self):
         self.add("close-video-survivor")
         self.show()
-        input=XInput()
+        input=XInput(client.rpc)
         valid=self.root/"close-loaded.mp4"; video(valid,duration=12)
         corrupt=self.root/"close-corrupt.mp4"; corrupt.write_bytes(b"incomplete video output")
         paths={"missing":self.root/"close-missing.mp4","corrupt":corrupt,"loaded":valid}
@@ -1673,9 +1830,9 @@ class PreviewIntegration(unittest.TestCase):
                             self.assertFalse(row(key)["metrics"]["engine"])
                         # Click the real top-right close button and leave the
                         # pointer there while Qt destroys its native children.
-                        overlay=row(key)["overlays"]["controls"]
+                        overlay=row(key)["overlays"]["close"]
                         self.assertTrue(overlay["visible"])
-                        input.click(overlay["x"]+overlay["width"]-20,overlay["y"]+overlay["height"]//2)
+                        input.click(overlay["x"]+overlay["width"]//2,overlay["y"]+overlay["height"]//2)
                         eventually(lambda:key not in {r["id"] for r in client.rpc({"method":"list"})["entries"]})
                         self.assertEqual(client.rpc({"method":"ping"})["pid"],self.pid)
                         self.assertTrue(row("close-video-survivor")["active"])
@@ -1691,7 +1848,7 @@ class PreviewIntegration(unittest.TestCase):
         for i in range(6): self.add(f"page-{i}")
         client.rpc({"method":"layout","layout":"grid","grid_size":2})
         self.show()
-        input=XInput()
+        input=XInput(client.rpc)
         try:
             input.press("Right")
             eventually(lambda:client.rpc({"method":"list"})["selected"]=="page-4")
@@ -1710,6 +1867,21 @@ class PreviewIntegration(unittest.TestCase):
                 self.assertEqual(client.rpc({"method":"list"})["selected"],selected)
         finally: input.close()
 
+    @unittest.skipUnless(GPU and os.environ.get("QT_QPA_PLATFORM")!="wayland","Native rapid reopen and window shortcuts")
+    def test_48_rapid_reopen_restores_window_shortcuts(self):
+        self.add("rapid-one"); self.add("rapid-two"); self.show()
+        eventually(lambda:row("rapid-one").get("metrics",{}).get("loads",0)>0)
+        input=XInput(client.rpc)
+        try:
+            for _ in range(3):
+                client.rpc({"method":"hide"}); self.show()
+                eventually(lambda:client.rpc({"method":"list"})["presentation"]["active"])
+                input.press("Right")
+                eventually(lambda:client.rpc({"method":"list"})["selected"]=="rapid-two")
+                input.press("Left")
+                eventually(lambda:client.rpc({"method":"list"})["selected"]=="rapid-one")
+        finally: input.close()
+
     def test_20_navigation_save_failure_preserves_selection(self):
         self.add("before-failure"); self.add("after-failure")
         self.show()
@@ -1723,7 +1895,7 @@ class PreviewIntegration(unittest.TestCase):
             self.assertEqual(state["selected"],"before-failure")
             self.assertEqual({e["id"] for e in state["entries"] if e["active"]},{"before-failure"})
             if GPU and os.environ.get("QT_QPA_PLATFORM")!="wayland":
-                input=XInput()
+                input=XInput(client.rpc)
                 try:
                     input.press("Right"); time.sleep(.2)
                     self.assertEqual(client.rpc({"method":"list"})["selected"],"before-failure")
@@ -1733,7 +1905,7 @@ class PreviewIntegration(unittest.TestCase):
         finally:
             registry.rmdir(); backup.replace(registry)
         if GPU and os.environ.get("QT_QPA_PLATFORM")!="wayland":
-            input=XInput()
+            input=XInput(client.rpc)
             try:
                 input.press("Right")
                 eventually(lambda:client.rpc({"method":"list"})["selected"]=="after-failure")
@@ -1782,6 +1954,49 @@ class PreviewIntegration(unittest.TestCase):
         client.rpc({"method":"remove","id":"close-current"})
         self.assertEqual(client.rpc({"method":"list"})["selected"],"close-before")
 
+    @unittest.skipUnless(GPU and os.environ.get("QT_QPA_PLATFORM")!="wayland","Native projection shortcuts")
+    def test_projection_shortcuts_target_model_and_material(self):
+        obj=self.root/"projection.obj"
+        subprocess.run([sys.executable,str(ROOT/"examples/generate_cube.py"),str(obj)],check=True,capture_output=True)
+        for key in ("projection-one","projection-two"):
+            client.rpc({"method":"add","entry":{"id":key,"path":str(obj),"settings":{"orthographic":False}}})
+        self.add("projection-material",kind="material",settings={"orthographic":False})
+        self.add("projection-image")
+        client.rpc({"method":"layout","layout":"grid"}); self.show()
+        ids=("projection-one","projection-two","projection-material","projection-image")
+        eventually(lambda:all(row(key).get("metrics",{}).get("loads",0)>0 and
+            not row(key)["metrics"].get("command_pending") for key in ids),timeout=30)
+        for key in ids[:3]:
+            renderer=row(key)["metrics"]["renderer"]
+            self.assertFalse(any(s in renderer.lower() for s in ("llvmpipe","softpipe","software","unknown")),renderer)
+        input=XInput(client.rpc); numlock=input.numlock(True)
+        def target(key):
+            view=row(key)["viewport"]
+            input.motion(view["x"]+view["width"]//2,view["y"]+view["height"]//2); input.x.XFlush(input.display)
+            eventually(lambda:client.rpc({"method":"list"})["selected"]==key)
+        def toggle(key,button,enabled):
+            input.press(button)
+            eventually(lambda:row(key)["settings"]["orthographic"]==enabled and
+                not row(key)["metrics"].get("command_pending"))
+        try:
+            for key in ids[:3]:
+                target(key); camera=row(key)["metrics"]["camera"]; loads=row(key)["metrics"]["loads"]
+                toggle(key,"5",True); toggle(key,"KP_5",False)
+                input.numlock(False)
+                toggle(key,"KP_Begin",True); toggle(key,"KP_Begin",False)
+                input.numlock(True)
+                self.assertEqual(row(key)["metrics"]["loads"],loads)
+                for field in ("position","focal","up"):
+                    self.assertLess(math.dist(camera[field],row(key)["metrics"]["camera"][field]),1e-6)
+                for other in ids[:3]: self.assertFalse(row(other)["settings"]["orthographic"])
+            target("projection-image"); preferences=client.rpc({"method":"list"})["preferences"]
+            input.press("5"); input.press("KP_5"); time.sleep(.1)
+            self.assertEqual(client.rpc({"method":"list"})["preferences"],preferences)
+            self.assertNotIn("orthographic",row("projection-image")["settings"])
+            self.assertFalse(preferences["3d"]["orthographic"])
+        finally:
+            input.numlock(numlock); input.close()
+
     @unittest.skipUnless(GPU and os.environ.get("QT_QPA_PLATFORM")!="wayland","Hardware camera persistence and reset")
     def test_34_camera_persistence_and_reset(self):
         obj=self.root/"saved-camera.obj"
@@ -1800,14 +2015,14 @@ class PreviewIntegration(unittest.TestCase):
         for ortho in (False,True):
             client.rpc({"method":"settings","id":"camera","settings":{"orthographic":ortho}})
             time.sleep(.2)
-            baseline_input=XInput()
+            baseline_input=XInput(client.rpc)
             try:
                 reset=row("camera")["controls"]["reset"]
                 baseline_input.click(reset["x"]+reset["width"]//2,reset["y"]+reset["height"]//2)
                 time.sleep(.2)
             finally: baseline_input.close()
             initial=row("camera")["metrics"]["camera"]
-            input=XInput()
+            input=XInput(client.rpc)
             try:
                 view=row("camera")["viewport"]; x=view["x"]+view["width"]//2; y=view["y"]+view["height"]//2
                 input.drag(x,y,60,35)
@@ -1825,7 +2040,7 @@ class PreviewIntegration(unittest.TestCase):
             eventually(lambda:row("camera").get("metrics",{}).get("engine")); check(saved)
             client.rpc({"method":"quit"}); eventually(lambda:not client.running()); client.start(); self.show()
             eventually(lambda:row("camera").get("metrics",{}).get("engine")); check(saved)
-            input=XInput()
+            input=XInput(client.rpc)
             try:
                 time.sleep(.2); reset=row("camera")["controls"]["reset"]
                 self.assertTrue(reset["visible"])
@@ -1893,7 +2108,7 @@ class PreviewIntegration(unittest.TestCase):
         png(self.root/"grid-second.png", (220,70,80,80))
         client.rpc({"method":"layout","layout":"grid"}); self.show()
         eventually(lambda:row("grid-second").get("metrics",{}).get("loads"))
-        input=XInput(); saved_files=[]
+        input=XInput(client.rpc); saved_files=[]
         try:
             time.sleep(.2); view=row("grid-second")["viewport"]; x=view["x"]+view["width"]//2; y=view["y"]+view["height"]//2
             loads={id:row(id)["metrics"]["loads"] for id in ("grid-first","grid-second","grid-third")}
@@ -1971,7 +2186,7 @@ int main(int argc,char** argv) {
         self.assertFalse(row("compare-hidden")["active"])
         renderer=row("compare-one")["metrics"]["renderer"]
         self.assertFalse(any(s in renderer.lower() for s in ("llvmpipe","softpipe","software","unknown")),renderer)
-        input=XInput()
+        input=XInput(client.rpc)
         try:
             time.sleep(.2); view=row("compare-one")["viewport"]; x=view["x"]+view["width"]//2; y=view["y"]+view["height"]//2
             before=row("compare-two")["metrics"]["camera"]
@@ -2016,6 +2231,191 @@ int main(int argc,char** argv) {
             client.rpc({"method":"hide"}); self.assertEqual(client.rpc({"method":"list"})["active"],0)
         finally: input.close()
 
+    def test_image_comparison_lifecycle_and_validation(self):
+        self.addCleanup(client.rpc,{"method":"compare","camera_sync":True})
+        framing={"zoom":2.5,"pan":[.1,-.2]}
+        self.add("image-pair-one",image_view=framing,settings={"nearest":True})
+        self.add("image-pair-two",image_view={"zoom":1,"pan":[0,0]},settings={"nearest":False})
+        png(self.root/"image-pair-two.png",size=32)
+        self.add("image-pair-hidden")
+        client.rpc({"method":"add","entry":{"id":"image-pair-model","path":str(self.root/"missing.obj")}})
+        pair=["image-pair-one","image-pair-two"]
+        client.rpc({"method":"compare","ids":pair,"camera_sync":True})
+        self.show()
+        eventually(lambda:all(row(key).get("metrics",{}).get("loads") for key in pair))
+        self.assertFalse(row("image-pair-hidden")["active"])
+        self.assertEqual(row(pair[1])["metrics"]["image_view"],framing)
+        self.assertTrue(row(pair[0])["settings"]["nearest"])
+        self.assertFalse(row(pair[1])["settings"]["nearest"])
+        self.assertEqual(row(pair[1])["metrics"]["decoded_width"],32)
+        for ids in ([pair[0]], [pair[0],pair[0]], [pair[0],"image-pair-model"], [pair[0],"unknown"]):
+            with self.assertRaises(RuntimeError): client.rpc({"method":"compare","ids":ids})
+            self.assertEqual(client.rpc({"method":"list"})["comparison"],pair)
+        client.rpc({"method":"hide"})
+        self.assertTrue(all(not row(key)["active"] for key in pair))
+        self.show()
+        eventually(lambda:all(row(key).get("metrics",{}).get("loads") for key in pair))
+        self.assertEqual(row(pair[1])["metrics"]["image_view"],framing)
+        client.rpc({"method":"compare","camera_sync":False})
+        client.rpc({"method":"quit"}); eventually(lambda:not client.running()); client.start(); self.show()
+        eventually(lambda:all(row(key).get("metrics",{}).get("loads") for key in pair))
+        self.assertEqual(client.rpc({"method":"list"})["comparison"],pair)
+        self.assertFalse(client.rpc({"method":"list"})["camera_sync"])
+        self.assertEqual(row(pair[1])["metrics"]["image_view"],framing)
+        client.rpc({"method":"add","entry":{"id":pair[1],"path":str(self.root/"changed.obj")}})
+        self.assertEqual(client.rpc({"method":"list"})["comparison"],[])
+
+    @unittest.skipUnless(GPU and os.environ.get("QT_QPA_PLATFORM")!="wayland","Native image comparison controls")
+    def test_image_comparison_picker(self):
+        self.add("picker-source",label="Source",project="art")
+        colors={}
+        marker=self.root/"picker-must-not-run-generator"
+        for i in range(24):
+            key=f"choice-{i:02}";asset=self.root/(key+".png")
+            colors[key]=(40+i*7,85+i*3,190-i*4);png(asset,colors[key])
+            entry={"id":key,"path":str(asset),"label":f"Choice{i:02}","project":"art"}
+            if i==0:entry.update(command=["/usr/bin/touch",str(marker)],cwd=str(self.root))
+            client.rpc({"method":"add","entry":entry})
+        self.add("picker-elsewhere",label="Elsewhere",project="other")
+        client.rpc({"method":"add","entry":{"id":"picker-model","path":str(self.root/"not-an-image.obj")}})
+        client.rpc({"method":"select","id":"picker-source"})
+        client.rpc({"method":"layout","layout":"gallery","project_filter":"art"})
+        client.rpc({"method":"theme","mode":"dark"});self.show()
+        eventually(lambda:row("picker-source").get("metrics",{}).get("loads"))
+        input=XInput(client.rpc)
+        def state():return client.rpc({"method":"list"})
+        def picker():return state()["presentation"]["comparison_picker"]
+        def open_picker():
+            input.shortcut("v");time.sleep(.1);input.press("c")
+            return eventually(lambda:picker() if picker()["visible"] else None)
+        def capture(name):
+            target=Path(os.environ.get("ASSET_PREVIEW_EVIDENCE_DIR",self.root));target.mkdir(parents=True,exist_ok=True)
+            path=target/(name+".png");path.unlink(missing_ok=True);client.rpc({"method":"capture","path":str(path)})
+            return path
+        def query(text):
+            p=picker();r=p["search"]
+            input.click(p["x"]+r["x"]+r["width"]//2,p["y"]+r["y"]+r["height"]//2)
+            input.chord("Control_L","a")
+            for letter in text:input.press(letter)
+            eventually(lambda:picker().get("query")==text)
+        try:
+            p=open_picker();self.assertEqual(p["source"],"picker-source")
+            self.assertEqual(p["grid"]["items"],25);self.assertGreaterEqual(p["grid"]["columns"],3)
+            self.assertNotIn("picker-source",[t["id"] for t in p["grid"]["tiles"]])
+            self.assertNotIn("picker-model",[t["id"] for t in p["grid"]["tiles"]])
+            p=eventually(lambda:picker() if all(t["thumbnail_ready"] for t in picker()["grid"]["tiles"]) else None)
+            self.assertEqual(state()["active"],1);self.assertEqual(state()["selected"],"picker-source")
+            self.assertFalse(marker.exists(),"Browsing comparison images started a generator")
+            input.motion(5,5);input.x.XFlush(input.display);time.sleep(.05)
+            image=capture("comparison-picker-wide")
+            for tile in p["grid"]["tiles"]:
+                if tile["id"] in colors and tile["y"]+60<p["height"]-45:
+                    self.assertEqual(png_pixel(image,tile["x"]+tile["width"]//2,tile["y"]+50),colors[tile["id"]])
+            input.press("Escape");eventually(lambda:not picker()["visible"])
+            self.assertEqual(state()["comparison"],[]);self.assertEqual(state()["layout"],"gallery")
+            p=open_picker()
+            self.add("picker-late",label="Late arrival",project="other")
+            eventually(lambda:picker()["grid"]["items"]==26)
+            client.rpc({"method":"remove","id":"choice-00"})
+            eventually(lambda:picker()["grid"]["items"]==25)
+            dialog=input.find(input.root,title="Compare with Source");self.assertTrue(dialog)
+            input.x.XResizeWindow.argtypes=[ctypes.c_void_p,ctypes.c_ulong,ctypes.c_uint,ctypes.c_uint]
+            input.x.XResizeWindow(input.display,dialog,420,360);input.x.XFlush(input.display)
+            # Keep the modal fixture at the same normalized XTest origin as
+            # its parent; Gamescope otherwise applies its client offset twice.
+            input.x.XMoveWindow(input.display,dialog,0,0);input.x.XSync(input.display,0)
+            p=eventually(lambda:picker() if picker()["width"]==420 else None)
+            self.assertGreaterEqual(p["grid"]["columns"],2);self.assertGreater(p["grid"]["scroll_max"],0)
+            for tile in p["grid"]["tiles"]:
+                self.assertGreaterEqual(tile["x"],0);self.assertLessEqual(tile["x"]+tile["width"],p["width"])
+            capture("comparison-picker-narrow")
+            query("notfound");eventually(lambda:picker()["grid"]["items"]==0)
+            capture("comparison-picker-empty")
+            self.assertEqual(state()["comparison"],[])
+            query("choice17");eventually(lambda:picker()["grid"]["items"]==1)
+            p=eventually(lambda:picker() if picker()["grid"]["tiles"][0]["thumbnail_ready"] else None)
+            self.assertEqual(p["grid"]["tiles"][0]["id"],"choice-17")
+            # A concurrent selection must not change the captured comparison source.
+            client.rpc({"method":"select","id":"choice-06"})
+            self.assertEqual(picker()["source"],"picker-source")
+            p=picker();tile=p["grid"]["tiles"][0]
+            input.click(p["x"]+tile["x"]+tile["width"]//2,p["y"]+tile["y"]+50)
+            eventually(lambda:state()["comparison"]==["picker-source","choice-17"])
+            eventually(lambda:not picker()["visible"])
+            self.assertEqual(state()["active"],2);self.assertFalse(marker.exists())
+            client.rpc({"method":"compare","ids":[]})
+            open_picker();client.rpc({"method":"hide"})
+            eventually(lambda:not picker()["visible"]);self.assertEqual(state()["active"],0)
+            self.show();eventually(lambda:row("picker-source").get("metrics",{}).get("loads"))
+            open_picker();client.rpc({"method":"remove","id":"picker-source"})
+            eventually(lambda:not picker()["visible"])
+            self.assertEqual(state()["comparison"],[])
+        finally:input.close()
+
+    @unittest.skipUnless(GPU and os.environ.get("QT_QPA_PLATFORM")!="wayland","Native image comparison controls")
+    def test_image_comparison_input(self):
+        asset=self.root/"pixel-edge.svg"
+        asset.write_text('<svg xmlns="http://www.w3.org/2000/svg" width="8" height="8">'
+                         '<path fill="black" d="M0 0h4v8H0z"/><path fill="white" d="M4 0h4v8H4z"/></svg>')
+        for key in ("pixel-before","pixel-after"):
+            client.rpc({"method":"add","entry":{"id":key,"path":str(asset),"label":key}})
+        self.show()
+        eventually(lambda:row("pixel-before").get("metrics",{}).get("loads"))
+        input=XInput(client.rpc)
+        original_size=client.rpc({"method":"list"})["presentation"]
+        def state(key): return row(key)["metrics"]["image_view"]
+        def center(key):
+            view=row(key)["viewport"]
+            return view["x"]+view["width"]//2,view["y"]+view["height"]//2
+        try:
+            # Enter through the actual menu: only another image is offered.
+            input.shortcut("v"); time.sleep(.15); input.press("c"); time.sleep(.15); input.press("Return")
+            eventually(lambda:client.rpc({"method":"list"})["comparison"]==["pixel-before","pixel-after"])
+            eventually(lambda:row("pixel-after").get("metrics",{}).get("loads"))
+            comparison=self.root/"image-comparison.png"
+            client.rpc({"method":"capture","path":str(comparison)})
+            x,y=center("pixel-before"); input.click(x,y); input.scroll(x+40,y)
+            eventually(lambda:state("pixel-before")["zoom"]>1)
+            eventually(lambda:state("pixel-after")==state("pixel-before"))
+            input.drag(x,y,35,20)
+            eventually(lambda:state("pixel-after")==state("pixel-before"))
+            x,y=center("pixel-after"); input.drag(x,y,-25,-15)
+            eventually(lambda:client.rpc({"method":"list"})["selected"]=="pixel-after")
+            eventually(lambda:state("pixel-after")==state("pixel-before"))
+            input.press("f")
+            eventually(lambda:all(state(key)=={"zoom":1,"pan":[0,0]} for key in ("pixel-before","pixel-after")))
+            client.rpc({"method":"compare","camera_sync":False})
+            x,y=center("pixel-after"); input.scroll(x,y)
+            eventually(lambda:state("pixel-after")["zoom"]>1)
+            self.assertEqual(state("pixel-before")["zoom"],1)
+            client.rpc({"method":"compare","camera_sync":True})
+            eventually(lambda:state("pixel-after")==state("pixel-before"))
+            saved=state("pixel-after")
+            client.rpc({"method":"reload","id":"pixel-before"})
+            eventually(lambda:row("pixel-before")["metrics"]["loads"]>1)
+            self.assertEqual(state("pixel-before"),saved)
+            if os.environ.get("ASSET_PREVIEW_EVIDENCE_DIR"):
+                target=Path(os.environ["ASSET_PREVIEW_EVIDENCE_DIR"]); target.mkdir(parents=True,exist_ok=True)
+                shutil.copy2(comparison,target/comparison.name)
+            input.x.XResizeWindow.argtypes=[ctypes.c_void_p,ctypes.c_ulong,ctypes.c_uint,ctypes.c_uint]
+            input.x.XResizeWindow(input.display,input.window,540,380); input.x.XFlush(input.display)
+            eventually(lambda:client.rpc({"method":"list"})["presentation"]["width"]==540)
+            for key in ("pixel-before","pixel-after"):
+                view=row(key)["viewport"]
+                self.assertGreaterEqual(view["width"],100)
+                self.assertLessEqual(view["x"]+view["width"],540)
+            if os.environ.get("ASSET_PREVIEW_EVIDENCE_DIR"):
+                narrow=self.root/"pixel-comparison-narrow.png"
+                client.rpc({"method":"capture","path":str(narrow)})
+                shutil.copy2(narrow,target/narrow.name)
+            client.rpc({"method":"layout","layout":"single"})
+            self.assertEqual(client.rpc({"method":"list"})["comparison"],[])
+        finally:
+            input.x.XResizeWindow.argtypes=[ctypes.c_void_p,ctypes.c_ulong,ctypes.c_uint,ctypes.c_uint]
+            input.x.XResizeWindow(input.display,input.window,original_size["width"],original_size["height"])
+            input.x.XSync(input.display,0)
+            input.close()
+
     def test_39_comparison_validation_and_failure_preserves_state(self):
         for id in ("pair-one","pair-two"):
             client.rpc({"method":"add","entry":{"id":id,"path":str(self.root/(id+".obj"))}})
@@ -2048,7 +2448,7 @@ int main(int argc,char** argv) {
         ids=("hover-one","hover-two","hover-image","hover-video")
         eventually(lambda:all(row(id).get("metrics",{}).get("loads",0)>0 and row(id)["metrics"]["renders"]>0 for id in ids))
         loads={id:row(id)["metrics"]["loads"] for id in ids}
-        input=XInput()
+        input=XInput(client.rpc)
         def point(id,overlay=None):
             area=row(id)["overlays"][overlay] if overlay else row(id)["viewport"]
             return area["x"]+area["width"]//2,area["y"]+area["height"]//2

@@ -247,6 +247,7 @@ class OptimizationIntegration(unittest.TestCase):
         self.assertFalse(first["metrics"]["texture_preview"]["cache_hit"])
         self.assertEqual(first["metrics"]["texture_preview"]["source_sha256"], digest)
         camera, triangles = first["metrics"]["camera"], first["metrics"]["triangles"]
+        first_pixels = self.fixture.capture("camera-before-hide.png")
         self.rpc({"method": "hide"})
         self.assertNotIn("metrics", self.row())
         second = self.show_loaded("model")
@@ -255,16 +256,33 @@ class OptimizationIntegration(unittest.TestCase):
         self.assertGreaterEqual(diagnostic["glb_disk.write"],1)
         self.assertGreaterEqual(diagnostic["glb_disk.hit"],1)
         self.assertGreaterEqual(diagnostic["glb_disk.prune_scan"],1)
-        self.assertEqual(second["metrics"]["camera"], camera)
+        restored = second["metrics"]["camera"]
+        self.assertEqual(restored.keys(), camera.keys())
+        # VTK re-normalizes view-up and recomputes the projection span when
+        # restoring a camera; use the native component's 1e-10 tolerance.
+        for key, value in camera.items():
+            if isinstance(value, list):
+                self.assertEqual(len(restored[key]), len(value))
+                for actual, expected in zip(restored[key], value):
+                    self.assertAlmostEqual(actual, expected, delta=1e-10, msg=key)
+            else:
+                self.assertAlmostEqual(restored[key], value, delta=1e-10, msg=key)
         self.assertEqual(second["metrics"]["triangles"], triangles)
+        self.assertEqual(self.fixture.capture("camera-after-show.png"), first_pixels,
+                         "Restoring the fitted camera changed the visible model")
+        def settings_complete():
+            metrics = self.row()["metrics"]
+            return metrics if not metrics.get("loading") and not metrics.get("command_pending") else None
         self.rpc({"method": "settings", "id": "model", "settings": {"textures": False}})
-        disabled = self.row()["metrics"]["texture_preview"]
+        disabled = eventually(settings_complete, timeout=30, description="texture-disable publication")["texture_preview"]
         self.assertEqual(disabled["requested"], "preview")
         self.assertEqual(disabled["status"], "original")
         self.rpc({"method": "settings", "id": "model", "settings": {"textures": True, "texture_quality": "original"}})
-        self.assertEqual(self.row()["metrics"]["texture_preview"]["status"], "original")
+        enabled = eventually(settings_complete, timeout=30, description="original-texture publication")
+        self.assertEqual(enabled["texture_preview"]["status"], "original")
         self.rpc({"method": "settings", "id": "model", "settings": {"texture_quality": "preview"}})
-        self.assertTrue(self.row()["metrics"]["texture_preview"]["cache_hit"])
+        preview = eventually(settings_complete, timeout=30, description="cached preview-texture publication")
+        self.assertTrue(preview["texture_preview"]["cache_hit"])
         self.inspect("open")
         eventually(lambda: self.inspect().get("loaded"), timeout=30)
         self.assertEqual(self.inspect()["revision"], digest)
@@ -359,6 +377,7 @@ class OptimizationIntegration(unittest.TestCase):
         This exercises immediate registration freshness without relying on a
         wall-clock deadline or adding a debug operation to the public protocol.
         """
+        before = self.row(entry["id"])
         process = self.fixture.process
         self.assertIsNone(process.poll())
         connection = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
@@ -381,9 +400,24 @@ class OptimizationIntegration(unittest.TestCase):
                 self.assertLess(len(response), 1024 * 1024)
             result = json.loads(response.split(b"\n", 1)[0])
             self.assertTrue(result.get("ok"), result)
-            return self.row(entry["id"])
+            return self.completed_refresh(entry["id"], before)
         finally:
             connection.close()
+
+    def completed_refresh(self, key, before):
+        # Native imports return after admission, rather than blocking the RPC
+        # until rendering finishes. Require immediate admission (a later watcher
+        # reload must not rescue this assertion), then inspect the new pixels.
+        previous = before["revisions"]
+        admitted = self.row(key)
+        self.assertTrue(admitted.get("metrics", {}).get("loading") or
+                        admitted["revisions"] > previous,
+                        "Refresh was not admitted before returning to the caller")
+        def completed():
+            current = self.row(key)
+            metrics = current.get("metrics", {})
+            return current if current["revisions"] > previous and metrics.get("loads", 0) and not metrics.get("loading") else None
+        return eventually(completed, timeout=30, description=f"completed refresh {key}")
 
     def generator(self, mode="unchanged", initial=False):
         """A finite source-save builder with test-owned publication gates."""
@@ -668,6 +702,30 @@ class OptimizationIntegration(unittest.TestCase):
         self.assertEqual(hashlib.sha256(self.fixture.model.read_bytes()).hexdigest(), self.fixture.sha)
 
     @unittest.skipUnless(GPU, GPU_REASON)
+    def test_changed_model_reconnect_keeps_last_good_view_after_failure(self):
+        entry = {"id": "model", "path": str(self.fixture.model), "kind": "model",
+                 "settings": {"lighting": "lightkit"}}
+        self.add(entry)
+        self.show_loaded("model")
+        before = self.prime_reload("model")
+        original = self.fixture.model.read_bytes()
+        self.fixture.model.write_bytes(b"incomplete GLB replacement")
+        self.add(entry)
+        def failed():
+            current = self.row("model")
+            return current if current["status"].startswith("Waiting") and not current.get("metrics", {}).get("loading") else None
+        current = eventually(failed, timeout=30, description="failed reconnect retained the previous scene")
+        self.assertTrue(current["metrics"]["engine"])
+        self.assertEqual(current["metrics"]["loads"], before["metrics"]["loads"])
+        self.assertEqual(current["revisions"], before["revisions"])
+        self.assertEqual(current["metrics"]["camera"], before["metrics"]["camera"])
+        self.fixture.model.write_bytes(original)
+        self.add(entry)
+        restored = self.completed_refresh("model", before)
+        self.assertGreater(restored["revisions"], before["revisions"])
+        self.hardware_renderer()
+
+    @unittest.skipUnless(GPU, GPU_REASON)
     def test_replaced_external_model_dependency_reconnect_precedes_watcher_debounce(self):
         document, binary = fixture_document()
         dependency = self.root / "external.bin"
@@ -693,6 +751,7 @@ class OptimizationIntegration(unittest.TestCase):
 
         after = self.reconnect_after_publication(entry, replace_dependency)
         self.assertGreater(after["revisions"], before["revisions"])
+        self.assertGreater(after["metrics"]["loads"], before["metrics"]["loads"], "Reconnect replaced the native view")
         self.assertEqual(hashlib.sha256(model.read_bytes()).hexdigest(), main_digest)
         self.hardware_renderer()
 
@@ -715,7 +774,7 @@ class OptimizationIntegration(unittest.TestCase):
         width, height = struct.unpack(">II", capture.read_bytes()[16:24])
         self.assertEqual(png_pixel(capture, width // 2, height // 2)[:3], color)
 
-    def dependency_only_build(self, entry, dependency, replacement):
+    def dependency_only_build(self, entry, dependency, replacement, compare_pixels=False):
         ready = self.root / "dependency-builder-ready"
         allow = self.root / "allow-dependency-builder-exit"
         ready.unlink(missing_ok=True)
@@ -735,13 +794,24 @@ class OptimizationIntegration(unittest.TestCase):
         eventually(lambda: ready.is_file() and self.row(entry["id"])["building"],
                    description="dependency-only generator startup")
         before = self.row(entry["id"])
+        def scene_pixels(name):
+            rect = self.row(entry["id"])["viewport"]
+            center = {"x": rect["x"] + rect["width"] // 4, "y": rect["y"] + rect["height"] // 4,
+                      "width": rect["width"] // 2, "height": rect["height"] // 2}
+            path = self.root / name
+            self.rpc({"method": "capture", "path": str(path)})
+            return inspection_tests.capture_pixels(path, center)
+        original_pixels = scene_pixels("dependency-before.png") if compare_pixels else None
         allow.touch()
         eventually(lambda: not self.row(entry["id"])["building"],
                    description="dependency-only generator completion")
-        after = self.row(entry["id"])
+        after = self.completed_refresh(entry["id"], before)
         self.assertGreater(after["revisions"], before["revisions"])
         self.assertGreater(after["metrics"]["loads"], before["metrics"]["loads"])
         self.assertEqual(after["builds"], 1)
+        if compare_pixels:
+            self.assertNotEqual(scene_pixels("dependency-after.png"), original_pixels,
+                                "External texture changed counters but not the rendered material")
 
     def test_external_svg_reconnect_refreshes_actual_format_under_either_suffix(self):
         for suffix in ("svg", "png"):
@@ -793,6 +863,7 @@ class OptimizationIntegration(unittest.TestCase):
         digest = hashlib.sha256(Path(entry["path"]).read_bytes()).hexdigest()
         after = self.reconnect_after_publication(entry, lambda: replacement.replace(dependency))
         self.assertGreater(after["revisions"], before["revisions"])
+        self.assertGreater(after["metrics"]["loads"], before["metrics"]["loads"], "Reconnect replaced the native view")
         self.assertEqual(hashlib.sha256(Path(entry["path"]).read_bytes()).hexdigest(), digest)
         self.hardware_renderer()
 
@@ -829,9 +900,16 @@ class OptimizationIntegration(unittest.TestCase):
         source.write_text("ObjectType = Image\nNDims = 2\nBinaryData = True\n"
                           "DimSize = 4 4\nElementNumberOfChannels = 3\nElementType = MET_UCHAR\n"
                           "ElementDataFile = material.raw\n")
-        entry = {"id": "model", "path": str(source), "kind": "material",
+        # Albedo is authored into glTF, whose image reader rejects MetaImage.
+        # Normal overrides use F3D's native image reader and support its raw
+        # sidecar. The independent reader probe matches equivalent PNG pixels.
+        albedo = self.root / "albedo.png"
+        png(albedo, (50, 130, 210, 255), size=64)
+        original = hashlib.sha256(albedo.read_bytes() + source.read_bytes()).hexdigest()
+        entry = {"id": "model", "path": str(albedo), "kind": "material", "maps": {"normal": str(source)},
                  "settings": {"shape": "plane", "lighting": "lightkit"}}
-        self.dependency_only_build(entry, dependency, replacement)
+        self.dependency_only_build(entry, dependency, replacement, compare_pixels=True)
+        self.assertEqual(hashlib.sha256(albedo.read_bytes() + source.read_bytes()).hexdigest(), original)
         self.hardware_renderer()
 
     def review_document(self, dependencies="1" * 64, count=4096):

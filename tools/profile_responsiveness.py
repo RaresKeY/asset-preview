@@ -21,7 +21,7 @@ import time
 
 ROOT=Path(__file__).resolve().parents[1]
 sys.path.insert(0,str(ROOT/'tests'))
-from integration import png, XInput, ticks, memory
+from integration import png, audio, video, XInput, ticks, memory
 
 def rpc(path,request,timeout=60):
     with socket.socket(socket.AF_UNIX) as connection:
@@ -47,11 +47,14 @@ def main():
     parser.add_argument('--perf',action='store_true',help='Collect attributed samples; do not compare these as clean timings')
     parser.add_argument('--count',type=int,default=96)
     parser.add_argument('--edge',type=int,default=2048)
+    parser.add_argument('--extended',action='store_true',help='Include document/diff, model, paused media and idle/reentry scenarios')
+    parser.add_argument('--captures',action='store_true',help='Capture settled phases outside timing scope')
+    parser.add_argument('--request-probes',action='store_true',help='Measure repeated read-only socket requests after each layout settles')
     args=parser.parse_args(); args.binary=args.binary.resolve()
     assert 16<=args.count<=256 and 64<=args.edge<=4096
     args.output.mkdir(parents=True,exist_ok=True)
     report={'binary':str(args.binary),'binary_sha256':hashlib.sha256(args.binary.read_bytes()).hexdigest(),
-        'instrumented_perf':args.perf,
+        'instrumented_perf':args.perf,'complete':False,
         'scope':'Private native service; ping round trips during each completed workload, not display latency. Host filesystem/driver caches are retained.',
         'host_load_before':Path('/proc/loadavg').read_text().strip(),'phases':[]}
     with tempfile.TemporaryDirectory(prefix='ap-latency-') as directory:
@@ -63,6 +66,22 @@ def main():
             entries.append({'id':f'image-{i}','path':str(image),'kind':'image','label':f'Image {i}',
                 'project':f'group-{i%16}','settings':{}})
         for i in range(16): groups.append({'id':f'group-{i}','label':f'Project {i}','current':f'image-{i}'})
+        extended=[]
+        if args.extended:
+            from inspection_fixture import write_fixture
+            markdown=root/'guide.md'; markdown.write_text('# Preview performance\n\n'+('| Image | Role |\n| --- | --- |\n'+
+                "| <img src='image-0.png' width=120> | **Portrait**<br>Current source. |\n\n")*24)
+            source=root/'source.cpp'; source.write_text(('// Asset Preview fixture\nint value = 42;\n')*300)
+            before=root/'before.cpp'; before.write_text(source.read_text().replace('42','24'))
+            model=root/'fixture.glb'; write_fixture(model)
+            sound=root/'sound.wav'; audio(sound,duration=2)
+            movie=root/'movie.mp4'; video(movie,duration=2)
+            extended=[('markdown',markdown,'file',{'file_mode':'rendered'},{}),
+                ('source',source,'file',{'file_mode':'source'},{}),
+                ('diff',source,'file',{'file_mode':'split'},{'before':str(before)}),
+                ('model',model,'model',{'paused':True},{}),
+                ('audio',sound,'audio',{'paused':True,'muted':True},{}),
+                ('video',movie,'video',{'paused':True,'muted':True},{})]
         registry={'version':1,'entries':entries,'selected':'image-0','layout':'overview','projects':groups,
             'project_grid_size':4,'grid_size':4,'theme':'dark'}
         (state/'previews.json').write_text(json.dumps(registry))
@@ -74,7 +93,7 @@ def main():
         if args.perf:
             command=['perf','record','-e','cycles:u','-F','199','--call-graph','dwarf,8192','--user-callchains','-o',str(args.output/'profile.perf.data'),'--',*command]
         process=subprocess.Popen(command,env=env,stdout=log,stderr=log,start_new_session=True)
-        stop=threading.Event(); samples=[]; errors=[]; observer=None; input=None
+        stop=threading.Event(); paused=threading.Event(); samples=[]; errors=[]; observer=None; input=None
         try:
             deadline=time.monotonic()+20
             while True:
@@ -85,6 +104,8 @@ def main():
             report['startup_service_ms']=(time.perf_counter()-started)*1000
             def observe():
                 while not stop.is_set():
+                    if paused.is_set():
+                        stop.wait(.01); continue
                     start=time.perf_counter()
                     try:
                         rpc(path,{'method':'ping'},30)
@@ -112,10 +133,45 @@ def main():
                     'memory':memory(service_pid),'active':after['active'],'cache':after['cache'],
                     'preload':after['preload'],'performance':after.get('performance',{})}
                 report['phases'].append(item); print(json.dumps({k:v for k,v in item.items() if k not in ('cache','preload')}),flush=True)
+                if args.captures and after['window_visible']:
+                    rpc(path,{'method':'capture','path':str((args.output/(name+'.png')).resolve())})
                 return after
+            def idle(name):
+                # Stop observer RPCs as well as workload actions during idle.
+                wait(lambda s:not s['presentation']['overview']['worker_active'] and not s['preload']['worker_active'])
+                time.sleep(.6); paused.set(); time.sleep(.05)
+                before=state_now(); cpu=ticks(service_pid); begin=time.perf_counter()
+                time.sleep(1)
+                cpu_delta=(ticks(service_pid)-cpu)/os.sysconf('SC_CLK_TCK'); elapsed=time.perf_counter()-begin
+                after=state_now(); paused.clear()
+                previous={e['id']:e.get('metrics',{}).get('renders',0) for e in before['entries']}
+                report.setdefault('idle',[]).append({'name':name,'seconds':elapsed,'cpu_seconds':cpu_delta,
+                    'memory':memory(service_pid),'active':after['active'],'cache_bytes':after['cache']['bytes'],
+                    'render_delta':{e['id']:e.get('metrics',{}).get('renders',0)-previous[e['id']] for e in after['entries'] if e['active']}})
+            def request_probes(name):
+                if not args.request_probes: return
+                # Keep the latency observer out of the measured request stream.
+                paused.set(); time.sleep(.05)
+                try:
+                    before=state_now()
+                    identity=lambda s:(s['selected'],s['layout'],s['active'],
+                        [(e['id'],e['path'],e['kind'],e['active']) for e in s['entries']])
+                    for method,iterations in (('ping',2000),('list',100)):
+                        values=[]; cpu=ticks(service_pid); begin=time.perf_counter()
+                        for _ in range(iterations):
+                            start=time.perf_counter(); response=rpc(path,{'method':method})
+                            values.append((time.perf_counter()-start)*1000)
+                            assert response['pid']==service_pid
+                        report.setdefault('request_probes',[]).append({'name':name,'method':method,
+                            'iterations':iterations,'completed_ms':(time.perf_counter()-begin)*1000,
+                            'p50_ms':percentile(values,.5),'p95_ms':percentile(values,.95),
+                            'max_ms':max(values),'cpu_seconds':(ticks(service_pid)-cpu)/os.sysconf('SC_CLK_TCK')})
+                    assert identity(state_now())==identity(before),'Read-only requests changed preview ownership'
+                finally: paused.clear()
             visible_ready=lambda s:s['presentation']['overview'].get('visible_ready',not s['presentation']['overview']['worker_active'])
             phase('overview-cold',lambda:rpc(path,{'method':'show'}),visible_ready)
             phase('overview-all-open-warm',lambda:None,lambda s:not s['presentation']['overview']['worker_active'])
+            request_probes('overview')
             input=XInput()
             def hover():
                 overview=state_now()['presentation']['overview']; tiles=overview['tiles']
@@ -131,6 +187,7 @@ def main():
             phase('projects-hover',project_hover)
             phase('overview-return',lambda:rpc(path,{'method':'layout','layout':'overview'}),visible_ready)
             phase('projects-warm-16',lambda:rpc(path,{'method':'layout','layout':'projects'}),loaded)
+            request_probes('projects-16')
             phase('single-last',lambda:(rpc(path,{'method':'layout','layout':'single'}),rpc(path,{'method':'select','id':f'image-{args.count-1}'})),
                 lambda s:s['preload']['state'] in ('cached','skipped') and not s['preload']['worker_active'] and any(e['id']==s['selected'] and e.get('metrics',{}).get('loads',0)>0 and not e['metrics'].get('loading') for e in s['entries']))
             def close_left():
@@ -138,6 +195,32 @@ def main():
                     selected=state_now()['selected']; rpc(path,{'method':'remove','id':selected})
                     wait(lambda s:not s['preload']['worker_active'] and any(e['id']==s['selected'] and e.get('metrics',{}).get('loads',0)>0 and not e['metrics'].get('loading') for e in s['entries'])); time.sleep(.05)
             phase('close-left-preload',close_left)
+            request_probes('single')
+            if args.extended:
+                idle('image')
+                for label,asset,kind,settings,extra in extended:
+                    identifier='extended-'+label
+                    rpc(path,{'method':'add','entry':{'id':identifier,'path':str(asset),'kind':kind,'settings':settings,**extra}})
+                    def completed(s,identifier=identifier,kind=kind,label=label):
+                        metrics=next(e.get('metrics',{}) for e in s['entries'] if e['id']==identifier)
+                        if not metrics.get('loads') or metrics.get('loading'): return False
+                        if kind in ('model','video','audio') and not metrics.get('engine'): return False
+                        if kind=='model' and not metrics.get('load_timing',{}).get('first_render_ms'): return False
+                        if kind=='audio' and not metrics.get('waveform',{}).get('ready'): return False
+                        return kind!='video' or metrics.get('width',0)>0
+                    response=phase(label+'-first',lambda identifier=identifier:rpc(path,{'method':'select','id':identifier}),completed)
+                    metrics=next(e['metrics'] for e in response['entries'] if e['id']==identifier)
+                    report.setdefault('extended_metrics',{})[label]=metrics
+                    if metrics.get('renderer'):
+                        report['renderer']=metrics['renderer']
+                        if any(marker in report['renderer'].lower() for marker in ('llvmpipe','softpipe','software')):
+                            raise RuntimeError('Hardware renderer required')
+                    idle(label)
+                phase('extended-hide',lambda:rpc(path,{'method':'hide'}),lambda s:s['active']==0)
+                idle('hidden')
+                assert not state_now()['cache']['bytes'],'Hidden window retained cached RAM'
+                phase('video-reentry',lambda:rpc(path,{'method':'show'}),completed)
+                idle('video-reentry')
             if args.real_model:
                 model=args.real_model.resolve(); report['real_model']={'path':str(model),'sha256':hashlib.sha256(model.read_bytes()).hexdigest()}
                 rpc(path,{'method':'add','entry':{'id':'real-model','kind':'model','path':str(model),'settings':{'lighting':'lightkit'}}})
@@ -146,8 +229,13 @@ def main():
                 model_row=next(e for e in s['entries'] if e['id']=='real-model'); report['model_metrics']=model_row['metrics']
                 phase('model-hide',lambda:rpc(path,{'method':'hide'}),lambda s:s['active']==0)
                 phase('model-reopen',lambda:rpc(path,{'method':'show'}),ready)
-            report['observer_errors']=errors
+            if errors: raise RuntimeError('Ping observer failed: '+str(errors))
+            report['complete']=True
+        except BaseException as error:
+            report['failure']=f'{type(error).__name__}: {error}'
+            raise
         finally:
+            report['observer_errors']=errors
             stop.set()
             if observer: observer.join(timeout=2)
             if input: input.close()
@@ -157,8 +245,13 @@ def main():
             except subprocess.TimeoutExpired: process.kill(); process.wait()
             log.close()
             report['exit_code']=process.returncode
+            failed_shutdown=report['complete'] and process.returncode!=0
+            if failed_shutdown:
+                report['complete']=False
+                report['failure']=f'Service shutdown exited {process.returncode}'
             if (state/'crash.log').exists(): shutil.copy2(state/'crash.log',args.output/'crash.log')
             report['host_load_after']=Path('/proc/loadavg').read_text().strip()
             (args.output/'performance.json').write_text(json.dumps(report,indent=2))
+            if failed_shutdown: raise RuntimeError(report['failure'])
 
 if __name__=='__main__': main()

@@ -17,16 +17,20 @@ class Responsiveness(unittest.TestCase):
     setUp=f.PreviewIntegration.setUp
 
     def measure(self,action,done):
-        samples=[];stop=threading.Event();errors=[]
+        samples=[];stop=threading.Event();warm=threading.Event();errors=[]
         def observe():
             while not stop.is_set():
                 began=time.perf_counter()
                 try:f.client.rpc({'method':'ping'})
-                except Exception as error:errors.append(str(error));return
-                samples.append(time.perf_counter()-began);stop.wait(.01)
-        thread=threading.Thread(target=observe);thread.start();time.sleep(.025)
-        began=time.perf_counter()
+                except Exception as error:errors.append(str(error));warm.set();return
+                samples.append(time.perf_counter()-began)
+                if len(samples)>=3:warm.set()
+                stop.wait(.01)
+        thread=threading.Thread(target=observe);thread.start()
         try:
+            self.assertTrue(warm.wait(5),'Ping observer did not start')
+            self.assertFalse(errors,errors)
+            began=time.perf_counter()
             action();f.eventually(done,timeout=30)
         finally:stop.set();thread.join(5)
         self.assertFalse(errors,errors);self.assertGreater(len(samples),2)
@@ -75,7 +79,7 @@ class Responsiveness(unittest.TestCase):
         f.client.rpc({'method':'show'})
         loading=f.eventually(lambda:f.row('model') if f.row('model').get('metrics',{}).get('loading') else None)
         self.assertTrue(loading['overlays']['status']['loading'])
-        target=Path(os.environ.get('ASSET_PREVIEW_EVIDENCE_DIR',self.root))
+        target=Path(os.environ.get('ASSET_PREVIEW_EVIDENCE_DIR',self.root)).resolve()
         target.mkdir(parents=True,exist_ok=True)
         f.client.rpc({'method':'capture','path':str(target/'model-loading.png')})
         # Navigate immediately during native import; a stale candidate cannot
@@ -105,19 +109,28 @@ class Responsiveness(unittest.TestCase):
         f.client.rpc({'method':'show'})
         f.eventually(lambda:f.row('interactive').get('metrics',{}).get('loads')==1,timeout=25)
         texture=self.root/'large-material.png';f.png(texture,(90,140,200,255),4096)
-        ids=[f'material-{i}' for i in range(3)]
+        ids=[f'material-{i}' for i in range(15)]
         for key in ids:
             f.client.rpc({'method':'add','entry':{'id':key,'kind':'material','path':str(texture),
                 'settings':{'shape':'cube','lighting':'lightkit'}}})
-        f.client.rpc({'method':'layout','layout':'grid','grid_size':2})
-        f.eventually(lambda:all(f.row(key)['active'] for key in ids) and any(
-            f.row(key).get('metrics',{}).get('loading') for key in ids),timeout=25)
-        before=f.row('interactive')['metrics']['camera']
+        f.client.rpc({'method':'layout','layout':'grid','grid_size':4})
+        # Waiting for every card's admission leaves only the final import's
+        # narrow loading interval. Exercise the queued batch while admission is
+        # also pending, and inspect one snapshot instead of 15 serial RPCs.
+        def rows():return {e['id']:e for e in f.client.rpc({'method':'list'})['entries']}
+        admitted=rows()
+        self.assertTrue(any(not admitted[key].get('metrics',{}).get('loads',0) for key in ids),
+            'Import fixture completed before input was issued')
+        before=admitted['interactive']['metrics']['camera']
         timing=self.measure(lambda:f.client.rpc({'method':'camera_view','id':'interactive','view':'front'}),lambda:
             f.row('interactive')['metrics'].get('camera')!=before and not f.row('interactive')['metrics'].get('command_pending'))
-        self.assertFalse(all(f.row(key).get('metrics',{}).get('loads',0)>0 for key in ids),
+        completed=rows()
+        self.assertFalse(all(completed[key].get('metrics',{}).get('loads',0)>0 for key in ids),
             'Input waited behind every queued import')
-        f.eventually(lambda:all(f.row(key).get('metrics',{}).get('loads',0)>0 for key in ids),timeout=30)
+        def ready():
+            current=rows()
+            return all(current[key].get('metrics',{}).get('loads',0)>0 for key in ids)
+        f.eventually(ready,timeout=30)
         self.record('input-priority',timing)
 
     def record(self,name,value):

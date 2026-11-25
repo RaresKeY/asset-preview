@@ -4,6 +4,7 @@
 #include "model_frame.h"
 #include "gl_framebuffer.h"
 #include "animation_time.h"
+#include "preview_navigation.h"
 #include <QApplication>
 #include <QElapsedTimer>
 #include <QHideEvent>
@@ -12,11 +13,7 @@
 #include <QMouseEvent>
 #include <QMutex>
 #include <QMutexLocker>
-#include <QPainter>
-#include <QOpenGLWindow>
-#include <QOpenGLExtraFunctions>
-#include <QOpenGLTextureBlitter>
-#include <QOpenGLFramebufferObject>
+#include <QPlatformSurfaceEvent>
 #include <QPointer>
 #include <QResizeEvent>
 #include <QShowEvent>
@@ -29,6 +26,7 @@
 #include <atomic>
 #include <deque>
 #include <optional>
+#include <cmath>
 
 namespace {
 class RenderDispatcher final : public QObject {
@@ -125,8 +123,9 @@ std::shared_ptr<ModelGpuContext> createGpuContext() {
     format.setRenderableType(QSurfaceFormat::OpenGL);
     format.setVersion(3,3); format.setProfile(QSurfaceFormat::CoreProfile);
     format.setDepthBufferSize(24); format.setStencilBufferSize(8);
+    format.setAlphaBufferSize(0); format.setSwapInterval(0);
     context->setFormat(format);
-    if(!context->create()) { delete context; throw std::runtime_error("Cannot create shared model GPU context"); }
+    if(!context->create()) { delete context; throw std::runtime_error("Cannot create model GPU context"); }
     auto* surface=new QOffscreenSurface(nullptr,qApp); surface->setFormat(context->format()); surface->create();
     if(!surface->isValid()) { delete surface; delete context; throw std::runtime_error("Cannot create model producer surface"); }
     context->moveToThread(&workerRuntime.thread);
@@ -141,7 +140,7 @@ struct ModelState {
     std::atomic_uint revision=0;
     std::atomic_uint pendingCommands=0;
     std::atomic_bool renderPending=false;
-    std::atomic<quint64> producedFrame=0;
+    std::atomic<quint64> presented=0;
     // The worker and observer are used and destroyed only on the render thread.
     ModelWorker* worker=nullptr;
     Observer observer;
@@ -149,21 +148,21 @@ struct ModelState {
     double queueMs=0;
     QString failure;
     QMutex mutex;
-    QImage frame;
     std::shared_ptr<ModelGpuContext> gpu;
-    std::shared_ptr<ModelGpuFrame> gpuFrame;
     QJsonObject metrics,home;
     std::optional<std::pair<bool,QString>> completion;
     unsigned publishedRevision=0;
-    bool notification=false;
+    bool notification=false,playbackNotification=false;
 };
-class ModelSurface final : public QOpenGLWindow, public PreviewView {
+class ModelSurface final : public QWindow, public PreviewView {
 public:
     ModelSurface(QJsonObject cfg,QWidget* parent,LoadedCallback callback,InspectionCallback changed)
         :ModelSurface(std::move(cfg),parent,std::move(callback),std::move(changed),createGpuContext()) {}
     ModelSurface(QJsonObject cfg,QWidget*,LoadedCallback callback,InspectionCallback changed,std::shared_ptr<ModelGpuContext> gpu)
-        :QOpenGLWindow(gpu?gpu->context:nullptr),state(std::make_shared<ModelState>()),loaded(std::move(callback)),config(std::move(cfg)) {
+        :state(std::make_shared<ModelState>()),loaded(std::move(callback)),config(std::move(cfg)) {
         state->gpu=std::move(gpu);
+        setSurfaceType(QSurface::OpenGLSurface);
+        if(state->gpu)setFormat(state->gpu->context->format());
         setMinimumSize({100,100}); setCursor(Qt::OpenHandCursor);
         inspectionChanged=std::move(changed);
         QPointer<ModelSurface> guard(this); const auto slot=state;
@@ -189,9 +188,9 @@ public:
                         if(guard && guard->cache)guard->cache->observe(tier,action,key,bytes,reason,us,details);
                     },Qt::QueuedConnection);
                 };
-                slot->worker->frameReady=[guard,slot](QImage frame) { publish(guard,slot,std::move(frame)); };
-                slot->worker->gpuFrameReady=[guard,slot](std::shared_ptr<ModelGpuFrame> frame) { publish(guard,slot,{}, {},std::move(frame)); };
-                slot->worker->loaded=[guard,slot](bool ok,QString error) { publish(guard,slot,{},std::pair{ok,error}); };
+                slot->worker->frameRendered=[guard,slot] { publish(guard,slot,{},false); };
+                slot->worker->framePresented=[slot] { ++slot->presented; };
+                slot->worker->loaded=[guard,slot](bool ok,QString error) { publish(guard,slot,std::pair{ok,error}); };
                 slot->worker->inspectionChanged=[guard,slot](const QJsonObject& camera,bool persist) {
                     const auto version=slot->activeRevision;
                     QMetaObject::invokeMethod(qApp,[guard,slot,version,camera,persist] {
@@ -211,15 +210,12 @@ public:
     }
     ~ModelSurface() override {
         state->dead=true; ++state->revision;
-        { QMutexLocker lock(&state->mutex); state->gpuFrame.reset(); }
-        if(context())disconnect(context(),nullptr,this,nullptr);
-        if(isValid()) { makeCurrent(); blitter.destroy(); doneCurrent(); }
-        gpuFrame.reset();
+        detachSurface();
         const auto slot=state;
         renderWork([slot] {
             if(slot->worker) {
-                slot->worker->frameReady={}; slot->worker->loaded={};
-                slot->worker->gpuFrameReady={};
+                slot->worker->frameRendered={}; slot->worker->loaded={};
+                slot->worker->framePresented={};
                 slot->worker->inspectionChanged={}; slot->worker->playbackChanged={};
                 slot->worker->playbackSettingsRequested={};
                 delete slot->worker; slot->worker=nullptr;
@@ -238,7 +234,7 @@ public:
             worker.viewport(extent,scale); worker.exposed(visible);
             QString error; const bool ok=worker.reload(cfg,error);
             // First-frame publication includes import, upload and shader work.
-            // GPU work stays serial, with one bounded frame mailbox per view.
+            // GPU work and native window presentation stay on the worker.
             worker.present();
             return std::pair{ok,error};
             },version,true);
@@ -251,56 +247,56 @@ public:
             next["animation"].toInt()!=old["animation"].toInt() ||
             next["materials"].toBool(true)!=old["materials"].toBool(true) || next["textures"].toBool(true)!=old["textures"].toBool(true) ||
             next["texture_quality"].toString("original")!=old["texture_quality"].toString("original") ||
-            next["ovoxel_mode"].toString("surface")!=old["ovoxel_mode"].toString("surface");
+            next["ovoxel_mode"].toString("surface")!=old["ovoxel_mode"].toString("surface") ||
+            next["edge_topology"].toString("source")!=old["edge_topology"].toString("source");
         config=cfg;
         if(reload && statistics["engine"].toBool()) { pending=true; if(loadingChanged)loadingChanged(); }
         command([cfg](ModelWorker& worker){worker.settings(cfg);});
     }
     void fit() override { command([](ModelWorker& worker){worker.fit();}); }
+    void zoomBy(double factor) {
+        const double delta=std::log(factor)/std::log(1.0015);
+        command([delta](ModelWorker& worker){worker.scroll(delta);},true);
+    }
+    void panBy(QPointF viewportDelta) {
+        const QPointF pixels(viewportDelta.x()*width(),viewportDelta.y()*height());
+        command([pixels](ModelWorker& worker){worker.drag(pixels,true);if(worker.inspectionChanged)worker.inspectionChanged(worker.cameraState(),true);},true);
+    }
+    void setPanMode(bool enabled) {panOnly=enabled;setCursor(enabled?Qt::OpenHandCursor:Qt::ArrowCursor);}
     void resetView() override { command([](ModelWorker& worker){worker.resetView();}); }
     QJsonObject metrics() const override {
         auto result=statistics; result["loading"]=pending; result["render_worker_limit"]=1;
-        result["command_pending"]=state->pendingCommands>0 || state->renderPending || statistics["render_pending"].toBool() ||
-            (state->gpu && isExposed() && state->producedFrame>presentedSerial);
-        result["presented_frames"]=qint64(presented); result["presented_serial"]=qint64(presentedSerial);
-        result["display"]=QJsonObject{{"visible",isVisible()},{"exposed",isExposed()},{"valid",isValid()},
+        result["command_pending"]=state->pendingCommands>0 || state->renderPending || statistics["render_pending"].toBool();
+        result["presented_frames"]=qint64(state->presented.load()); result["presented_serial"]=qint64(state->presented.load());
+        result["display"]=QJsonObject{{"visible",isVisible()},{"exposed",isExposed()},{"valid",handle()!=nullptr},{"window_id",handle()?qint64(winId()):0},
             {"width",width()},{"height",height()},{"parent",parent()?parent()->objectName():QString()},
-            {"sharing",context() && state->gpu && QOpenGLContext::areSharing(context(),state->gpu->context)}};
+            {"sharing",false}};
         result["display_readbacks"]=qint64(readbacks); result["display_readback_bytes"]=qint64(readbackBytes); return result;
     }
     bool loading() const override { return pending; }
     QImage snapshot() override { return captureFrame({}); }
     QImage thumbnailSnapshot(QSize bound) override { return captureFrame(bound); }
     QImage captureFrame(QSize bound) {
-        if(!gpuFrame || !isValid())return image;
-        makeCurrent(); QImage result;
-        {
-            QMutexLocker lock(&gpuFrame->mutex); auto* f=context()->extraFunctions();
-            if(gpuFrame->ready)f->glWaitSync(gpuFrame->ready,0,GL_TIMEOUT_IGNORED);
-            GLuint target=0; f->glGenFramebuffers(1,&target); f->glBindFramebuffer(GL_FRAMEBUFFER,target);
-            f->glFramebufferTexture2D(GL_FRAMEBUFFER,GL_COLOR_ATTACHMENT0,GL_TEXTURE_2D,gpuFrame->texture,0);
-            if(f->glCheckFramebufferStatus(GL_FRAMEBUFFER)==GL_FRAMEBUFFER_COMPLETE) {
-                const auto size=bound.isValid()?gpuFrame->size.scaled(bound,Qt::KeepAspectRatio):gpuFrame->size;
-                std::unique_ptr<QOpenGLFramebufferObject> small;
-                if(size!=gpuFrame->size) {
-                    small=std::make_unique<QOpenGLFramebufferObject>(size);
-                    if(!small->isValid()) { small.reset(); f->glBindFramebuffer(GL_FRAMEBUFFER,defaultFramebufferObject()); f->glDeleteFramebuffers(1,&target); doneCurrent(); return {}; }
-                    f->glBindFramebuffer(GL_READ_FRAMEBUFFER,target); f->glBindFramebuffer(GL_DRAW_FRAMEBUFFER,small->handle());
-                    f->glBlitFramebuffer(0,0,gpuFrame->size.width(),gpuFrame->size.height(),0,0,size.width(),size.height(),GL_COLOR_BUFFER_BIT,GL_LINEAR);
-                    f->glBindFramebuffer(GL_FRAMEBUFFER,small->handle());
-                }
-                result=QImage(size,QImage::Format_RGBA8888);
-                f->glReadPixels(0,0,result.width(),result.height(),GL_RGBA,GL_UNSIGNED_BYTE,result.bits()); ++readbacks;
-                readbackBytes+=result.sizeInBytes();
-            }
-            f->glBindFramebuffer(GL_FRAMEBUFFER,defaultFramebufferObject()); f->glDeleteFramebuffers(1,&target);
-        }
-        doneCurrent();
-#if QT_VERSION >= QT_VERSION_CHECK(6,9,0)
-        return result.flipped(Qt::Vertical).convertToFormat(QImage::Format_RGB32);
-#else
-        return result.mirrored().convertToFormat(QImage::Format_RGB32);
-#endif
+        if(pending)return {};
+        QImage result; const auto slot=state;
+        QMetaObject::invokeMethod(runtime().dispatcher,[slot,bound,&result] {
+            if(!slot->worker)return;
+            try { result=bound.isValid()?slot->worker->thumbnailSnapshot(bound):slot->worker->snapshot(); }
+            catch(const std::exception& error) { qWarning("Model capture failed: %s",error.what()); }
+        },Qt::BlockingQueuedConnection);
+        if(!result.isNull()) { ++readbacks; readbackBytes+=result.sizeInBytes(); }
+        return result;
+    }
+    void requestThumbnail(QSize bound,std::function<void(QImage)> ready) override {
+        const auto slot=state;
+        // A departure capture must not make navigation wait behind another import.
+        // Keep it ahead of this scene's queued destruction without retaining a window.
+        renderWork([slot,bound,ready=std::move(ready)] {
+            QImage result;
+            if(slot->worker)try { result=slot->worker->thumbnailSnapshot(bound); }
+            catch(const std::exception& error) { qWarning("Model thumbnail failed: %s",error.what()); }
+            QMetaObject::invokeMethod(qApp,[ready,result] { ready(result); },Qt::QueuedConnection);
+        },2);
     }
     QJsonObject cameraState() const override { return statistics["camera"].toObject(); }
     QJsonObject cameraHome() const override { return home; }
@@ -322,48 +318,44 @@ public:
         return true;
     }
 protected:
-    void initializeGL() override {
-        connect(context(),&QOpenGLContext::aboutToBeDestroyed,this,[this] { makeCurrent(); blitter.destroy(); doneCurrent(); },Qt::DirectConnection);
-        if(!blitter.create())qWarning("Cannot create model display blitter");
-    }
-    void paintGL() override {
-        auto* f=context()->extraFunctions();
-        preview::bindColorFramebuffer(*context(),defaultFramebufferObject());
-        const bool light=config["settings"].toObject()["background"]=="light";
-        f->glDisable(GL_SCISSOR_TEST); f->glDisable(GL_DEPTH_TEST); f->glDisable(GL_BLEND);
-        f->glColorMask(GL_TRUE,GL_TRUE,GL_TRUE,GL_TRUE);
-        f->glClearColor(light?.8f:.075f,light?.8f:.09f,light?.8f:.115f,1); f->glClear(GL_COLOR_BUFFER_BIT);
-        if(gpuFrame && blitter.isCreated()) {
-            QMutexLocker lock(&gpuFrame->mutex);
-            if(gpuFrame->ready)f->glWaitSync(gpuFrame->ready,0,GL_TIMEOUT_IGNORED);
-            // F3D's background has transparent alpha. This viewer owns an
-            // opaque background, including on alpha-capable Wayland windows.
-            f->glColorMask(GL_TRUE,GL_TRUE,GL_TRUE,GL_FALSE);
-            blitter.bind(); blitter.blit(gpuFrame->texture,QMatrix4x4(),QOpenGLTextureBlitter::OriginBottomLeft); blitter.release();
-            f->glColorMask(GL_TRUE,GL_TRUE,GL_TRUE,GL_TRUE);
-            if(gpuFrame->consumed)f->glDeleteSync(gpuFrame->consumed);
-            gpuFrame->consumed=f->glFenceSync(GL_SYNC_GPU_COMMANDS_COMPLETE,0); f->glFlush();
-            presentedSerial=gpuFrame->serial; ++presented;
+    bool event(QEvent* event) override {
+        if(event->type()==QEvent::PlatformSurface) {
+            auto* surface=static_cast<QPlatformSurfaceEvent*>(event);
+            if(surface->surfaceEventType()==QPlatformSurfaceEvent::SurfaceAboutToBeDestroyed)detachSurface();
         }
+        return QWindow::event(event);
     }
     void resizeEvent(QResizeEvent* event) override {
-        QOpenGLWindow::resizeEvent(event); const auto extent=size(); const auto scale=devicePixelRatio();
+        QWindow::resizeEvent(event); const auto extent=size(); const auto scale=devicePixelRatio();
         command([extent,scale](ModelWorker& worker){worker.viewport(extent,scale);});
     }
-    void exposeEvent(QExposeEvent* event) override { QOpenGLWindow::exposeEvent(event); const bool shown=isExposed(); command([shown](ModelWorker& worker){worker.exposed(shown);}); }
-    void wheelEvent(QWheelEvent* event) override { const auto delta=event->angleDelta().y(); command([delta](ModelWorker& worker){worker.scroll(delta);},true); event->accept(); }
-    void mousePressEvent(QMouseEvent* event) override { last=event->position(); if(activated)activated(); requestActivate(); }
+    void exposeEvent(QExposeEvent* event) override {
+        QWindow::exposeEvent(event); const bool shown=isExposed();
+        if(state->gpu) {
+            QMutexLocker lock(&state->gpu->mutex);
+            state->gpu->window=this; state->gpu->exposed=shown;
+        }
+        command([shown](ModelWorker& worker){worker.exposed(shown);});
+    }
+    void wheelEvent(QWheelEvent* event) override { const auto delta=event->angleDelta().y()?event->angleDelta().y():event->pixelDelta().y(); const auto point=event->position(); command([delta,point](ModelWorker& worker){worker.pointer(point);worker.scroll(delta);},true); event->accept(); }
+    void mousePressEvent(QMouseEvent* event) override { last=event->position(); const auto point=last; command([point](ModelWorker& worker){worker.pointer(point);},true);setCursor(Qt::ClosedHandCursor); if(activated)activated(); requestActivate(); }
     void mouseReleaseEvent(QMouseEvent* event) override {
+        setCursor(panOnly?Qt::OpenHandCursor:Qt::ArrowCursor);
         command([](ModelWorker& worker){if(worker.inspectionChanged)worker.inspectionChanged(worker.cameraState(),true);},true); event->accept();
     }
     void mouseMoveEvent(QMouseEvent* event) override {
         const auto delta=event->position()-last; last=event->position();
         if(event->buttons()==Qt::NoButton)return;
-        const bool pan=event->buttons().testFlag(Qt::MiddleButton) || event->buttons().testFlag(Qt::RightButton) || event->modifiers().testFlag(Qt::ShiftModifier);
+        const bool pan=panOnly || event->buttons().testFlag(Qt::MiddleButton) || event->buttons().testFlag(Qt::RightButton) || event->modifiers().testFlag(Qt::ShiftModifier);
         command([delta,pan](ModelWorker& worker){worker.drag(delta,pan);},true);
     }
     void mouseDoubleClickEvent(QMouseEvent*) override { fit(); }
 private:
+    void detachSurface() {
+        if(!state->gpu)return;
+        QMutexLocker lock(&state->gpu->mutex);
+        state->gpu->exposed=false; state->gpu->window=nullptr;
+    }
     template<class Action> void command(Action action,bool motion=false) {
         post([action](ModelWorker& worker){action(worker); return std::pair{true,QString()};},state->revision,false,motion);
     }
@@ -377,65 +369,93 @@ private:
             if(slot->dead || version!=slot->revision)return;
             slot->activeRevision=version;
             if(completion)slot->queueMs=queued.nsecsElapsed()/1e6;
-            if(!slot->worker) { if(completion)publish(guard,slot,{},std::pair{false,slot->failure}); return; }
+            if(!slot->worker) { if(completion)publish(guard,slot,std::pair{false,slot->failure}); return; }
             try {
-                slot->worker->prepare();
                 const auto result=action(*slot->worker);
                 slot->renderPending=slot->worker->renderPending();
-                if(!motion)publish(guard,slot,{},completion?std::optional(result):std::nullopt);
-            } catch(const std::exception& error) { publish(guard,slot,{},std::pair{false,QString::fromUtf8(error.what())}); }
+                if(!motion)publish(guard,slot,completion?std::optional(result):std::nullopt);
+            } catch(const std::exception& error) { publish(guard,slot,std::pair{false,QString::fromUtf8(error.what())}); }
         },priority,slot.get(),false,motion,motion?std::function<void()>([guard,slot,version] {
-            if(!slot->dead && version==slot->revision)publish(guard,slot);
+            if(!slot->dead && version==slot->revision)publish(guard,slot,{},false);
         }):std::function<void()>{});
     }
-    static void publish(QPointer<ModelSurface> guard,const std::shared_ptr<ModelState>& slot,QImage frame={},std::optional<std::pair<bool,QString>> completion={},std::shared_ptr<ModelGpuFrame> gpuFrame={}) {
+    static void publish(QPointer<ModelSurface> guard,const std::shared_ptr<ModelState>& slot,std::optional<std::pair<bool,QString>> completion={},bool playbackNotification=true) {
         if(slot->dead || slot->activeRevision!=slot->revision)return;
-        QMutexLocker lock(&slot->mutex);
-        if(slot->dead)return;
-        if(slot->publishedRevision!=slot->activeRevision) {
-            slot->frame={}; slot->gpuFrame.reset(); slot->completion.reset();
+        QJsonObject metrics,home;
+        if(slot->worker) {
+            // Camera reads can commit an orbit and recalculate scene clipping.
+            // Keep native work outside the mailbox lock shared with the GUI.
+            metrics=slot->worker->metrics(); home=slot->worker->cameraHome();
+            auto timing=metrics["load_timing"].toObject(); timing["queue_ms"]=slot->queueMs;
+            metrics["load_timing"]=timing;
         }
-        if(!frame.isNull())slot->frame=std::move(frame);
-        if(gpuFrame) { slot->producedFrame=gpuFrame->serial; slot->gpuFrame=std::move(gpuFrame); }
+        QMutexLocker lock(&slot->mutex);
+        if(slot->dead || slot->activeRevision!=slot->revision)return;
+        if(slot->publishedRevision!=slot->activeRevision) {
+            slot->completion.reset(); slot->playbackNotification=false;
+        }
         if(slot->worker) {
             slot->renderPending=slot->worker->renderPending();
-            slot->metrics=slot->worker->metrics(); slot->home=slot->worker->cameraHome();
-            auto timing=slot->metrics["load_timing"].toObject(); timing["queue_ms"]=slot->queueMs;
-            slot->metrics["load_timing"]=timing;
+            slot->metrics=std::move(metrics); slot->home=std::move(home);
         }
         if(completion)slot->completion=completion;
+        slot->playbackNotification|=playbackNotification;
         slot->publishedRevision=slot->activeRevision;
         if(slot->notification)return;
         slot->notification=true;
         QMetaObject::invokeMethod(qApp,[guard,slot] {
-            QImage frame; QJsonObject metrics,home; std::optional<std::pair<bool,QString>> completion; unsigned version;
-            std::shared_ptr<ModelGpuFrame> gpuFrame;
+            QJsonObject metrics,home; std::optional<std::pair<bool,QString>> completion; unsigned version; bool playbackNotification;
             {
-                QMutexLocker lock(&slot->mutex); frame=std::move(slot->frame); metrics=slot->metrics; home=slot->home;
-                gpuFrame=std::move(slot->gpuFrame);
+                QMutexLocker lock(&slot->mutex); metrics=slot->metrics; home=slot->home;
                 completion=std::move(slot->completion); slot->completion.reset(); version=slot->publishedRevision; slot->notification=false;
+                playbackNotification=slot->playbackNotification; slot->playbackNotification=false;
             }
-            if(!guard || slot->dead || version!=slot->revision)return;
+            const auto current=[&] { return guard && !slot->dead && version==slot->revision; };
+            if(!current())return;
             guard->statistics=metrics; guard->home=home;
-            if(!frame.isNull()) { guard->image=std::move(frame); guard->update(); }
-            if(gpuFrame) { guard->gpuFrame=std::move(gpuFrame); guard->update(); }
+            const auto presented=slot->presented.load();
+            if(presented!=guard->notifiedPresentation) {
+                guard->notifiedPresentation=presented;
+                const auto callback=guard->framePresented;
+                if(callback)callback();
+            }
+            // Notifications may navigate away or reload the view synchronously.
+            if(!current())return;
             if(completion) {
                 guard->pending=false;
-                if(guard->loaded)guard->loaded(completion->first,completion->second);
+                const auto callback=guard->loaded;
+                if(callback)callback(completion->first,completion->second);
             }
-            if(guard->playbackChanged)guard->playbackChanged();
+            if(current() && playbackNotification) {
+                const auto callback=guard->playbackChanged;
+                if(callback)callback();
+            }
         },Qt::QueuedConnection);
     }
     std::shared_ptr<ModelState> state;
     LoadedCallback loaded;
     QJsonObject config,statistics,home;
-    QImage image;
-    std::shared_ptr<ModelGpuFrame> gpuFrame;
-    QOpenGLTextureBlitter blitter;
-    quint64 presentedSerial=0,presented=0,readbacks=0,readbackBytes=0;
+    quint64 notifiedPresentation=0,readbacks=0,readbackBytes=0;
     QPointF last;
     bool pending=false;
+    bool panOnly=false;
 };
+}
+bool preview::zoomView(PreviewView* view,double factor) {
+    if(!std::isfinite(factor) || factor<0.1 || factor>10)return false;
+    if(auto* image=dynamic_cast<ImageView*>(view)){image->zoomBy(factor,QPointF(image->width()/2.0,image->height()/2.0));return true;}
+    if(auto* model=dynamic_cast<ModelSurface*>(view)){model->zoomBy(factor);return true;}
+    return false;
+}
+bool preview::panView(PreviewView* view,QPointF delta) {
+    if(!std::isfinite(delta.x()) || !std::isfinite(delta.y()) || std::abs(delta.x())>1 || std::abs(delta.y())>1)return false;
+    if(auto* image=dynamic_cast<ImageView*>(view)){image->panBy(delta);return true;}
+    if(auto* model=dynamic_cast<ModelSurface*>(view)){model->panBy(delta);return true;}
+    return false;
+}
+bool preview::setPanMode(PreviewView* view,bool enabled) {
+    if(auto* model=dynamic_cast<ModelSurface*>(view)){model->setPanMode(enabled);return true;}
+    return dynamic_cast<ImageView*>(view)!=nullptr;
 }
 ModelHandle createModel(QJsonObject config,QWidget* parent,LoadedCallback loaded,InspectionCallback changed) {
     auto* surface=new ModelSurface(std::move(config),parent,std::move(loaded),std::move(changed));

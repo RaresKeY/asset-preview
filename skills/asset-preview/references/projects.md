@@ -1,9 +1,23 @@
 # Projects and current previews
 
-Use one stable project per owning project or independently followed workstream.
-Create it as work starts, or let the first send create it. Keep related model,
-image, material and media views together; their preview IDs still identify
-individual outputs. All commands below stay in the background.
+Use one stable project for the wider owning project, with separate groups/galleries
+for its individual parts. Create it as work starts, or let the first send create
+it. Keep related model, image, material and media views within their part's group;
+preview IDs still identify individual outputs. All registrations stay in the background.
+
+```sh
+preview="${ASSET_PREVIEW_PROJECT:-$HOME/workspace/asset-preview}/bin/asset-preview"
+"$preview" add /absolute/game/exports/chair.glb --id chair-model --project my-game --project-label "My Game" --group furniture --group-label "Furniture"
+"$preview" add /absolute/game/exports/hero.png --id hero --project my-game --group characters --group-label "Characters"
+# Or put an existing gallery under its wider project:
+"$preview" project create chair --parent my-game --label "Chair"
+```
+
+`--group` defaults its parent to the owning checkout when `--project` is omitted.
+Group IDs are scoped to their project, so two projects can both have a `props`
+gallery. `project list --json` reports their effective IDs and `parent` relationship.
+Without `--group`, existing `--project` usage still registers directly in that
+project. The following remains useful for one small standalone asset:
 
 ```sh
 preview="${ASSET_PREVIEW_PROJECT:-$HOME/workspace/asset-preview}/bin/asset-preview"
@@ -39,7 +53,11 @@ finite generator attached to its intended view; choosing a different current vie
 may suspend it when its old pane becomes hidden.
 
 In **Overview**, **Group by project** toggles grouping and the project selector
-filters the visible thumbnails. **Projects** (Ctrl+9) shows one fully controllable
+filters the visible thumbnails. Projects have wider headers with indented group
+headers below. Choosing a project includes all its groups; choosing a group shows
+only that gallery. The folder explorer nests project → group → preview.
+Right-click a group heading or explorer folder for **Move to Project** (including
+**New Project…**) or **Move Out of Project**. **Projects** (Ctrl+9) shows one fully controllable
 current preview per project, with an in-pane dropdown for switching members.
 Auto grid grows with the project count; 2×2, 3×3 and 4×4 provide explicit density.
 Narrow windows reduce columns, and overflow scrolls. Only panes intersecting the
@@ -54,9 +72,22 @@ window placement and focus remain in place. Hiding/minimizing suspends all panes
 Read `status --json`: `projects[].current`, membership, active flags and successful
 revisions establish what was chosen and what actually loaded.
 
-Projects/current choices, grouping/filtering and grid density persist across
-restarts. Removing a current preview falls back to the last registered surviving
-member; removing the last member leaves an empty project. `project remove ID`
-removes an empty project only. Close all removes registrations while retaining
-project groups. Reconnecting without a socket-level `entry.project` retains an
+Populated projects/current choices, grouping/filtering and grid density persist
+across restarts. Empty waiting groups and their filters last for the creating
+session. Removing a current preview falls back to the last registered surviving
+member; closing or moving the last member automatically removes the group.
+`project remove ID` removes a waiting group only. Close all clears registrations
+and groups; undo restores a preview's project name and position. Legacy empty
+groups are pruned at startup. Reconnecting without a socket-level `entry.project` retains an
 existing registration's membership; an explicit empty string removes membership.
+
+For a collection browser with one full preview, use
+`layout gallery --project PROJECT` (Ctrl+8 / View > Image Gallery). It shows a
+compact left thumbnail grid and one selected asset on the right, with a resizable
+divider. Click thumbnails to select in place; arrows follow filtered order.
+Organize unique assets and method comparisons into separate named groups beneath their owning project;
+register one representative per subject in the former and comparison images in
+the latter. The project selector switches collections. Only the selected ordinary
+preview loads; thumbnails reuse the bounded cache. As with other layout commands,
+choose Gallery only when organizing/opening is requested. Verify `layout:gallery`,
+`presentation.gallery.visible`, one active selected member and successful loads.

@@ -31,6 +31,23 @@ cache was tested and removed because completed-load results were inconsistent.
 The retained direct project-count accessor removes unnecessary geometry JSON
 construction without a standalone timing claim.
 
+## November native preview measurements
+
+These measurements use the source build with Qt 6.12, F3D 4 and an NVIDIA
+GeForce RTX 2080 Ti under headless Gamescope. Timings cover each fixture and
+its stated measurement boundary.
+
+| Workload | Observed result |
+|---|---|
+| Visible 3D reconnect after an external buffer changes | Median completed readiness fell from 94.2 ms to 56.5 ms across two runs per build, with source writes excluded. The existing view preserves its camera and last good scene on failure. |
+| Overview diagnostics with 256 registered images | Median ping fell from 0.172 ms to 0.134 ms, and median full-list time fell from 6.433 ms to 5.831 ms. Single-view ping was slower in the measured runs. |
+| Rendered Markdown with 16 images exceeding the decoded cache budget | Median resize fell from about 540 ms to 7 ms across matched runs. Raster reads during resize fell from 1,456 to zero and twelve matched captures retained exact pixels. |
+
+Reproduce the underlying checks with `tools/profile_responsiveness.py`,
+`tools/profile_crash_context.sh`, `tools/profile_markdown.cpp`, and the relevant
+headless lanes in [verification](../evidence/verification.md). Timing variance,
+format support and filesystem/driver caches affect results.
+
 ## Bounded parallel thumbnails (2026-10-28)
 
 The window-owned scheduler uses two low-priority image slots and one independent

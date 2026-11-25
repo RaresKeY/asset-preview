@@ -14,7 +14,7 @@ constexpr qint64 ReadLimit=32*preview::PreviewCache::MiB;
 QString fingerprint(const QStringList& paths) {
     QByteArray identity;
     for(const auto& path:paths)identity+=path.toUtf8()+'\0'+preview::sourceCacheKey("preload-dependency-v1",path).toUtf8()+'\0';
-    return QString::fromLatin1(QCryptographicHash::hash(identity,QCryptographicHash::Sha256).toHex());
+    return QString::fromLatin1(preview::sha256(identity).toHex());
 }
 preview::CachedPayload decode(const QString& path,const std::atomic_bool& cancelled) {
     if (cancelled || QFileInfo(path).size()>16*preview::PreviewCache::MiB) return {};

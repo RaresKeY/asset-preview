@@ -15,6 +15,16 @@ output disabled. The Wayland lane checks actual compositor pixels against captur
 The service restores `LC_NUMERIC=C` after Qt startup so desktop numeric locales
 such as `en_US.UTF-8` do not make `mpv_create()` reject audio/video playback.
 
+Overview and Gallery use a canonical frame near the midpoint, with an opening
+frame fallback for unknown duration or an empty seek. This is independent of
+current playback, including the selected paused Gallery video. The shared
+[thumbnail queue](cache-overview.md) runs installed FFmpeg tools in one finite,
+silent, low-priority child group; it never opens a player or loads libmpv into an
+Overview-only service. Bounds, source freshness, disk reuse, cancellation and
+missing-tool placeholders follow that spec. `tools/test.sh content-thumbnails-gpu`
+checks real midpoint pixels, selected-item regeneration and decoder cancellation
+on hide or owning-server death.
+
 Playback defaults to unpaused, muted, looping. A native bottom overlay provides
 play/pause, restart, elapsed/total time, a seekable timeline, mute, loop and fullscreen.
 Video uses a full-width 3 px teal timeline with a round handle above 40 px dark

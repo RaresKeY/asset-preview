@@ -1,4 +1,28 @@
-# Verification — October 5, 2026
+# Verification
+
+## November source update
+
+- A fresh Release build from a Git archive passed on the NVIDIA GeForce RTX
+  2080 Ti host. The source checks covered the paired-image shortcut and saved
+  registry migration, Gallery, file previews, selection, Wayland, backend
+  compatibility, packaged entry points and rebuild activation. The activation
+  fixture expects the staged executable and modules from the build wrapper.
+- Native NVIDIA Gamescope checks covered Gallery and project hierarchy, file and
+  video thumbnails, preview navigation and native input, image and model
+  publication, animation and video playback, and selection. Repeated hide/reopen
+  and failed replacements preserved the expected view state and last good content.
+- Rendered Markdown checks covered source parity, search and zoom, local images,
+  external resource rejection and bounded image decoding. File and diff previews
+  also passed native interaction and reload checks.
+- Selection checks covered inline raster and model actions, variant rows and
+  scrolling, preserving decisions across presentation changes, stale and corrupt
+  results, and live reload.
+- Native Wayland checks covered fractional-scale compositor output, rendering and
+  mixed-grid media. Native F3D/VTK checks covered static GLB/glTF parts and cuts,
+  original data preservation and reload. The optional real-model inspection
+  test was skipped in the final focused inspection suite.
+- Older 0.0.2 packages have their own [release validation](releases/0.0.2/validation.json).
+  The November source update has no corresponding downloadable package.
 
 ## Hover targeting — October 14, 2026
 

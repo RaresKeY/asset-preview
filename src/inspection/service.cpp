@@ -42,7 +42,7 @@ void checkReviewIdentity(const Entry& entry,const QJsonObject& document) {
 }
 QJsonObject viewState(PreviewView* view,const QJsonObject& state) {
     QJsonObject result;
-    for (const auto& key:{"cuts","hidden","selected","selection","revision","dependency_revision","orthographic"}) if (state.contains(key)) result[key]=state[key];
+    for (const auto& key:{"cuts","hidden","selected","selection","revision","dependency_revision","orthographic","display"}) if (state.contains(key)) result[key]=state[key];
     if (view) result["camera"]=view->cameraState();
     return result;
 }
@@ -206,7 +206,7 @@ QJsonObject Service::inspectionRequest(const QJsonObject& request) {
     }
     if (!enabled(*entry) || inspectionId!=id || !entry->active || !entry->view)
         return failed("Open this model in a visible Inspect 3D view first");
-    const QSet<QString> actions{"parts","select","pick","hide","show","isolate","restore","cut","apply"};
+    const QSet<QString> actions{"parts","select","pick","hide","show","isolate","restore","cut","apply","display"};
     if (!actions.contains(action)) return failed("Unknown inspection action");
     QString error;
     const auto previousConfig=entry->config;
@@ -385,6 +385,65 @@ bool PreviewWindow::commitInspectionControls() {
     return service->inspectionId.isEmpty() || !inspectionPanel || inspectionPanel->commitPendingCuts();
 }
 
+QJsonObject PreviewWindow::inspectionDraft() const { return inspectionPanel?inspectionPanel->restartState():service->restartDraft; }
+void PreviewWindow::restoreInspectionDraft(const QJsonObject& state) {
+    if(inspectionPanel) inspectionPanel->restoreRestartState(state);
+    else service->restartDraft=state;
+}
+void PreviewWindow::restoreWindowState(const QJsonObject& state) {
+    if(state["fullscreen"].toBool()) { fullscreenFocus=state["single_preview"].toBool(); showFullScreen(); }
+    else if(state["maximized"].toBool()) showMaximized();
+    if(state["minimized"].toBool()) showMinimized();
+}
+QJsonObject Service::restartRequest(const QJsonObject& request) {
+    const auto action=request["action"].toString();
+    if(action=="capture") {
+        if(window && !window->commitInspectionControls()) return failed("Could not commit inspection controls before restart");
+        QJsonArray views;
+        for(const auto& id:order) {
+            const auto entry=entries[id];
+            auto view=entry->inspectionView;
+            if(entry->active && entry->view && inspectionId==id) {
+                QString error; const auto state=entry->view->inspect({{"action","state"}},error);
+                if(error.isEmpty() && state["loaded"].toBool()) view=viewState(entry->view,state);
+            }
+            if(!view.isEmpty()) views.append(QJsonObject{{"id",id},{"path",entry->config["path"]},{"view",view},{"tool",entry->inspectionTool}});
+        }
+        QJsonObject presentation;
+        const auto current=window?window->presentation():QJsonObject{};
+        for(const auto* key:{"active","fullscreen","single_preview"}) presentation[key]=current[key];
+        presentation["visible"]=bool(window && window->isVisible());
+        presentation["minimized"]=bool(window && window->isMinimized());
+        presentation["maximized"]=bool(window && window->isMaximized());
+        QJsonObject session{{"views",views},{"window",presentation},{"panel",window?window->inspectionDraft():restartDraft}};
+        // Keep capture replay below the existing one-MiB request bound. Refuse
+        // before stopping rather than truncate an unsaved draft or saved view.
+        if(QJsonDocument(session).toJson(QJsonDocument::Compact).size()>768*1024) return failed("Restart session exceeds the replay limit; current service retained");
+        return okay({{"session",session}});
+    }
+    if(action!="restore" || !request["session"].isObject()) return failed("Restart state requires capture or restore with a session object");
+    const auto session=request["session"].toObject();
+    if(!session["views"].isArray() || !session["window"].isObject() || !session["panel"].isObject() ||
+       QJsonDocument(session).toJson(QJsonDocument::Compact).size()>768*1024) return failed("Invalid restart session");
+    for(const auto& value:session["views"].toArray()) {
+        const auto saved=value.toObject(); const auto entry=entries.value(saved["id"].toString());
+        if(!entry || saved["path"]!=entry->config["path"] || !saved["view"].isObject() ||
+           (saved["tool"]!="parts" && saved["tool"]!="cuts")) return failed("Restart view no longer matches its registered model");
+    }
+    for(const auto& value:session["views"].toArray()) {
+        const auto saved=value.toObject(); auto entry=entries[saved["id"].toString()];
+        entry->inspectionView=saved["view"].toObject(); entry->inspectionTool=saved["tool"].toString();
+    }
+    restartDraft=session["panel"].toObject();
+    const auto presentation=session["window"].toObject();
+    if(presentation["visible"].toBool()) {
+        if(!window) window=std::make_unique<PreviewWindow>(this);
+        window->present(presentation["active"].toBool()); window->restoreWindowState(presentation);
+        reconcile();
+    }
+    return okay();
+}
+
 void PreviewWindow::refreshInspection() {
     const auto id=service->inspectionId;
     const bool visible=!id.isEmpty() && service->entries.contains(id);
@@ -403,6 +462,7 @@ void PreviewWindow::refreshInspection() {
     }
     inspectionPanel->setState(id,service->inspectionState(id));
     inspectionPanel->setToolMode(service->entries[id]->inspectionTool);
+    if(!service->restartDraft.isEmpty()) { inspectionPanel->restoreRestartState(service->restartDraft); service->restartDraft={}; }
     inspectionDock->setWindowTitle(service->entries[id]->inspectionTool=="cuts"?"Cut mode":"Part mode");
     inspectionDock->show();
 }

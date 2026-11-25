@@ -92,6 +92,12 @@ int main(int argc,char** argv) {
         until([&] { return !queue.metrics()["worker_active"].toBool(); });
         require(!cache.peekThumbnail("after-active-view").isNull(),"Navigation did not resume after explicit clearing");
         require(queue.metrics()["image_worker_limit"].toInt()==2 && queue.metrics()["render_worker_limit"].toInt()==1,"Worker bounds changed");
+        queue.demand({}, {}, {}, false,false);cache.clear(true);
+        queue.setItems({{"document",path,"file"},{"clip",path,"video"}});
+        identities["document"]="document-content";identities["clip"]="video-content";
+        queue.demand({"document","clip"}, {}, {}, true,false);
+        until([&] { return !queue.metrics()["worker_active"].toBool(); });
+        require(!cache.peekThumbnail("document-content").isNull() && !cache.peekThumbnail("video-content").isNull(),"File/video demand did not use the finite serial content lane");
         std::cout<<"Parallel image/model lanes, images first, deduplication, quiet warming, foreground preemption, hidden cancellation, freshness and clear/resume passed\n";
     } catch(const std::exception& error) { std::cerr<<error.what()<<'\n'; return 1; }
 }

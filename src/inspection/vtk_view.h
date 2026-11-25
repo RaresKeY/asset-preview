@@ -2,6 +2,7 @@
 #include "../viewer.h"
 #include <QOpenGLWindow>
 #include <memory>
+class vtkActor;
 
 class InspectionVtkView final : public QOpenGLWindow, public PreviewView {
 public:
@@ -43,6 +44,9 @@ private:
     void applyVisibility();
     void applyCuts();
     void applySelection();
+    void styleActor(vtkActor*);
+    void applyDisplay(bool rebuildCaps=false);
+    void applyCaps(bool geometry=true);
     QJsonObject pick(double,double,QString&);
     bool applyView(const QJsonObject&,QString&);
     QJsonObject config, retainedView, selectedTarget;

@@ -30,15 +30,23 @@ ProjectGrid::ProjectGrid(QWidget* parent):QScrollArea(parent),content(new QWidge
     connect(verticalScrollBar(),&QScrollBar::valueChanged,this,[this] { schedule(); });
 }
 void ProjectGrid::detach(Slot& slot) {
-    if (!slot.card) return;
-    slot.body->removeWidget(slot.card); slot.card->hide(); slot.card->setParent(parentWidget()); slot.card.clear();
+    const auto card=slot.card;
+    slot.card.clear();
+    if (!card) return;
+    slot.body->removeWidget(card); card->hide();
 }
 void ProjectGrid::setProjects(const QJsonArray& items,int requested) {
     QStringList next;
     for (const auto& value:items) next.append(value.toObject()["id"].toString());
     for (auto it=panesById.begin();it!=panesById.end();) {
         if (next.contains(it.key())) { ++it; continue; }
-        detach(it.value()); delete it->pane; it=panesById.erase(it);
+        const auto card=it->card;
+        detach(it.value());
+        // Only move a retired card when its pane is actually being deleted.
+        // Reparenting an embedded GL image during an ordinary member switch
+        // can recreate native ancestors and hide the scroll area's content.
+        if (card) card->setParent(parentWidget());
+        delete it->pane; it=panesById.erase(it);
     }
     order=next; density=requested;
     for (const auto& value:items) {
@@ -119,9 +127,14 @@ QStringList ProjectGrid::visibleIds() const {
 }
 QString ProjectGrid::adjacentHovered(int delta) const {
     if (!isVisible()) return {};
-    const auto position=viewport()->mapFromGlobal(QCursor::pos());
+    // Native scroll descendants can report a zero global origin on Qt/X11.
+    // Use the stable top-level mapping and the same widget-tree offsets used
+    // by describe(), so toolbar points cannot target the first project pane.
+    const auto* top=window();
+    const auto windowPosition=top->mapFromGlobal(QCursor::pos());
+    const auto position=windowPosition-viewport()->mapTo(top,QPoint());
     if (!viewport()->rect().contains(position)) return {};
-    const auto point=content->mapFrom(viewport(),position);
+    const auto point=windowPosition-content->mapTo(top,QPoint());
     for (const auto& id:order) {
         const auto& slot=panesById[id];
         if (id.isEmpty() || !slot.pane->geometry().contains(point)) continue;
@@ -134,6 +147,7 @@ QString ProjectGrid::adjacentHovered(int delta) const {
 void ProjectGrid::attach(const QString& id,QWidget* card) {
     for (auto& slot:panesById) if (slot.current==id) {
         if (slot.card!=card || card->parentWidget()!=slot.pane) { detach(slot); slot.card=card; slot.body->addWidget(card,1); }
+        static_cast<LoadingLabel*>(slot.empty)->setLoading(false);
         slot.empty->hide(); card->show(); slot.body->activate(); return;
     }
 }

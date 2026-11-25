@@ -1,5 +1,6 @@
 """Native Wayland hardware checks, without DISPLAY. Run tools/test.sh wayland-gpu."""
 import json
+import ctypes
 import os
 from pathlib import Path
 import shutil
@@ -18,6 +19,7 @@ from inspection_integration import capture_pixels, png_rgb
 class WaylandIntegration(unittest.TestCase):
     def setUp(self):
         self.assertTrue(os.environ.get('WAYLAND_DISPLAY'), 'Use tools/test.sh wayland-gpu')
+        self.outer_display = os.environ.get('DISPLAY')
         temporary = tempfile.TemporaryDirectory(prefix='preview-wayland-')
         self.addCleanup(temporary.cleanup)
         self.root = Path(temporary.name)
@@ -46,6 +48,7 @@ class WaylandIntegration(unittest.TestCase):
         state = client.rpc({'method': 'ping'})
         self.pid = state['pid']
         self.assertEqual(state['platform'], 'wayland')
+        client.rpc({'method': 'layout', 'layout': 'single'})
         maps = Path(f'/proc/{self.pid}/maps').read_text()
         self.assertIn('/platforms/libqwayland.so', maps)
         self.assertNotIn('/platforms/libqxcb.so', maps)
@@ -76,9 +79,9 @@ class WaylandIntegration(unittest.TestCase):
         return pixels
 
     def compositor_capture(self, key, label):
-        # The service's capture composites the source texture into QWidget::grab.
-        # Only a compositor screenshot catches display draw-buffer, alpha or
-        # stacking failures when the source texture itself is correct.
+        # The service composites per-view captures into QWidget::grab. Only a
+        # compositor screenshot catches native draw-buffer, alpha or stacking
+        # failures when the captured scene itself is correct.
         self.assertTrue(shutil.which('spectacle'), 'Wayland display checks require installed Spectacle')
         eventually(lambda: not row(key)['metrics'].get('command_pending'), timeout=30)
         path = self.output / f'{label}-compositor.png'
@@ -102,6 +105,54 @@ class WaylandIntegration(unittest.TestCase):
             'display_removed': 'DISPLAY' not in os.environ, 'memory': memory(self.pid), **fields,
         }, indent=2) + '\n')
 
+    def test_comparison_picker(self):
+        # Inject only into the outer X server of tools/wayland-session.py's
+        # private headless compositor. The application remains Wayland-only.
+        self.assertTrue(self.outer_display)
+        x=ctypes.CDLL('libX11.so.6');xt=ctypes.CDLL('libXtst.so.6');pointer=ctypes.c_void_p
+        x.XOpenDisplay.argtypes=[ctypes.c_char_p];x.XOpenDisplay.restype=pointer
+        x.XCloseDisplay.argtypes=[pointer];x.XFlush.argtypes=[pointer]
+        x.XStringToKeysym.argtypes=[ctypes.c_char_p];x.XStringToKeysym.restype=ctypes.c_ulong
+        x.XKeysymToKeycode.argtypes=[pointer,ctypes.c_ulong];x.XKeysymToKeycode.restype=ctypes.c_uint
+        xt.XTestFakeKeyEvent.argtypes=[pointer,ctypes.c_uint,ctypes.c_int,ctypes.c_ulong]
+        display=x.XOpenDisplay(self.outer_display.encode());self.assertTrue(display)
+        self.addCleanup(x.XCloseDisplay,display)
+        def key(name,pressed):xt.XTestFakeKeyEvent(display,x.XKeysymToKeycode(display,x.XStringToKeysym(name.encode())),pressed,0)
+        def press(name):
+            key(name,1);key(name,0);x.XFlush(display);time.sleep(.05)
+        def picker():return client.rpc({'method':'list'})['presentation']['comparison_picker']
+        def open_picker():
+            key('Alt_L',1);press('v');key('Alt_L',0);x.XFlush(display);time.sleep(.15);press('c')
+            return eventually(lambda:picker() if picker()['visible'] else None)
+        colors={}
+        for i in range(4):
+            path=self.root/f'choice-{i}.png';color=(40+i*45,90+i*15,190-i*25);png(path,color)
+            self.add(f'choice-{i}',path,label='Source' if i==0 else f'Choice {i}')
+            if i:colors[f'choice-{i}']=color
+        client.rpc({'method':'select','id':'choice-0'});client.rpc({'method':'show'})
+        eventually(lambda:row('choice-0').get('metrics',{}).get('loads'));time.sleep(.2)
+        open_picker()
+        p=eventually(lambda:picker() if all(t['thumbnail_ready'] for t in picker()['grid']['tiles']) else None)
+        self.assertEqual(p['grid']['items'],3);self.assertEqual(client.rpc({'method':'list'})['active'],1)
+        reference=self.root/'picker-reference.png';client.rpc({'method':'capture','path':str(reference)})
+        shutil.copy2(reference,self.output/reference.name)
+        actual=self.output/'picker-compositor.png'
+        subprocess.run(['spectacle','-b','-n','-a','-e','-S','-o',str(actual)],check=True,capture_output=True,timeout=15)
+        width,height,rows=png_rgb(actual)
+        self.assertEqual((width,height),(p['width'],p['height']))
+        for tile in p['grid']['tiles']:
+            px,py=tile['x']+tile['width']//2,tile['y']+50
+            observed=tuple(rows[py][px*3:px*3+3])
+            self.assertLessEqual(max(abs(a-b) for a,b in zip(observed,colors[tile['id']])),3)
+            self.assertEqual(png_pixel(reference,px,py),colors[tile['id']])
+        press('Right');press('Return')
+        eventually(lambda:client.rpc({'method':'list'})['comparison']==['choice-0','choice-2'])
+        eventually(lambda:not picker()['visible'])
+        self.assertEqual(client.rpc({'method':'list'})['active'],2)
+        open_picker();press('Escape');eventually(lambda:not picker()['visible'])
+        self.assertEqual(client.rpc({'method':'list'})['comparison'],['choice-0','choice-2'])
+        self.receipt(checks=['native Wayland keyboard picker','actual compositor thumbnail pixels','comparison selection','Escape preserves pair'])
+
     def test_images_models_and_materials(self):
         image = self.root / 'image.png'
         png(image, (220, 70, 80, 255))
@@ -121,7 +172,7 @@ class WaylandIntegration(unittest.TestCase):
         client.rpc({'method': 'select', 'id': 'model'})
         eventually(lambda: row('model').get('metrics', {}).get('engine'), timeout=30)
         renderer = self.hardware('model')
-        self.assertEqual(row('model')['metrics']['frame_transport'], 'shared_gpu_texture')
+        self.assertEqual(row('model')['metrics']['frame_transport'], 'native_window')
         self.assertEqual(row('model')['metrics']['display_readbacks'], 0)
         self.compositor_capture('model', 'model-initial')
         before = self.capture('model', 'model')

@@ -15,6 +15,11 @@ widgets in the top-level raster backing store. Projects permits the native
 ancestor chain needed for embedded GL scroll clipping only inside its own branch.
 This avoids the fractional-scale resampling/stale child-surface flush observed
 on Qt 6.12 Wayland while preserving native GL presentation and overlay input.
+Native Wayland/X11 windows create a hidden OpenGL-widget composition anchor
+before their first show. This keeps the native window stable when image GPU
+displays are added or removed during Gallery/Overview navigation; it owns no
+image and schedules no frames. Image framebuffers join Qt's composition while
+chrome and Overview retain their ordinary widget painting and ancestry.
 
 Native model, video and inspection painting share explicit framebuffer/color
 buffer selection in `gl_framebuffer.h`. Shared/EGL contexts may initially select
@@ -43,6 +48,18 @@ detached cards, including Qt's synchronous synthetic enter/leave/focus events
 during close. This also applies to inspection backend replacement. Native input
 tests click the close button while the pointer remains over missing, failed and
 loaded videos in single and grid layouts, then verify the service stays alive.
+The close button has the accessible name `Close preview`; `overlays.close`
+reports its actual bounds so native checks do not accidentally click an adjacent
+selection checkbox. Window presentation diagnostics expose native activation,
+exposure and position. X11 input fixtures await Qt's window state before
+injecting input after a hide/reopen or native-child change.
+On explicit Show, a rapid reopen may find the native QWindow still focused while
+Qt Widgets has cleared its active-window metadata. Presentation restores that
+metadata only when native focus already belongs to this window, no widget window
+is active, and no popup or modal dialog owns input. Ordinary activation still
+uses `activateWindow()`. This finite compatibility repair uses Qt's deprecated
+public metadata setter because another native activation request does not repair
+the missing widget state; it adds no focus polling or delayed focus grab.
 Hidden/minimized/closed windows activate none. Unchanged visible entries are retained
 when unrelated registrations change. Navigation destroys prior off-page views;
 camera angle, focal point/pan, view angle and orthographic scale persist per
@@ -81,9 +98,11 @@ also moves to its surface so a previously focused video cannot consume a model's
 M shortcut. Cards have no selection tint or border change. Mouse entry/movement
 drives targeting, with no polling timer. Outside the previews, the last active
 preview remains the target for menus and keyboard use. Open popups/dialogs and
-mouse drags freeze hover targeting; explicit clicks and keyboard/CLI selection
-still work. Reflow beneath a stationary pointer does not override keyboard/CLI
-selection; movement, wheel input or a click resumes mouse targeting. Accessible
+mouse drags freeze hover targeting. A focused text-entry field, including file
+Find, also blocks mouse entry/movement from changing target or focus; explicit
+clicks, scrolling and keyboard/CLI selection still work. Reflow beneath a
+stationary pointer does not override keyboard/CLI selection; movement, wheel
+input or a click resumes mouse targeting when text entry is not focused. Accessible
 card names identify the active preview.
 Clicking a native preview surface transfers keyboard focus back from its
 playback controls even if the pointer has stayed at the same position.
@@ -119,20 +138,32 @@ View > Camera Views supports front/back/right/left/top/bottom/isometric, with
 and distance. Exact top/bottom views survive reload; horizon-locked dragging
 still clamps pitch when orbit resumes. F fits; Ctrl+Home resets the camera.
 
-View > Compare With activates exactly two model/material previews side by side.
-Sync camera links orbit, pan, zoom and camera presets in either direction, with
+View > Compare With opens a thumbnail/name grid of compatible registrations,
+with name/path/project search, keyboard navigation and click/Enter selection.
+It captures the original source ID, so concurrent ordinary selection does not
+change what will be compared. Registration changes update the choices; removing
+the source or hiding the main window closes the picker. Escape/Cancel preserves
+an existing pair or ordinary layout. Choosing a target activates exactly two
+images or two model/material previews side by side. Window captures include the
+picker while it is open.
+Image pairs use Sync pan / zoom to link Fit-relative zoom and normalized pan;
+filtering and backgrounds remain independent. See [Images](images.md).
+For 3D pairs, Sync camera links orbit, pan, zoom and camera presets in either direction, with
 translation and distance scaled around each scene's square-fit reference center.
 Projection and up-axis/horizon conventions follow the source camera. Sync can be
 disabled for independent views. Comparison and sync preference survive restart;
 closing a compared preview or choosing a normal layout ends comparison.
 
-Cards allocate the full surface to content, with separate native overlays:
+Spatial and media cards allocate the full surface to content, with separate native overlays:
 text-width title at top left, fit/reset/options/remove/selection checkbox at top right for 3D views, text-width status
 below the title, and a triangle count at bottom left for loaded 3D views. The
 single global toolbar owns navigation, grid size and Close all / Close selected. Live status, waiting/errors/building and enabled
 triangle counts stay visible. Cards use 6-pixel insets and a 34-pixel title/control row. The main toolbar uses
 32-pixel controls. Narrow cards move fit/reset/remove into the menu. Fit preserves angle and fits the bounds;
 Reset restores the initial three-quarter angle, framing and zoom. Long title/status text elides within the card.
+File cards use an attached compact toolbar with no Fit action, duplicate title
+or healthy status badge. [Presentation by type](presentation.md) lists each
+kind's information, controls and conditional details.
 Elided titles retain full title/path tooltips. Only overlays intercept pointer
 input; central content remains available for orbit/pan. Captures composite their
 small native overlays after model GPU readback, with no recurring copy loop.
@@ -164,8 +195,8 @@ QPainter fit/zoom/pan and checker/dark/light/pixel options. Models and material
 samples use F3D native/Assimp readers on the shared render worker described in
 [Models](models.md). Material sample geometry has normals and explicitly
 triangulated UV faces. Each scene renders through F3D's external-context API
-into shared GPU textures on the worker; a native QOpenGLWindow displays the
-latest completed texture with GPU fence synchronization. Only requested captures
+directly into an embedded native QWindow on the worker, which swaps its buffers.
+The GUI receives metadata notifications without image frames. Only requested captures
 and small departure thumbnails read pixels back to the CPU. Static scenes have
 no recurring frame copy/render loop. Component inspection and video also use
 embedded QOpenGLWindow surfaces. Startup explicitly
@@ -219,8 +250,12 @@ and last-good behavior. Authored vertex-color neutralization is not verified.
 
 Triangle counts default visible and can be toggled per model/material via options
 or the boolean `triangles` setting without reloading geometry. Window shortcuts
-E toggles edges/lines and M toggles the triangle-count overlay for the targeted
-model/material preview; holding a key does not repeatedly toggle it. The video
+E toggles edges/lines, M toggles the triangle-count overlay, and 5 or Numpad 5
+toggles perspective/orthographic for the targeted model/material preview,
+including Parts/Cuts. Numpad 5 works with Num Lock on or off. Projection changes
+use the existing settings path, preserving camera pose without reimporting and
+remembering the choice as the 3D default. Perspective is the built-in default.
+Holding a key does not repeatedly toggle it. The video
 surface retains M for mute. The badge abbreviates thousands, millions and billions
 with `K`, `M` and `B`, rounded to at most one decimal with no trailing zero;
 rounding promotes to the next suffix when needed. Counts below 1,000 remain exact.
@@ -240,6 +275,13 @@ metadata display `Tris —` with an explanatory tooltip. Counts describe source
 primitives, including degenerate strip/fan triangles, rather than GPU frame work.
 Models expose nullable `metrics.triangles`; entry `overlays` reports ephemeral
 name/control/status/count geometry and visibility for isolated UI checks.
+Animated-card reflow assigns the native count badge its final rectangle once,
+above the animation transport. It never moves through the static bottom-left
+position during readout updates; static-model placement and M toggling retain
+their existing behavior. The animation GPU badge regression watches actual
+native-window configuration events while rendered frames advance.
+Readout-only layout requests retain existing native stacking instead of cycling
+every overlay above its siblings; structural/show/resize updates still restack.
 
 Static and paused views repaint only after file changes, input, settings, exposure
 or resize, plus one waveform-completion update for audio. Playing videos additionally repaint on libmpv frame notifications. Playing
@@ -343,6 +385,13 @@ camera state and retain the existing generator connection.
 
 ## Shared window controls and captures
 
+Read-only text/code, rendered Markdown and file diffs use the same visible-card
+lifecycle. File controls use an attached compact toolbar; file cards suppress
+duplicate title and healthy refresh overlays and expose no Fit action. Both
+comparison inputs are watched; unsuccessful saves keep
+the last-good document. File > Compare Files opens a selected pair. See
+[Files and diffs](files.md) for formats, controls and content bounds.
+
 Native File, View, Go, Settings and Help menus use the desktop Qt style, theme
 icons, standard shortcut labels and disabled actions where applicable. A native
 toolbar retains navigation, selection, grid size controls; secondary
@@ -369,3 +418,12 @@ admission; clients waiting for a complete layout observe its expected active
 count and each view's loading metrics. A pending callback recomputes current
 visibility instead of retaining an old page. Project panes show a spinner while
 waiting for a card. Existing cards retain their lifetime and generator ownership.
+The native responsiveness lane keeps the 500 ms concurrent ping limit for sixteen
+large images. Observer startup waits for three actual samples. Its input-priority
+fixture issues a camera command during a fifteen-import batch in a sixteen-card
+grid and checks a single registry snapshot before/after completion; it does not
+wait for the last card's narrow admission/import interval before issuing input.
+
+Card and project-pane loading spinners rotate from elapsed time, repainting on a
+precise 16 ms timer only while visible and busy. Timer delays do not slow their
+rotation; static and hidden labels stop the timer.

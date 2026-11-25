@@ -7,6 +7,7 @@
 #include <QJsonArray>
 #include <QKeyEvent>
 #include <QPushButton>
+#include <QPlainTextEdit>
 #include <QSlider>
 #include <QTreeWidget>
 #include <QCoreApplication>
@@ -20,6 +21,8 @@ int main(int argc,char** argv) {
     int cutsSent=0;
     bool rejectCuts=false;
     QJsonObject lastCut;
+    QJsonObject lastDisplay;
+    int displaySent=0;
     QStringList actions;
     QJsonObject snapshot{{"loaded",true},{"revision",sha},{"dependency_revision",dependency},
         {"review_path","/tmp/panel-review.json"},{"document_revision",1},{"review_digest",QString(64,'c')},
@@ -36,6 +39,12 @@ int main(int argc,char** argv) {
             ++cutsSent;
             lastCut=request;
             if(rejectCuts) return {{"ok",false},{"error","Cut failed"}};
+        }
+        if(action=="display") {
+            ++displaySent; lastDisplay=request["display"].toObject();
+            auto display=snapshot["display"].toObject();
+            for(auto it=lastDisplay.begin();it!=lastDisplay.end();++it) display[it.key()]=it.value();
+            snapshot["display"]=display;
         }
         auto reply=snapshot; reply["ok"]=true; return reply;
     });
@@ -135,5 +144,24 @@ int main(int argc,char** argv) {
     panel.setState("model",snapshot);
     QEventLoop loop; QTimer::singleShot(35,&loop,&QEventLoop::quit); loop.exec();
     std::printf("cuts_sent_after_resource_revision_change=%d cut_position=%.1f\n",cutsSent,position->value());
-    return cutsSent==0 && position->value()==0?0:2;
+    if(cutsSent!=0 || position->value()!=0) return 2;
+    auto* colors=panel.findChild<QCheckBox*>("inspectionPartColors");
+    auto* explode=panel.findChild<QSlider*>("inspectionExplosion");
+    auto* fill=panel.findChild<QCheckBox*>("inspectionCapCuts");
+    if(!colors || !explode || !fill) return 30;
+    colors->setChecked(true); explode->setValue(75); fill->setChecked(false);
+    if(displaySent || !panel.commitPendingCuts() || displaySent!=1 || lastDisplay["explosion"]!=.75 ||
+       !lastDisplay["part_colors"].toBool() || lastDisplay["cap_cuts"].toBool(true)) return 31;
+    panel.findChild<QPlainTextEdit*>("inspectionCommentDraft")->setPlainText("Unfinished review\nwith a second line.");
+    panel.findChild<QComboBox*>("inspectionCommentScope")->setCurrentIndex(1);
+    panel.findChild<QComboBox*>("inspectionCommentStatus")->setCurrentIndex(1);
+    const auto saved=panel.restartState();
+    panel.findChild<QPlainTextEdit*>("inspectionCommentDraft")->clear();
+    panel.restoreRestartState(saved);
+    if(panel.restartState()!=saved) return 32;
+    explode->setValue(90); snapshot["dependency_revision"]=QString(64,'e'); panel.setState("model",snapshot);
+    QEventLoop displayLoop; QTimer::singleShot(35,&displayLoop,&QEventLoop::quit); displayLoop.exec();
+    if(displaySent!=1 || explode->value()!=75) return 33;
+    std::printf("part_display=coalesced draft=preserved pending_display_revision_change=cancelled\n");
+    return 0;
 }

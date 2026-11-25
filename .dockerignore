@@ -1,6 +1,10 @@
 .git
+.local
 build
+captures
+docs/plans
 evidence
 release
+TODO.md
 __pycache__
 *.pyc

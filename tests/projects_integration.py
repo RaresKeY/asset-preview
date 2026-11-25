@@ -24,6 +24,82 @@ class ProjectsIntegration(OverviewIntegration):
         self.rpc({'method':'add','entry':{'id':key,'path':str(path),'project':project},'make_current':current})
         return path
 
+    def test_project_hierarchy_order_filters_restart_and_undo(self):
+        self.send('character','characters'); self.send('sound','sounds'); self.send('prop','props')
+        self.rpc({'method':'project','id':'game','label':'My Game'})
+        self.rpc({'method':'project','id':'characters','parent':'game','label':'Characters'})
+        self.rpc({'method':'project','id':'props','parent':'game','label':'Props'})
+        self.assertEqual(list(self.projects()),['sounds','game','characters','props'])
+        self.rpc({'method':'layout','layout':'overview','project_filter':'game'})
+        self.rpc({'method':'show'})
+        state=self.state()
+        self.assertEqual(state['active'],0)
+        self.assertEqual([g['id'] for g in state['presentation']['overview']['groups']],['game','characters','props'])
+        self.assertEqual([g['nested'] for g in state['presentation']['overview']['groups']],[False,True,True])
+        self.assertEqual(state['presentation']['overview']['items'],2)
+        self.rpc({'method':'layout','layout':'gallery'})
+        self.loaded('character')
+        self.assertEqual(self.state()['active'],1)
+        self.rpc({'method':'layout','project_filter':'props'})
+        self.assertEqual(self.state()['selected'],'prop')
+        self.assertEqual(self.state()['presentation']['overview']['items'],1)
+        self.rpc({'method':'layout','layout':'projects','project_filter':'game'})
+        self.assertEqual([p['project'] for p in self.state()['presentation']['projects']['panes']],['characters','props'])
+        self.restart()
+        self.assertEqual(self.projects()['characters']['parent'],'game')
+        self.assertEqual(self.projects()['game']['label'],'My Game')
+        self.rpc({'method':'close_all'}); self.assertEqual(self.projects(),{})
+        self.rpc({'method':'reopen'})
+        self.assertEqual(self.projects()['props']['parent'],'game')
+        self.assertEqual(self.projects()['game']['label'],'My Game')
+        self.restart()
+        self.assertEqual(list(self.projects()),['game','props'])
+
+    def test_project_parent_validation_and_transaction_rollback(self):
+        path=self.send('character','characters')
+        self.rpc({'method':'project','id':'game'})
+        self.rpc({'method':'project','id':'characters','parent':'game'})
+        before=self.state()
+        for request in (
+            {'method':'project','id':'characters','parent':'missing'},
+            {'method':'project','id':'characters','parent':'characters'},
+            {'method':'project','id':'game','parent':'characters'},
+            {'method':'project','id':'nested','parent':'characters'},
+            {'method':'project','id':'characters','parent':False},
+            {'method':'project','id':'game','action':'remove'},
+            {'method':'add','entry':{'id':'bad','path':str(path),'project':'new'},'parent_project':'characters'},
+        ):
+            with self.assertRaises(RuntimeError): self.rpc(request)
+            self.assertEqual(before['projects'],self.state()['projects'])
+        registry=self.fixture.state_dir/'previews.json'; backup=registry.with_suffix('.backup')
+        registry.rename(backup); registry.mkdir()
+        try:
+            for request in (
+                {'method':'project','id':'characters','parent':'','label':'Wrong'},
+                {'method':'add','entry':{'id':'character','path':str(path),'project':'characters'},'parent_project':'other','parent_project_label':'Other'},
+                {'method':'add','entry':{'id':'new','path':str(path),'project':'new-group'},'parent_project':'new-owner'},
+            ):
+                with self.assertRaises(RuntimeError): self.rpc(request)
+                for key in ('projects','entries','project_filter','selected'):
+                    self.assertEqual(before[key],self.state()[key],key)
+        finally: registry.rmdir(); backup.rename(registry)
+        self.rpc({'method':'project','id':'characters','parent':''})
+        self.assertEqual(self.projects()['characters']['parent'],'')
+
+    def test_group_registration_is_atomic_and_metadata_reconnect_is_saved(self):
+        path=self.root/'waiting.png'
+        request={'method':'add','entry':{'id':'asset','path':str(path),'project':'parts'},
+                 'parent_project':'game','parent_project_label':'Game','project_label':'Parts'}
+        self.rpc(request)
+        self.assertEqual(self.projects()['parts']['parent'],'game')
+        self.assertEqual(self.projects()['game']['label'],'Game')
+        request['parent_project']='another'; request['parent_project_label']='Another'
+        self.rpc(request)
+        self.restart()
+        self.assertEqual(self.projects()['parts']['parent'],'another')
+        self.assertNotIn('game',self.projects())
+        self.assertEqual(self.state()['window_visible'],False)
+
     def test_project_publication_persistence_and_rollback(self):
         self.rpc({'method':'project','id':'alpha','label':'Alpha'})
         self.assertEqual(self.projects()['alpha']['current'],'')
@@ -64,9 +140,102 @@ class ProjectsIntegration(OverviewIntegration):
         self.rpc({'method':'add','entry':{'id':'a','path':str(a),'project':'alpha'},'make_current':False})
         self.assertEqual(self.projects()['alpha']['current'],'support','no-current re-add must retain the removal fallback')
         self.restart(); self.assertEqual(self.projects()['alpha']['current'],'support')
-        self.rpc({'method':'close_all'}); self.assertEqual(self.projects()['alpha']['current'],'')
-        self.rpc({'method':'project','id':'alpha','action':'remove'}); self.assertEqual(self.state()['project_filter'],'')
+        self.rpc({'method':'close_all'}); self.assertEqual(self.projects(),{})
+        self.assertEqual(self.state()['project_filter'],'')
         self.rpc({'method':'reopen'}); self.assertTrue(self.state()['entries'])
+
+    def test_empty_projects_prune_on_close_move_bulk_and_undo(self):
+        self.rpc({'method':'project','id':'alpha','label':'Original Alpha'})
+        self.send('a'); self.send('support'); self.send('b','beta')
+        self.rpc({'method':'layout','layout':'projects','project_filter':'alpha'})
+        self.rpc({'method':'show'})
+        self.rpc({'method':'remove','id':'a'})
+        self.assertEqual(self.projects()['alpha']['current'],'support')
+        self.rpc({'method':'remove','id':'support'})
+        self.assertNotIn('alpha',self.projects())
+        self.assertEqual(self.state()['project_filter'],'')
+        self.assertEqual([p['project'] for p in self.state()['presentation']['projects']['panes']],['beta'])
+        registry=self.fixture.state_dir/'previews.json'
+        self.assertNotIn('alpha',{p['id'] for p in json.loads(registry.read_text())['projects']})
+        self.rpc({'method':'reopen'})
+        self.assertEqual(list(self.projects()),['alpha','beta'])
+        self.assertEqual(self.projects()['alpha']['label'],'Original Alpha')
+        # Moving the last member has the same ownership cleanup as closing it.
+        self.rpc({'method':'add','entry':{'id':'support','path':str(self.root/'support.png'),'project':'beta'}})
+        self.assertNotIn('alpha',self.projects())
+        self.restart(); self.assertNotIn('alpha',self.projects())
+        self.rpc({'method':'project','id':'beta','label':'Original Beta'})
+        self.rpc({'method':'remove_many','ids':['b','support']})
+        self.assertEqual(self.projects(),{})
+        self.rpc({'method':'reopen'})
+        self.assertEqual(self.projects()['beta']['label'],'Original Beta')
+        self.rpc({'method':'project','id':'waiting','label':'Waiting for an export'})
+        self.rpc({'method':'close_all'}); self.assertEqual(self.projects(),{})
+        self.rpc({'method':'reopen'})
+        self.assertEqual(self.projects()['beta']['label'],'Original Beta')
+        self.restart(); self.assertEqual(list(self.projects()),['beta'])
+
+    def test_waiting_groups_are_session_only_and_legacy_empty_groups_migrate(self):
+        self.send('a')
+        self.rpc({'method':'project','id':'waiting','label':'Current work'})
+        self.rpc({'method':'layout','layout':'projects','project_filter':'waiting'})
+        self.assertIn('waiting',self.projects())
+        registry=self.fixture.state_dir/'previews.json'
+        saved=json.loads(registry.read_text())
+        self.assertEqual([p['id'] for p in saved['projects']],['alpha'])
+        self.assertEqual(saved['project_filter'],'')
+        self.restart(); self.assertNotIn('waiting',self.projects())
+        self.assertEqual(self.state()['project_filter'],'')
+        self.rpc({'method':'quit'}); self.fixture.process.wait(timeout=5)
+        saved=json.loads(registry.read_text())
+        saved['projects'] += [{'id':f'old-{i}','label':f'Old project {i}','current':''} for i in range(19)]
+        saved['project_filter']='old-0'
+        registry.write_text(json.dumps(saved))
+        self.restart_stopped()
+        self.assertEqual(list(self.projects()),['alpha'])
+        self.assertEqual(self.state()['project_filter'],'')
+        migrated=json.loads(registry.read_text())
+        self.assertEqual([p['id'] for p in migrated['projects']],['alpha'])
+        self.assertEqual(migrated['entries'],saved['entries'])
+        self.restart(); self.assertEqual(list(self.projects()),['alpha'])
+
+    def test_failed_close_or_move_keeps_projects_and_filters(self):
+        self.send('a'); self.send('b','beta')
+        self.rpc({'method':'layout','layout':'projects','project_filter':'alpha'})
+        registry=self.fixture.state_dir/'previews.json'; backup=registry.with_suffix('.backup')
+        before=self.state(); registry.rename(backup); registry.mkdir()
+        try:
+            for request in (
+                {'method':'remove','id':'a'},
+                {'method':'remove_many','ids':['a','b']},
+                {'method':'close_all'},
+                {'method':'add','entry':{'id':'a','path':str(self.root/'a.png'),'project':'beta'}},
+            ):
+                with self.assertRaises(RuntimeError): self.rpc(request)
+                after=self.state()
+                for key in ('projects','entries','project_filter','selected'):
+                    self.assertEqual(before[key],after[key],key)
+        finally: registry.rmdir(); backup.rename(registry)
+        self.rpc({'method':'remove','id':'a'})
+        before=self.state(); registry.rename(backup); registry.mkdir()
+        try:
+            with self.assertRaises(RuntimeError): self.rpc({'method':'reopen'})
+            after=self.state()
+            for key in ('projects','entries','project_filter','selected'):
+                self.assertEqual(before[key],after[key],key)
+        finally: registry.rmdir(); backup.rename(registry)
+        self.rpc({'method':'reopen'}); self.assertEqual(list(self.projects()),['alpha','beta'])
+
+    def test_close_all_undo_restores_project_names_and_order(self):
+        self.send('a'); self.send('b','beta')
+        self.rpc({'method':'project','id':'alpha','label':'Alpha named'})
+        self.rpc({'method':'project','id':'beta','label':'Beta named'})
+        self.rpc({'method':'project','id':'waiting'})
+        self.rpc({'method':'close_all'}); self.assertEqual(self.projects(),{})
+        self.rpc({'method':'reopen'}); self.rpc({'method':'reopen'})
+        self.assertEqual(list(self.projects()),['alpha','beta'])
+        self.assertEqual(self.projects()['alpha']['label'],'Alpha named')
+        self.assertEqual(self.projects()['beta']['label'],'Beta named')
 
     def test_project_grid_visibility_switching_and_overview(self):
         self.send('alpha-a'); self.send('beta-a','beta'); self.send('alpha-b'); self.send('legacy','')
@@ -198,6 +367,9 @@ class ProjectsIntegration(OverviewIntegration):
         self.rpc({'method':'project','id':'waiting','label':'Long project name waiting for its first export'})
         self.rpc({'method':'layout','layout':'projects','project_grid_size':2}); self.rpc({'method':'show'})
         model=self.loaded('model'); renderer=model['metrics']['renderer']
+        for overlay in ('name','controls','status','triangles'):
+            self.assertTrue(model['overlays'][overlay]['native_project_pane'],
+                             'Native model chrome must be clipped by its project pane before surface creation')
         self.assertFalse(any(token in renderer.lower() for token in ('llvmpipe','softpipe','software','unknown')),renderer)
         input=XInput(); self.addCleanup(input.close)
         input.x.XResizeWindow.argtypes=[ctypes.c_void_p,ctypes.c_ulong,ctypes.c_uint,ctypes.c_uint]

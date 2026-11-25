@@ -1,4 +1,5 @@
 #include "material_graph.h"
+#include "preview_navigation.h"
 #include <QApplication>
 #include <QComboBox>
 #include <QDateTime>
@@ -26,6 +27,8 @@
 #include <QTimer>
 #include <QVBoxLayout>
 #include <QWheelEvent>
+#include <QToolButton>
+#include <QScopeGuard>
 #include <algorithm>
 #include <cmath>
 
@@ -220,10 +223,24 @@ MaterialGraphView::MaterialGraphView(QWidget* parent):QWidget(parent) {
     inspectorPanel=new QWidget(contentSplit);inspectorPanel->setObjectName("materialSidebar");inspectorPanel->setMinimumWidth(225);auto* sidebar=new QVBoxLayout(inspectorPanel);sidebar->setContentsMargins(8,0,0,0);sidebar->setSpacing(0);
     inspectorSplit=new QSplitter(Qt::Vertical,inspectorPanel);inspectorSplit->setObjectName("materialInspectorSplit");inspectorSplit->setHandleWidth(1);inspectorSplit->setChildrenCollapsible(false);sidebar->addWidget(inspectorSplit);
     auto* previewPanel=new QWidget(inspectorSplit);previewPanel->setObjectName("materialPreviewPanel");auto* materialColumn=new QVBoxLayout(previewPanel);materialColumn->setContentsMargins(0,0,0,6);materialColumn->setSpacing(5);
-    auto* previewTitle=new QLabel("Material preview");previewTitle->setStyleSheet("font-size:11px;font-weight:600;color:#b5b5b5;");materialColumn->addWidget(previewTitle);
+    auto* previewTitle=new QLabel("Material preview");previewTitle->setStyleSheet("font-size:11px;font-weight:600;color:#b5b5b5;");
+    auto* navigation=new QHBoxLayout;navigation->setSpacing(2);navigation->addWidget(previewTitle,1);
+    auto tool=[&](const QString& icon,const QString& label,const QString& name) {
+        auto* button=new QToolButton;button->setIcon(QIcon::fromTheme(icon));button->setFixedSize(24,24);button->setIconSize({16,16});button->setAutoRaise(true);
+        button->setToolTip(label);button->setAccessibleName(label);button->setObjectName(name);navigation->addWidget(button);return button;
+    };
+    zoomOutButton=tool("zoom-out","Zoom out","materialZoomOut");
+    zoomInButton=tool("zoom-in","Zoom in","materialZoomIn");
+    previewFitButton=tool("zoom-fit-best","Fit material preview","materialFitPreview");
+    panButton=tool("transform-move","Pan with left drag; right or Shift+drag also pans","materialPan");panButton->setCheckable(true);
+    connect(zoomOutButton,&QToolButton::clicked,this,[this]{zoomPreview(0.8);});
+    connect(zoomInButton,&QToolButton::clicked,this,[this]{zoomPreview(1.25);});
+    connect(previewFitButton,&QToolButton::clicked,this,[this]{fitPreview();});
+    connect(panButton,&QToolButton::toggled,this,[this](bool enabled){preview::setPanMode(material.view,enabled);});
+    materialColumn->addLayout(navigation);
     auto* controls=new QHBoxLayout;controls->setSpacing(4);channels=new QComboBox;channels->setObjectName("materialChannel");channels->addItems({"Shaded","Albedo","Normal","ORM","Height"});channels->setAccessibleName("Material preview channel");controls->addWidget(channels,1);
     targets=new QComboBox;targets->setObjectName("materialTarget");targets->setAccessibleName("Apply material to");targets->addItem("Sphere","sphere");targets->addItem("Cube","cube");targets->addItem("Plane","plane");targets->addItem("Open model…","open");targets->setToolTip("Preview saved maps on a shape or apply them to a UV-mapped GLB model");controls->addWidget(targets,1);materialColumn->addLayout(controls);
-    materialHost=new QWidget;materialHost->setObjectName("shadedMaterialHost");materialHost->setMinimumSize(130,115);materialLayout=new QVBoxLayout(materialHost);materialLayout->setContentsMargins(0,0,0,0);materialColumn->addWidget(materialHost,1);
+    materialHost=new QWidget;materialHost->setObjectName("shadedMaterialHost");materialHost->setToolTip("Scroll to zoom · Drag to orbit · Pan tool, right drag or Shift+drag to pan · Double-click to fit");materialHost->setMinimumSize(130,115);materialLayout=new QVBoxLayout(materialHost);materialLayout->setContentsMargins(0,0,0,0);materialColumn->addWidget(materialHost,1);
     previewStatus=new QLabel("No bake available");previewStatus->setStyleSheet("font-size:10px;color:#969696;");previewStatus->setWordWrap(true);materialColumn->addWidget(previewStatus);
     auto* nodePanel=new QWidget(inspectorSplit);nodePanel->setObjectName("materialNodePanel");auto* information=new QVBoxLayout(nodePanel);information->setContentsMargins(0,7,0,0);information->setSpacing(5);selectionTitle=new QLabel("Node details");selectionTitle->setStyleSheet("font-size:11px;font-weight:600;");selectionTitle->setWordWrap(true);information->addWidget(selectionTitle);
     image=new QLabel("Select a node");image->setAlignment(Qt::AlignCenter);image->setMinimumHeight(65);image->setMaximumHeight(130);image->setSizePolicy(QSizePolicy::Ignored,QSizePolicy::Expanding);image->setStyleSheet("background:#191919;border:1px solid #333333;");information->addWidget(image,1);
@@ -316,33 +333,58 @@ void MaterialGraphView::inspector() {
     }
 }
 void MaterialGraphView::updateMaterial() {
-    if(inspectorPanel->isHidden()) {if(material.surface){delete material.surface;material={};}return;}
+    const auto controls=qScopeGuard([this]{updatePreviewControls();});
+    if(inspectorPanel->isHidden()) {if(material.surface){delete material.surface;material={};}materialError.clear();return;}
     const auto channel=channels->currentIndex()==0?QString("albedo"):channels->currentText().toLower();
     const auto path=doc.maps.value(channel);
     const bool shaded=channels->currentIndex()==0;targets->setEnabled(shaded);
+    materialHost->setToolTip(shaded?"Scroll to zoom · Drag to orbit · Pan tool, right drag or Shift+drag to pan · Double-click to fit":"Scroll to zoom at pointer · Drag to pan · Double-click to fit");
     QJsonObject config{{"kind",shaded?"material":"image"},{"graph_sample",true},{"path",path},{"settings",QJsonObject{{"shape",modelPath.isEmpty()?targets->currentData().toString():QString("sphere")},{"grid",false},{"background","dark"}}}};
     if(shaded && !modelPath.isEmpty())config["sample_model"]=modelPath;
     QJsonObject maps; for(const auto& key:{QString("normal"),QString("orm")})if(doc.maps.contains(key))maps[key]=doc.maps[key]; config["maps"]=maps;
     QString revision=stamp(path);for(const auto& map:maps)revision+=":"+stamp(map.toString());if(shaded && !modelPath.isEmpty())revision+=":"+stamp(modelPath);
-    if(material.surface && config==materialConfig && revision==materialStamp)return;
+    // Failed imports may retain the previous frame. They must neither enable
+    // navigation for the new target nor suppress an explicit retry.
+    if(material.surface && config==materialConfig && revision==materialStamp && materialError.isEmpty())return;
     const bool targetChanged=materialConfig["sample_model"]!=config["sample_model"] || materialConfig["settings"].toObject()["shape"]!=config["settings"].toObject()["shape"];
     if(material.surface && (materialConfig["kind"]!=config["kind"] || targetChanged)) { delete material.surface; material={}; }
     materialConfig=config;
     materialStamp=revision;
-    if(path.isEmpty() || !QFileInfo::exists(path)) { if(material.surface) {delete material.surface;material={};} previewStatus->setText("Awaiting saved "+channel+" output"); return; }
-    if(shaded && !modelPath.isEmpty() && !QFileInfo::exists(modelPath)){if(material.surface){delete material.surface;material={};}previewStatus->setText("Waiting for model · "+QFileInfo(modelPath).fileName());return;}
+    materialError.clear();
+    if(path.isEmpty() || !QFileInfo::exists(path)) { if(material.surface) {delete material.surface;material={};} materialError="Awaiting saved "+channel+" output";previewStatus->setText(materialError); return; }
+    if(shaded && !modelPath.isEmpty() && !QFileInfo::exists(modelPath)){if(material.surface){delete material.surface;material={};}materialError="Waiting for model · "+QFileInfo(modelPath).fileName();previewStatus->setText(materialError);return;}
+    const auto loaded=[this](bool ok,QString message) {
+        materialError=ok?QString():message.isEmpty()?QString("Could not load preview"):message;
+        const auto label=channels->currentIndex()!=0?"Live · saved "+channels->currentText().toLower()+" map":
+            modelPath.isEmpty()?QString("Live · shaded material"):"Live · applied to "+QFileInfo(modelPath).fileName();
+        previewStatus->setText(ok?label:"Preview unavailable · "+materialError);updatePreviewControls();
+    };
     QString error;
     try {
         if(!material.surface) {
-            if(config["kind"]=="image") { auto* view=new ImageView(materialHost); material={view,view}; }
-            else material=createModel(config,materialHost,[this](bool ok,QString message){previewStatus->setText(ok?(modelPath.isEmpty()?"Live · shaded material":"Live · applied to "+QFileInfo(modelPath).fileName()):"Preview unavailable · "+message);},{});
+            if(config["kind"]=="image") {
+                auto* view=new ImageView(materialHost); material={view,view};
+                view->loaded=loaded;
+            }
+            else material=createModel(config,materialHost,loaded,{});
             materialLayout->addWidget(material.surface);
             material.view->activated=[this]{if(activated)activated();};
+            material.view->loadingChanged=[this]{updatePreviewControls();};
+            preview::setPanMode(material.view,panButton->isChecked());
         }
-        if(!material.view->reload(config,error))previewStatus->setText("Preview unavailable · "+error);
-        else if(config["kind"]=="image")previewStatus->setText("Live · saved "+channel+" map");
-    } catch(const std::exception& e) { previewStatus->setText("Shaded preview unavailable · "+QString::fromUtf8(e.what())+" · choose a map"); }
+        if(!material.view->reload(config,error)) {materialError=error.isEmpty()?QString("Could not load preview"):error;previewStatus->setText("Preview unavailable · "+materialError);}
+        else if(config["kind"]=="image")previewStatus->setText(material.view->loading()?"Loading saved "+channel+" map…":"Live · saved "+channel+" map");
+    } catch(const std::exception& e) {materialError=QString::fromUtf8(e.what());previewStatus->setText("Shaded preview unavailable · "+materialError+" · choose a map");}
 }
+void MaterialGraphView::updatePreviewControls() {
+    const auto metrics=material.view?material.view->metrics():QJsonObject{};
+    const bool ready=material.view && materialError.isEmpty() && !metrics["loading"].toBool() && (metrics["engine"].toBool() || metrics["width"].toInt()>0);
+    for(auto* button:{zoomInButton,zoomOutButton,previewFitButton})button->setEnabled(ready);
+    panButton->setEnabled(ready && channels->currentIndex()==0);
+}
+bool MaterialGraphView::zoomPreview(double factor) {return zoomInButton->isEnabled() && preview::zoomView(material.view,factor);}
+bool MaterialGraphView::panPreview(QPointF delta) {return zoomInButton->isEnabled() && preview::panView(material.view,delta);}
+bool MaterialGraphView::fitPreview() {if(!previewFitButton->isEnabled())return false;material.view->fit();return true;}
 bool MaterialGraphView::previewOnModel(const QString& path) {
     const auto absolute=QFileInfo(path).absoluteFilePath();
     if(QFileInfo(absolute).isDir() || QFileInfo(absolute).suffix().toLower()!="glb") {previewStatus->setText("Choose a UV-mapped GLB model");return false;}
@@ -390,4 +432,13 @@ QImage MaterialGraphView::snapshot() {
     if(material.view && material.surface) {const auto rendered=material.view->snapshot();if(!rendered.isNull()){QPainter painter(&frame);painter.drawImage(QRect(material.surface->mapTo(this,QPoint()),material.surface->size()),rendered);}}
     return frame;
 }
-QJsonObject MaterialGraphView::metrics() const {return {{"loads",revisions},{"graph_nodes",doc.nodes.size()},{"graph_connections",doc.edges.size()},{"graph_revisions",revisions},{"selected_node",selected},{"expanded_nodes",expanded.size()},{"decoded_previews",images.size()},{"preview_target",modelPath.isEmpty()?targets->currentData().toString():modelPath},{"inspector_side","right"},{"inspector_visible",!inspectorPanel->isHidden()},{"material_preview",material.view?material.view->metrics():QJsonObject{}}};}
+QJsonObject MaterialGraphView::metrics() const {
+    QJsonObject buttons;
+    for(auto* button:{zoomInButton,zoomOutButton,previewFitButton,panButton}) {
+        const auto point=button->mapTo(window(),button->rect().center());
+        buttons[button->objectName()]=QJsonArray{point.x(),point.y()};
+    }
+    return {{"loads",revisions},{"graph_nodes",doc.nodes.size()},{"graph_connections",doc.edges.size()},{"graph_revisions",revisions},{"selected_node",selected},{"expanded_nodes",expanded.size()},{"decoded_previews",images.size()},{"preview_target",modelPath.isEmpty()?targets->currentData().toString():modelPath},{"inspector_side","right"},{"inspector_visible",!inspectorPanel->isHidden()},
+        {"preview_navigation",QJsonObject{{"ready",previewFitButton->isEnabled()},{"error",materialError},{"pan_mode",panButton->isChecked()},{"buttons",buttons}}},
+        {"material_preview",material.view?material.view->metrics():QJsonObject{}}};
+}

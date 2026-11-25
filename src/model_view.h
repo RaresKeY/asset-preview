@@ -6,6 +6,7 @@
 #include <QTimer>
 #include <f3d/engine.h>
 #include <optional>
+#include <array>
 #include <vector>
 
 class ModelScene final : public ModelWorker {
@@ -22,20 +23,22 @@ public:
     void settings(const QJsonObject&) override;
     QJsonObject metrics() const override;
     QImage snapshot() override;
+    QImage thumbnailSnapshot(QSize) override;
     bool seek(double, QString&) override;
     static QImage thumbnail(QJsonObject,QString& error,QString& renderer);
     void viewport(QSize,double) override;
     void exposed(bool) override;
     void scroll(double) override;
+    void pointer(QPointF) override;
     void drag(QPointF,bool) override;
     void gpuContext(std::shared_ptr<ModelGpuContext>) override;
-    void prepare() override;
     bool renderPending() const override { return framePending; }
     void present() override;
 private:
     int width() const { return extent.width(); }
     int height() const { return extent.height(); }
     double devicePixelRatioF() const { return ratio; }
+    QSize pixelSize() const { return {std::max(1,int(width()*ratio)),std::max(1,int(height()*ratio))}; }
     bool isExposed() const { return visible; }
     void update(int delay=0);
     void paintGL();
@@ -44,10 +47,19 @@ private:
     bool visible=true,framePending=false;
     bool pendingLoadNotice=false;
     std::shared_ptr<ModelGpuContext> gpu;
-    std::vector<std::shared_ptr<ModelGpuFrame>> gpuFrames;
     quint64 frameSerial=0;
     bool cameraDirty=false;
-    std::shared_ptr<ModelGpuFrame> renderGpuFrame();
+    void prepare();
+    void renderTarget(GLuint,QSize);
+    bool fourView() const;
+    void renderViews(QSize,const std::function<void(int,QRect)>&);
+    void renderFour(GLuint,QSize);
+    struct FourPane { double zoom=1,span=1; QPointF pan; };
+    std::array<FourPane,3> fourPanes{};
+    int inputPane=0;
+    QImage capture(QSize);
+    QImage captureOffscreen();
+    quint64 captureReadbacks=0;
     bool load(QString& error, bool retainAnimation=false);
     struct Animation {
         QStringList clips;
@@ -67,6 +79,10 @@ private:
     void cleanup();
     f3d::vector3_t worldUp() const;
     void orbit(double yaw, double pitch);
+    void flushCamera() const;
+    mutable std::optional<f3d::camera_state_t> pendingOrbit;
+    struct Pan { double right,up,scale; };
+    mutable std::optional<Pan> pendingPan;
     double parallelSpan() const;
     void restoreCamera(const QJsonObject&);
     void rememberCamera(bool persist=true);
@@ -83,7 +99,7 @@ private:
     preview::TriangleMetadata triangleMetadata;
     QJsonObject texturePreviewMetrics;
     QJsonObject loadTiming;
-    QJsonObject gltfImport;
+    QJsonObject gltfImport,topologyMetrics;
     QElapsedTimer loadClock;
     bool firstFramePending=false;
     QString publishedMaterialModel;

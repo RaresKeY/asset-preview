@@ -1,4 +1,5 @@
 #include "crash_log.h"
+#include "registry_limits.h"
 #include "backend_abi_config.h"
 #include <QDateTime>
 #include <QDir>
@@ -39,6 +40,7 @@ char messages[MessageCount][MessageLimit], contextBytes[ContextLimit];
 size_t messageSizes[MessageCount]{}, contextSize = 0;
 unsigned messageIndex = 0, messageTotal = 0;
 QJsonObject currentContext;
+bool contextPending = true;
 QByteArray sessionInfo;
 char buildInfo[8192]; size_t buildInfoSize = 0;
 
@@ -222,7 +224,7 @@ void terminateException() {
 }
 QJsonObject registryContext(const QString& statePath) {
     QFile file(statePath + "/previews.json");
-    if (!file.open(QIODevice::ReadOnly) || file.size() > 4*1024*1024) return {};
+    if (!file.open(QIODevice::ReadOnly) || file.size() > preview::MaxRegistryBytes) return {};
     const auto registry = QJsonDocument::fromJson(file.readAll()).object();
     auto ids = registry["comparison"].toArray(); ids.append(registry["selected"]);
     QJsonArray previews;
@@ -288,10 +290,18 @@ CrashLog::~CrashLog() {
 }
 void CrashLog::context(const QJsonObject& state) {
     if (output < 0) return;
-    for (auto it = state.begin(); it != state.end(); ++it) currentContext[it.key()] = it.value();
+    for (auto it = state.begin(); it != state.end(); ++it) {
+        if (currentContext.value(it.key()) == it.value()) continue;
+        currentContext[it.key()] = it.value();
+        contextPending = true;
+    }
+    // Read-only probes often repeat exactly the same context. Keep the last
+    // signal-safe bytes, but retry publication if a Qt message held the buffer.
+    if (!contextPending) return;
     const auto bytes = QJsonDocument(currentContext).toJson(QJsonDocument::Compact).left(ContextLimit);
     if (!buffersBusy.test_and_set()) {
         std::memcpy(contextBytes,bytes.constData(),size_t(bytes.size())); contextSize = size_t(bytes.size());
+        contextPending = false;
         buffersBusy.clear();
     }
 }

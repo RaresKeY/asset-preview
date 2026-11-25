@@ -1,7 +1,13 @@
 # Runtime and connections
 
+Reusable `selection` previews display sectioned Markdown options and persist
+user accept/deny choices separately from source. `.selection.json` auto-detects;
+`add --decisions FILE` chooses the result path. See [Selection](selection.md).
+
 [Projects](projects.md) owns persistent agent grouping, chosen current previews,
 the interactive Projects grid and Overview grouping/filtering.
+`--group`/`--group-label` register a separate gallery beneath the owning
+`--project`; project creation accepts `--parent` to organize existing groups.
 
 Optional originating Codex conversation metadata, the attached terminal lifecycle
 and image-reference flow are owned by [Visual references](references.md).
@@ -11,13 +17,19 @@ Material Maker `.ptex` / `.materialgraph.json` files auto-detect as `graph`;
 saved-map presentation and shared Atlas widget are defined in
 [Material graphs](material-graphs.md).
 
+Common text/code/Markdown and patch extensions auto-detect as `file`.
+`diff BEFORE AFTER` or `add AFTER --before BEFORE` watches both inputs without
+opening the window. Read-only rendering, comparison bounds and controls are
+defined in [Files and diffs](files.md).
+
 The optional `inspect` and `annotations` requests, persistent review references,
 offline review reads and visible-only inspection ownership are defined in
 [3D inspection and reviews](inspection.md). Review JSON is separate from the
 preview registry and generator inputs; comments do not rebuild models.
 
 Source ownership: `src/main.cpp`, `src/crash_log.{h,cpp}`, `src/service.{h,cpp}`, `src/theme.h`, `bin/asset-preview`,
-`fish/`, `skills/asset-preview/`, `tools/install.py`, `play.sh`, `icon.svg`. See [protocol](../docs/protocol.md)
+`fish/`, `skills/asset-preview/`, `tools/install.py`, `tools/build.sh`,
+`tools/activate-build.py`, `play.sh`, `icon.svg`. See [protocol](../docs/protocol.md)
 for concrete request/configuration fields and limits.
 When the account already has the workstation's private
 `~/.local/share/f3d-runtime/lib/libcudart.so.13` repair, the CLI prefixes that
@@ -39,6 +51,12 @@ readiness and then sends newline JSON. The native server holds a QLockFile befor
 removing a stale socket. Unix socket permissions restrict access to the owning
 user. SIGTERM/SIGINT wake Qt through a self-pipe; no signal polling timer is used.
 
+`ASSET_PREVIEW_NO_START=1` is the host-owned embedding route: CLI publication may
+reuse the already-running service, but `start()` fails before creating directories,
+locks or a process when it is unavailable. Editorial's Modeling terminal sets it
+alongside private runtime/state and project locations. Its host owns Launch/Stop;
+normal CLI startup behavior is unchanged when the variable is unset.
+
 Native `src/crash_log.*` owns crash-only diagnostics for every launcher. It is
 installed before QApplication and remains active through service/Qt teardown.
 `crash.log` in the state directory appends fatal SIGSEGV/ABRT/BUS/ILL/FPE/SYS/TRAP,
@@ -52,6 +70,21 @@ Flatpak bridge launches discard stdout/stderr instead of overwriting
 `server.log`; direct/foreground runners may explicitly collect stderr.
 Existing historical `server.log` files are left untouched. Cache telemetry is
 separate and retains its [cache diagnostics](cache-overview.md) contract.
+
+Request-boundary context refreshes still merge the current selection, active
+preview state and last meaningful request before/after dispatch. Unchanged fields
+do not rewrite the retained JSON object or serialize its signal-safe copy again.
+Changed nested state and explicit null values publish normally; omitted fields
+remain intact. If another diagnostic writer holds the fixed buffer, publication
+stays pending until the next context refresh, including an otherwise empty one.
+Only successful buffer publication clears that pending state. This uses the
+existing main-thread context owner and adds no polling, timer or extra snapshot.
+The native crash fixture forces buffer contention and verifies the newest nested
+state after repeated identical/empty updates. `tools/profile_crash_context.sh`
+exercises the same production component with one/sixteen preview contexts,
+shared/independent JSON storage and changing selections. The final-service
+`tools/profile_responsiveness.py --request-probes` adds bounded read-only request
+measurements after Overview, sixteen-pane Projects and Single workloads settle.
 
 Fatal handlers use a preopened private file, fixed buffers, an alternate main
 thread signal stack and syscall-only output, preserving the original fatal
@@ -138,12 +171,41 @@ offscreen positions; oversized windows shrink to fit. A deferred check handles
 X11 decoration placement after mapping. Minimizing is cleared when opening.
 `stop` / `quit` exits the server. Private version-1 state uses QSaveFile and retains
 invalid/corrupt state with an error. Session diagnostics are separate from specs.
+On restore, a legacy `toggle_with: null` is treated as an absent image partner
+and omitted on the next save. New registrations still validate explicit partners.
+`restart [--if-running]` serializes restarts under a private lock and replays a
+bounded native session snapshot. It preserves visible/hidden/minimized/fullscreen
+presentation, inspection tool, camera, cuts, selection, visibility, part colors,
+explosion and the unfinished inspection comment. Hidden services stay hidden;
+`--if-running` leaves a stopped service stopped. Native `restart_state` capture
+flushes pending inspection gestures and refuses snapshots over 768 KiB before
+stopping. Replay retains model/path binding and leaves changed-source safety
+checks to the importer. The initial migration from older servers preserves the
+available inspection view and visibility; those servers cannot expose a draft.
+Host-managed (`ASSET_PREVIEW_NO_START`) viewers retain host-owned restart control.
+
+`tools/build.sh` holds a build lock, compiles all targets to `build/.staging`, and
+runs the staged executable's display-free `--check-backends` ABI/factory check.
+Only a complete compatible set can be activated by `tools/activate-build.py`.
+Changed artifacts are prepared and published with same-filesystem renames while
+the exact current service is stopped, then restarted with session
+replay. Failed preparation/copy publication retains or rolls back installed
+artifacts; failed build/preflight never changes the live modules or process.
+Unchanged artifacts and a current running executable need no restart. A stale
+replaced executable is restarted even when artifacts are unchanged. Stopped
+services receive the complete build without being launched. `--no-restart`
+validates and retains the staging output while a viewer is running; with no
+viewer it may activate files without launching. Direct `cmake --build` produces
+staged artifacts; the wrapper owns activation. `backend-manifest.json` records
+whether the optional inspector belongs in that build.
 Failed selection saves retain the previous selection and active views; hover,
 toolbar and keyboard navigation report the failure without terminating the service.
 In the active window, hovering a visible preview updates the same saved selection
 and recent-preview history used by clicks and keyboard navigation. No explicit
-selection highlight is drawn. Popups/dialogs and ongoing drags keep their target;
-leaving the cards retains the last target as the keyboard/menu fallback.
+selection highlight is drawn. Popups/dialogs, ongoing drags and focused text-entry
+fields keep their target during mouse entry/movement; explicit clicks, scrolling
+and keyboard/CLI selection remain available.
+Leaving the cards retains the last target as the keyboard/menu fallback.
 Reflow under a stationary mouse preserves explicit keyboard/CLI selection until
 the next pointer movement, scroll or click.
 Transient save/settings errors appear in the status bar.
@@ -184,7 +246,7 @@ fields are also version-1 state. `compare` sets or ends the pair; existing layou
 remains the return layout. Invalid IDs/flags are rejected. Selecting a preview
 outside the pair, replacing it with another kind, or closing it ends comparison.
 Display/media setting changes also update remembered defaults, persisted
-in the optional version-1 `preferences` object. Image, audio, video and shared model/material
+in the optional version-1 `preferences` object. File, image, audio, video and shared model/material
 (`3d`) groups retain all setting keys independently. New registrations inherit the
 appropriate group's last values; model animation transport remains per registration.
 Explicit registration options override them without

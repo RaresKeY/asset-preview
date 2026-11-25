@@ -16,6 +16,7 @@ See [the inspection spec](../specs/inspection.md) for backend and identity limit
 | `restore` | `all:true` or `last:true` | Restore all visibility or undo the last operation |
 | `cut` | `axis`: x/y/z, finite `position`, `keep`: positive/negative, boolean `enabled` | Update one model-space clipping plane |
 | `apply` | `view` object | Restore a validated current-revision camera/selection/cuts/visibility snapshot |
+| `display` | `display` object | Set boolean `part_colors`, boolean `cap_cuts`, or finite `explosion` from 0 to 2 |
 
 `method:"annotations"` uses preview `id` and `action:list|add|update|remove|restore`.
 `list` accepts bounded `offset`/`limit` and optional workflow `status`, returning
@@ -50,7 +51,7 @@ Unix stream socket, printed by `bin/asset-preview paths`. Socket and its parent
 directory are private to the current user. One UTF-8 JSON request and one JSON
 response, each followed by newline. Maximum request 1 MiB; incomplete connections
 expire after 5 seconds. Responses contain `ok`; failures contain `error`.
-CLI client timeout is 15 seconds. There are at most 64 connected clients, 256
+CLI client timeout is 15 seconds. There are at most 64 connected clients, 512
 registrations, 8 KiB per configuration, 128 extra input paths and 128 command args.
 
 `open` validates every path and the registration limit before adding previews.
@@ -67,14 +68,14 @@ accepts bare file paths and expands relative filenames before sending this reque
 | `list` | — | Entries, live metrics, selection, layout, grid_size, preferences, theme, effective_theme, close_behavior, close_target, preload status, presentation, active count, watches, Qt platform |
 | `theme` | optional `mode`: `auto`, `dark`, `light` | Read appearance choice or save/apply it; returns `theme` and `effective_theme` |
 | `close_behavior` | optional `mode`: `left` / `last` | Read or atomically persist the close destination preference; returns `close_behavior` and `close_target`. Default `left`; `last` means last viewed survivor, with neighbor fallback |
-| `add` | `entry` object; optional boolean `make_current` (default true), `project_label` | Add/replace and atomically choose the project current preview; no global focus/selection change |
-| `project` | `action`: `upsert` (default), `list`, `remove`; `id`, optional `label` / `current` | Create/name group, choose existing member, list groups or remove an empty group |
-| `open` | `paths`: array of 0 to 256 absolute file paths | Reuse the first registration for each normalized path or add a new auto-kind preview, select the last, and show the window; empty array only shows |
+| `add` | `entry` object; optional boolean `make_current` (default true), `project_label`, `parent_project`, `parent_project_label` | Add/replace and atomically choose the group current preview, creating its parent project if supplied; no global focus/selection change |
+| `project` | `action`: `upsert` (default), `list`, `remove`; `id`, optional `label` / `current` / `parent` | Create/name project or group, assign a group's parent, choose existing member, list groups or remove an empty group |
+| `open` | `paths`: array of 0 to 512 absolute file paths | Reuse the first registration for each normalized path or add a new auto-kind preview, select the last, and show the window; empty array only shows |
 | `remove` | `id` | Stop/unload and unregister; selected removal shows the configured left/last-viewed survivor; preserve files |
-| `remove_many` | `ids` | Atomically close 1..256 registered IDs (duplicates collapse); validate/save before unloading, preserve files, skip closed entries for the close destination |
+| `remove_many` | `ids` | Atomically close 1..512 registered IDs (duplicates collapse); validate/save before unloading, preserve files, skip closed entries for the close destination |
 | `close_all` | — | Close/unregister all previews and stop their generators; retain files, window, layout and preferences |
 | `select` | `id`; optional boolean `make_current` (default false) | Change visible preview/page without raising window; `make_current:true` atomically promotes the grouped preview and selects it in one save |
-| `layout` | optional `layout`: `single` / `grid` / `overview` / `projects`, `grid_size`: integer 2 / 3 / 4; `project_grid_size`: 0 (auto) / 2 / 3 / 4; `group_projects`: boolean; `project_filter`: empty / ID / `@ungrouped` | Persist layout; live grids activate at most 16 entries, thumbnail overview activates none; Projects activates current previews in intersecting panes |
+| `layout` | optional `layout`: `single` / `grid` / `overview` / `projects` / `gallery`, `grid_size`: integer 2 / 3 / 4; `project_grid_size`: 0 (auto) / 2 / 3 / 4; `group_projects`: boolean; `project_filter`: empty / ID / `@ungrouped` | Persist layout; live grids activate at most 16 entries, thumbnail overview activates none; Projects activates current previews in intersecting panes; Gallery shows a compact thumbnail sidebar and one selected preview |
 | `zoom` | `id` | Atomically select the preview and switch to Single view; does not raise a hidden window |
 | `cache` | optional `action`: `stats` / `events` / `clear`; `events` accepts integer `limit` 1..128 (default 64), nonnegative integer `after` (default 0) | Bounded cache/churn metrics, recent event tail or RAM/small-derivative clearing |
 | `settings` | `id`, `settings` object | Validate, merge and persist entry options and remembered defaults |
@@ -86,6 +87,11 @@ accepts bare file paths and expands relative filenames before sending this reque
 | `quit` | — | Stop owned generators, close socket and exit |
 | `capture` | new absolute `path` | Save currently visible window as PNG; refuse overwrite |
 
+Empty waiting projects are session-only until populated. Closing or moving the
+last member removes its project and clears that project's filter; `close_all`
+clears all groups. Undo restores the project label and position. Startup removes
+legacy empty groups from saved state.
+
 Example registration:
 
 ```json
@@ -93,7 +99,7 @@ Example registration:
 ```
 
 Entry fields: `id` (optional, otherwise allocated), `label`, optional `project` ID, absolute `path`, `kind`
-(`auto`, `image`, `audio`, `video`, `model`, `material`, `graph`), absolute file `watch` list, generator `cwd`,
+(`auto`, `image`, `audio`, `video`, `model`, `material`, `graph`, `file`), absolute file `watch` list, generator `cwd`,
 argument-array `command`, timeout seconds and `settings`. Material entries also
 have `maps` containing absolute `normal` / `orm` file paths. Files may be missing;
 generator cwd must exist at registration. No shell, URI execution, TCP listener,
@@ -102,6 +108,20 @@ and video extensions are detected automatically. OGG defaults to audio; use
 `--kind video` for an OGG video. Explicit `audio` or `video` accepts other local
 formats supported by the installed libmpv codecs. Audio/video streaming is exempt
 from the 256 MiB image/model/material file limit.
+
+File registrations optionally accept `before`, an absolute local file path,
+for a live comparison against `path` (after). Both files may initially be missing.
+Each text input is limited to 2 MiB, 20,000 newlines and 16,384 characters per line
+and requires UTF-8 without binary controls. File-only settings are `file_mode`
+(`source`, `rendered`, `inline`, `split`), boolean `file_wrap` and boolean
+`file_context`. Invalid values are rejected. Unavailable modes fall back to a
+supported mode for that document. Comparisons default to inline; soft wrap
+defaults on in source and both diff modes. Loaded file metrics include the
+effective `file_mode`, boolean `file_wrap`, `file_image_decodes`, bounded
+`file_image_cache_cost`, and the displayed pane's `file_scroll_y` /
+`file_scroll_max` (the after pane for split comparisons). See
+[Files and diffs](../specs/files.md) and the
+[presentation inventory](../specs/presentation.md).
 
 An identical validated registration retains its hidden configuration or healthy
 loaded view when watched inputs and the last successful output/dependency
@@ -121,7 +141,11 @@ model files remain waiting. Graph UI target changes use the same settings route.
 Boolean settings: `grid`, `axes`, `edges`, `orthographic`, `nearest`, `materials`,
 `textures`, `lock_horizon`, `triangles`, `paused`, `muted`, `loop`. Materials/textures/horizon/triangles
 and loop default to true. Video defaults to muted and unpaused; audio defaults
-to unmuted and paused. Remembered per-kind preferences override these defaults. Numeric settings:
+to unmuted and paused. For images, `nearest` also accepts `"auto"` (the default
+when absent): no AA for raster sources up to 256 × 256, AA for larger sources and
+SVGs. Boolean `true` means nearest-neighbor / AA off, and `false` means smooth /
+AA on. Image metrics report effective `nearest` and `filtering_auto`.
+Remembered per-kind preferences override these defaults. Numeric settings:
 `light` in 0–5, `roughness` / `metallic` in 0–1. `background` is `dark`, `light` or
 `checker`; checker applies to images. Material `shape` is `sphere`, `cube` or `plane`.
 Material roughness/metallic scalars apply when no ORM map is supplied.
@@ -183,7 +207,7 @@ from unused removals, recent refaults, repeated writes and empty prune scans;
 `work_us` covers measured decode/prune/reclamation work. Per-session metadata logs
 live at `STATE/cache-churn-v1.jsonl`, with one bounded backup.
 All changed settings are remembered for future previews, grouped as `image`,
-`audio`, `video` and `3d` (models/materials); `list.preferences` exposes these defaults.
+`audio`, `video`, `file` and `3d` (models/materials); `list.preferences` exposes these defaults.
 Explicit `add.entry.settings` overrides them without changing remembered defaults.
 
 For `.vxz`/`.ovoxel` models with the installed F3D4 TRELLIS reader,
@@ -219,14 +243,21 @@ faces and material samples; it is null for unavailable formats/metadata. Mesh
 instances and degenerate primitives are included. The `triangles` option controls
 the per-view badge without reloading and defaults to true, in all layouts.
 Active entry diagnostics expose `viewport`, `controls.options` geometry and
-`status_visible`, plus `overlays` name/controls/status/triangles geometry/visibility;
+`status_visible`, plus `overlays` name/controls/close/status/triangles geometry/visibility;
 top-level `options_open` reports an active popup. These support
 isolated input checks and are not persisted. These are diagnostic counters,
 not a guarantee of GPU-memory reclamation or perceptual quality.
+`overlays.close` identifies the actual close button independently of neighboring
+selection controls or toolbar order. Native input automation should use its center.
 Top-level `presentation` is empty without a window; otherwise it reports
-`fullscreen`, temporary `single_preview`, window `width`/`height`, `menu_visible`,
+`fullscreen`, temporary `single_preview`, window `x`/`y`/`width`/`height`,
+native `active`/`exposed` readiness, `menu_visible`,
 `toolbar_visible`, and `notice` geometry/visibility plus `sliding`. These are
 transient read-only UI diagnostics, independent of persisted layout/settings.
+`presentation.comparison_picker` reports visibility and, while open, the captured
+source ID, search query, dialog size/origin, search field and thumbnail-grid
+geometry/readiness. Grid and search coordinates are local to the dialog; its
+origin is relative to the main window. `capture` captures the picker while open.
 Playback `controls` also report `focused` for keyboard navigation checks;
 video adds a `fullscreen` button alongside the existing playback controls.
 Models expose a bounded `metrics.animations` clip-name array (up to 256 names,
@@ -274,7 +305,9 @@ Entry `selected` identifies the shortcut/menu target independently of decoded
 cards have no selection highlight. Outside previews, the last target is retained.
 
 `{"method":"compare","ids":["before","after"],"camera_sync":true}` displays
-two model/material previews with linked orbit, pan and zoom. Use `ids:[]` to
+two images with linked Fit-relative zoom/normalized pan, or two model/material
+previews with linked orbit, pan and zoom. Image/3D mixed pairs are rejected.
+Image filtering/background settings remain independent. Use `ids:[]` to
 end comparison, or omit `ids` to toggle `camera_sync` on the current pair.
 `list.comparison` and `list.camera_sync` report the saved comparison state.
 `{"method":"camera_view","id":"before","view":"front"}` changes a visible
@@ -301,10 +334,16 @@ the asset registry or remembered media defaults.
 Project metadata, CLI inference, persistence/fallback and visible-pane ownership
 are specified in [Projects](../specs/projects.md). Socket clients send
 `entry.project`; omitted membership is preserved on reconnect, while empty string
-means ungrouped. `list.projects` contains ordered `{id,label,current,entries}`
+means ungrouped. `list.projects` contains ordered `{id,label,current,entries,parent,parent_label}`
 records. Creating/promoting a project never selects a global preview or raises
 the window. `make_current:false` keeps an existing current member during batch
 sends. Project labels and memberships are independent of Codex conversation IDs.
+Optional `parent` in a project upsert moves that gallery into an existing
+top-level project; empty string detaches it. Cycles and deeper nesting reject.
+`add.parent_project` creates/assigns the wider project atomically with its group
+and asset; `parent_project_label` names it. Filters and project-header actions
+include descendant groups. Version-1 saved rows retain optional `parent`;
+parents with populated groups persist without a direct preview of their own.
 
 Native image/model loads publish asynchronously. `metrics.loading` remains true
 until completion. Ordinary models expose `metrics.command_pending` while an
@@ -312,3 +351,31 @@ input/settings/seek command or its rendered frame is outstanding. Clients that
 need completed pixels wait for both fields to clear. `list.performance` contains
 finite startup and most recent layout/reconcile phase timings (ms), with no
 sampling timer. Image, model and preload diagnostics include their own load times.
+
+`layout gallery` uses the Overview project filter and grouping beside one active
+selected preview. Filter transitions choose the first member when necessary and
+persist selection atomically. `presentation.gallery` reports `visible`,
+`selected` and `sidebar_width`; the existing `presentation.overview` exposes
+compact tile geometry, readiness and scroll state.
+## Selection previews
+
+`entry.kind: "selection"` (or automatic `.selection.json`) uses the versioned
+[selection manifest](../specs/selection.md). Optional `entry.decisions` is a
+separate absolute result file path. Native UI choices write its
+`asset-preview-decisions/v1` JSON atomically; no socket request records a user
+answer. Live metrics expose `selection_decisions` (IDs, current content digests,
+answers), totals, result path, writable state and errors. Hidden views unload;
+agents may read the result file offline and must compare current item digests.
+
+`four_view` is a boolean per-model/material setting. It enables a four-pane
+camera layout within that asset, independently of the window layout. It is not
+a shared 3D default; component inspection keeps its single view.
+
+The former `quad_view` camera-layout key remains accepted on registration restore,
+add and settings patches and is normalized to `four_view` in persisted/status
+settings. `edge_topology` is `source` (default) or `triangles`, independently of
+`four_view`; it is per registration and excluded from defaults. Set `edges:true`
+for the overlay through RPC. The UI topology selector enables it automatically.
+Native F3D4 OBJ/PLY imports retain source quads/n-gons and expose scalar evidence
+in `metrics.topology`; GLB/glTF reports zero source quads. Other readers retain
+source-edge behavior; explicit triangulated-edge mode supports OBJ/PLY/glTF.

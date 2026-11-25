@@ -1,6 +1,9 @@
 # Asset Preview
 
 Read `specs/_readme.md` and the owning spec before changes; update contracts with code.
+The user's preferred home view is Overview, all projects, grouped by project.
+Esc returns there from other views (exit fullscreen first). Agent sends preserve
+the user's current layout; use the preferred view when explicitly choosing one.
 Work in this checkout. Native C++/Qt development uses the host's existing CMake,
 compiler, Qt 6 and libf3d. The Python CLI uses only the standard library.
 Do not install dependencies automatically or create PRs unless requested.
@@ -8,7 +11,7 @@ Use Gamescope's headless backend for automated visual runs and verify the
 actual OpenGL renderer. User-requested visible launches are allowed.
 Only visible ordinary previews may own F3D engines, players or running generators.
 The window-owned thumbnail queue may run two low-priority raster decodes plus
-one finite offscreen model/material thumbnail child. Visible images lead;
+one finite content thumbnail child (model/material, file or video). Visible images lead;
 nearby and other open assets warm after a quiet period while the window is
 visible and ordinary previews are ready. Thumbnail work never activates an
 ordinary preview, media player or asset generator; hiding cancels publication.

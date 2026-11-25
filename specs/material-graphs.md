@@ -21,6 +21,18 @@ state and description. A resizable right sidebar splits vertically: the upper
 pane holds the shaded material or selected saved map, and the lower pane holds
 the selected node's thumbnail and parameters. Compact charcoal surfaces, small
 corner radii and dense controls apply to the shared graph presentation.
+The material pane has zoom out/in, Fit and a checkable Pan tool. Scroll zooms
+(including pixel-delta trackpad events). Shaded targets orbit on left drag and
+pan with the Pan tool, right/middle drag or Shift+drag. Saved maps pan on drag
+and zoom at the pointer, bounded to 0.05–32 times Fit. Double-click fits either
+view. Navigation controls disable until a preview is loaded; map decoding
+completion updates them without polling. Pan mode survives target/channel changes
+within the live graph. Fit graph continues to affect only graph nodes.
+Failed imports can retain a previous frame, but leave navigation disabled and
+publish `preview_navigation.error`; old image dimensions or a retained engine
+do not establish readiness. A later refresh retries failed imports even if the
+source size/mtime is unchanged. Successful loading clears the error and restores
+the controls.
 Compact cards hide the sidebar and release its shaded renderer; graph
 thumbnails, hover information and expandable nodes stay available. Embedded
 graphs reserve room for the owning card's title/close controls.
@@ -43,6 +55,13 @@ waiting until its file is created. UI choice and sidebar split survive graph
 refreshes; the Atlas workbench also saves them across minimize/reopen. Metrics
 include `preview_target`, `inspector_side`, `inspector_visible`, and the nested
 renderer's successfully loaded `material_model` path.
+`preview_navigation` reports toolbar readiness, Pan mode and button centers in
+the owning top-level widget's coordinates. Native model `display.window_id`
+identifies its existing surface for focused input checks. Additive helpers in
+`preview_navigation.h` provide bounded zoom/pan without changing PreviewView or
+ModelWorker's binary layout or virtual interfaces. Editorial compiles these
+sources against its pinned prepared backend; ordinary service binaries are not
+rebuilt by an Editorial build.
 
 `FILE.live.json` is optional agent progress: status, maps, node overrides and
 at most 500 operations. The material-owning project's publisher is responsible

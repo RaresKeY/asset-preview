@@ -50,6 +50,120 @@ class OverviewIntegration(unittest.TestCase):
                 env=self.fixture.env,cwd=harness.PROJECT_ROOT,stdin=subprocess.DEVNULL,stdout=log,stderr=log,start_new_session=True)
         harness.eventually(self.fixture.ping)
 
+    @unittest.skipUnless(harness.GPU,harness.GPU_REASON)
+    def test_single_arrows_follow_overview_project_order(self):
+        # Interleaved registrations expose a different order from project rows.
+        for key,project in [('a1','alpha'),('b1','beta'),('a2','alpha'),
+                            ('legacy',''),('b2','beta'),('a3','alpha')]:
+            self.image(key,project=project)
+        self.rpc({'method':'show'})
+        input=XInput(); self.addCleanup(input.close)
+
+        def walk(expected,grouped=True,project=''):
+            self.rpc({'method':'layout','layout':'single',
+                      'group_projects':grouped,'project_filter':project})
+            self.assertEqual(self.rpc({'method':'list'})['project_filter'],project,
+                             'Single layout discarded an explicitly requested filter')
+            self.rpc({'method':'select','id':expected[0]})
+            self.loaded(expected[0])
+            def arrow(key,target):
+                input.press(key)
+                harness.eventually(lambda:self.rpc({'method':'list'})['selected']==target)
+                self.loaded(target)
+            arrow('Left',expected[0])
+            for target in expected[1:]: arrow('Right',target)
+            arrow('Right',expected[-1])
+            for target in reversed(expected[:-1]): arrow('Left',target)
+            arrow('Left',expected[0])
+
+        walk(['a1','a2','a3','b1','b2','legacy'])
+        walk(['a1','b1','a2','legacy','b2','a3'],grouped=False)
+        walk(['b1','b2'],project='beta')
+
+    def test_home_default_without_saved_layout_and_explicit_layout_restore(self):
+        self.image('first',project='alpha')
+        self.rpc({'method':'quit'}); self.fixture.process.wait(timeout=5)
+        registry=self.fixture.state_dir/'previews.json'
+        saved=json.loads(registry.read_text())
+        for field in ('layout','group_projects','project_filter'): saved.pop(field,None)
+        registry.write_text(json.dumps(saved))
+        self.restart_stopped()
+        state=self.rpc({'method':'list'})
+        self.assertEqual(state['layout'],'overview')
+        self.assertTrue(state['group_projects']); self.assertEqual(state['project_filter'],'')
+        for layout in ('single','grid','projects','overview'):
+            with self.subTest(layout=layout):
+                self.rpc({'method':'layout','layout':layout,'group_projects':False,'project_filter':'alpha'})
+                self.restart()
+                state=self.rpc({'method':'list'})
+                self.assertEqual(state['layout'],layout)
+                self.assertFalse(state['group_projects']); self.assertEqual(state['project_filter'],'alpha')
+
+    @unittest.skipUnless(harness.GPU,harness.GPU_REASON)
+    def test_native_escape_returns_to_all_projects_grouped_overview(self):
+        self.image('first',project='alpha'); self.image('second',project='beta')
+        self.fixture.add_model(project='alpha')
+        movie=self.root/'escape.mp4'; video(movie)
+        self.rpc({'method':'add','entry':{'id':'movie','path':str(movie),'project':'beta',
+            'settings':{'paused':True,'muted':True}}})
+        self.rpc({'method':'show'})
+        input=XInput(); self.addCleanup(input.close)
+        def state(): return self.rpc({'method':'list'})
+        def focus(key):
+            viewport=self.row(key)['viewport']
+            input.click(viewport['x']+viewport['width']//2,viewport['y']+viewport['height']//2)
+        def home():
+            input.press('Escape')
+            result=harness.eventually(lambda:state() if state()['layout']=='overview' and
+                state()['group_projects'] and state()['project_filter']=='' else None)
+            self.assertEqual(result['active'],0)
+            self.assertEqual([g['id'] for g in result['presentation']['overview']['groups']],['alpha','beta'])
+            return result
+        for layout in ('single','grid','projects','overview'):
+            with self.subTest(layout=layout):
+                self.rpc({'method':'layout','layout':layout,'group_projects':False,'project_filter':'alpha'})
+                if layout=='overview':
+                    tile=state()['presentation']['overview']['tiles'][0]
+                    input.motion(tile['x']+30,tile['y']+40)
+                else:
+                    self.rpc({'method':'select','id':'first','make_current':True}); self.loaded('first'); focus('first')
+                selected=state()['selected']; self.assertEqual(home()['selected'],selected)
+        for key in ('model','movie'):
+            with self.subTest(native=key):
+                self.rpc({'method':'layout','layout':'single'})
+                self.rpc({'method':'select','id':key}); row=self.loaded(key); focus(key)
+                renderer=row['metrics']['renderer']
+                self.assertFalse(any(s in renderer.lower() for s in ('llvmpipe','softpipe','software','unknown')),renderer)
+                (self.root/(key+'-renderer.json')).write_text(json.dumps({'renderer':renderer}))
+                input.press('F11'); harness.eventually(lambda:state()['presentation']['fullscreen'])
+                input.press('Escape'); harness.eventually(lambda:not state()['presentation']['fullscreen'])
+                self.assertEqual(state()['layout'],'single'); self.assertEqual(home()['selected'],key)
+        self.rpc({'method':'add','entry':{'id':'other-model','path':str(self.fixture.model),'project':'beta'}})
+        self.rpc({'method':'compare','ids':['model','other-model']})
+        self.loaded('model'); focus('model'); self.assertFalse(home()['comparison'])
+        self.fixture.inspect('open',review=str(self.fixture.review))
+        harness.eventually(lambda:self.fixture.inspect()['loaded'],timeout=30)
+        self.fixture.hardware_renderer(); focus('model')
+        home(); self.assertFalse(self.fixture.inspect()['loaded'])
+        self.rpc({'method':'layout','layout':'single','group_projects':False,'project_filter':'alpha'})
+        self.rpc({'method':'select','id':'first'}); self.loaded('first'); focus('first')
+        registry=self.fixture.state_dir/'previews.json'; backup=registry.with_suffix('.before')
+        registry.rename(backup); registry.mkdir()
+        try:
+            input.press('Escape'); time.sleep(.2)
+            result=state()
+            self.assertEqual(result['layout'],'single'); self.assertTrue(self.row('first')['active'])
+            self.assertFalse(result['group_projects']); self.assertEqual(result['project_filter'],'alpha')
+        finally: registry.rmdir(); backup.rename(registry)
+        home()
+        modified=registry.stat().st_mtime_ns
+        home(); self.assertEqual(registry.stat().st_mtime_ns,modified,'Escape at home must not save again')
+        self.settled(); self.rpc({'method':'capture','path':str(self.root/'overview-home-wide.png')})
+        input.x.XResizeWindow.argtypes=[ctypes.c_void_p,ctypes.c_ulong,ctypes.c_uint,ctypes.c_uint]
+        input.x.XResizeWindow(input.display,input.window,520,600); input.x.XFlush(input.display)
+        harness.eventually(lambda:state()['presentation']['width']==520)
+        self.settled(); self.rpc({'method':'capture','path':str(self.root/'overview-home-narrow.png')})
+
     def test_close_default_left_boundaries_and_nonselected(self):
         for key in ("one","two","three","four"): self.image(key)
         self.assertEqual(self.rpc({"method":"list"})["close_behavior"],"left")
@@ -395,6 +509,30 @@ class OverviewIntegration(unittest.TestCase):
         self.assertLessEqual(after-before,3,"overview must settle without a polling/render loop")
         self.rpc({"method":"zoom","id":"image-79"})
         self.assertEqual(self.rpc({"method":"list"})["layout"],"single"); self.assertTrue(self.loaded("image-79")["active"])
+
+    @unittest.skipUnless(harness.GPU,harness.GPU_REASON)
+    def test_departing_model_captures_thumbnail_before_worker_destruction(self):
+        model=self.root/'departure.obj'
+        model.write_text('v -1 -1 0\nv 1 -1 0\nv 0 1 0\nf 1 2 3\n')
+        self.rpc({'method':'add','entry':{'id':'departure','path':str(model)}})
+        self.image('next')
+        self.rpc({'method':'layout','layout':'single'})
+        self.rpc({'method':'select','id':'departure'});self.rpc({'method':'show'})
+        self.loaded('departure')
+        harness.eventually(lambda:not self.row('departure')['metrics']['command_pending'])
+        sequence=self.rpc({'method':'list'})['cache']['diagnostics']['last_seq']
+        self.rpc({'method':'select','id':'next'})
+        def captured():
+            events=self.rpc({'method':'cache','action':'events','after':sequence})['events']
+            return events if any(event['tier']=='ram' and event['action']=='admit' and
+                event['reason']=='thumbnail' and event.get('detail',{}).get('source')==str(model) for event in events) else None
+        events=harness.eventually(captured,description='departure capture before scene destruction')
+        self.assertFalse(self.row('departure')['active'])
+        self.assertNotIn('metrics',self.row('departure'))
+        self.assertFalse(any(event['tier']=='thumbnail' and event['action']=='generated' for event in events),
+            'Departure must use the existing scene rather than importing a thumbnail child')
+        self.rpc({'method':'hide'})
+        self.assertEqual(self.rpc({'method':'list'})['cache']['bytes'],0)
 
     @unittest.skipUnless(harness.GPU,harness.GPU_REASON)
     def test_unvisited_models_and_materials_get_serial_low_priority_thumbnails(self):

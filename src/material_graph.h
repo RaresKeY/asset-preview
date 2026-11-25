@@ -15,6 +15,7 @@ class QComboBox;
 class QPushButton;
 class QVBoxLayout;
 class QSplitter;
+class QToolButton;
 
 namespace MaterialGraph {
 struct Node {
@@ -55,6 +56,9 @@ public:
     QString previewModelPath() const { return modelPath; }
     QJsonObject previewState() const;
     void restorePreviewState(const QJsonObject&);
+    bool zoomPreview(double factor);
+    bool panPreview(QPointF viewportDelta);
+    bool fitPreview();
 protected:
     void resizeEvent(QResizeEvent*) override;
 private:
@@ -62,6 +66,7 @@ private:
     void inspector();
     void updateMaterial();
     void watchModel();
+    void updatePreviewControls();
     MaterialGraph::Document doc;
     QGraphicsScene* scene;
     QGraphicsView* graph;
@@ -73,11 +78,13 @@ private:
     QWidget* materialHost;
     QWidget* inspectorPanel=nullptr;
     QPushButton* fitButton=nullptr;
+    QToolButton *zoomInButton,*zoomOutButton,*previewFitButton,*panButton;
     QVBoxLayout* materialLayout;
     ModelHandle material{};
     QJsonObject materialConfig;
     QJsonObject requestedPreviewSettings;
     QString materialStamp;
+    QString materialError;
     QString selected;
     QString modelPath;
     QFileSystemWatcher modelWatcher;

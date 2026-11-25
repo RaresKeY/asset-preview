@@ -53,6 +53,11 @@ These sampling controls also live in the options menu for narrow/condensed cards
 Narrow cards retain play, clip selection and seeking; secondary controls remain
 in the model options menu. Static models expose no animation bar. Fit/orbit,
 camera persistence, E edges and M triangle counts retain their normal 3D behavior.
+The native count badge stays above the animation transport. Each layout pass
+commits only its final geometry, so readout-driven layout requests do not move
+it through the static-model position and flash it during playback.
+Readout layout requests also retain the existing native overlay stacking order;
+structural updates, resize and show still establish it normally.
 On the model surface, Space toggles playback, Home restarts and Shift+Left/Right
 seek five seconds. Plain arrows continue preview navigation. Focused controls
 retain their native keyboard behavior.
@@ -86,22 +91,29 @@ Shading-driven engine replacement preserves the current position where possible.
 Successful imports cancel older retries and acknowledge the loaded output
 stamps, so a delayed watcher notification for that same save does not reset a
 subsequently selected pose. Explicitly watched generator inputs remain pending
-for their normal source-save handling.
+for their normal source-save handling. While an import is in flight, delayed
+output notifications for its same complete output stamps retain it and retry
+timers defer to it. Different output stamps still supersede the current load.
 
 ## Lifetime and observability
 
 Only a visible, exposed, playing animated scene schedules animation frames,
-using a single-shot Qt timer and elapsed-time playback. Smooth playback retains
-the 33 ms cadence. Stepped playback schedules the next sampling boundary (or clip
-end), adjusted for playback speed and time already spent rendering. Missed
+using a single-shot Qt timer and elapsed-time playback. Smooth playback follows
+60 Hz elapsed-time deadlines, including pose evaluation and render time instead
+of waiting a full interval after each render. Stepped playback schedules the next
+sampling boundary (or clip end), adjusted for playback speed and time already spent rendering. Missed
 boundaries catch up to the current elapsed-time pose without queuing stale frames.
 Unchanged samples skip pose evaluation, including incidental overlay/camera
-repaints. F3D owns pose evaluation, skinning through `loadAnimationTime` and its
-offscreen OpenGL context on the native render thread. Qt owns the GUI frame surface.
+repaints. F3D owns pose evaluation and skinning through `loadAnimationTime` on
+the native render thread. Each live frame evaluates its pose and renders directly
+into the Qt-owned native window in one context activation. Offscreen contexts
+serve preparation and explicit captures; captures retain the evaluated pose and
+do not publish live frames or complete pending scene loads.
 Static, paused, hidden, minimized and off-page scenes have no animation timer.
 The shared visible-only rule unloads engines off-page/hidden. Returning reloads
 from the start, applying that registration's transport preferences. Playback UI
-notifications are capped at approximately 10 Hz without a polling timer; low-rate
+notifications are capped at approximately 10 Hz without a polling timer; publishing
+a native frame publishes metadata without refreshing the transport widgets. Low-rate
 stepped playback publishes at pose changes, rather than waking for clock text.
 
 Loaded model metrics expose `animations` (clip names), and for animated files:
@@ -122,8 +134,15 @@ ownership using deterministic standard-library GLB fixtures in Gamescope headles
 `tools/test.sh video-controls` also checks narrow/condensed animation widgets,
 large and changing desktop fonts, speed/FPS edits, long-clip and fractional-pose
 steps, partial terminal frames, stale drag cancellation, readout reflow and
-keyboard focus order. Native timeline keys and stepping from elapsed position
+keyboard focus order. The GPU lane also checks smooth presentation cadence without
+display readbacks and paused settling; `async-loading` checks that frame publication
+preserves explicit control notifications without notifying controls for each frame.
+Native timeline keys and stepping from elapsed position
 between low-rate deadlines are covered by `animation-gpu`.
+`AnimationBadgeIntegration` observes the real X11 badge window's structure events:
+playing frames must produce zero badge configuration changes at a fixed size.
+It also checks M visibility toggles, placement after narrow resizing, unchanged
+triangle counts, engine reuse and the actual hardware renderer.
 
 Frame-ruler redesign evidence: `evidence/animation-redo/` contains matched hardware
 captures and three-second 2-fps fixture measurements. On the RTX 2080 Ti, draws

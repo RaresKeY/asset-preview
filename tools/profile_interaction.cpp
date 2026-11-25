@@ -4,8 +4,9 @@
 #include <QElapsedTimer>
 #include <QJsonArray>
 #include <QJsonDocument>
+#include <QFile>
 #include <QMouseEvent>
-#include <QOpenGLWindow>
+#include <QSurfaceFormat>
 #include <QThread>
 #include <QTimer>
 #include <iostream>
@@ -14,7 +15,7 @@
 
 // Run beside the selected backend module, under tools/offscreen.sh (or the
 // private Wayland harness). This measures Qt input delivery to completed-frame
-// repaint admission, not physical display/scanout latency.
+// presentation notification, not physical display/scanout latency.
 class Paints final : public QObject {
 public:
     PreviewView* view=nullptr;
@@ -46,17 +47,27 @@ int main(int argc,char** argv) {
     QSurfaceFormat::setDefaultFormat(format);
     QApplication app(argc,argv);
     try {
-        if(argc<2)throw std::runtime_error("Expected model path [burst|stream] [capture.png]");
+        if(argc<2)throw std::runtime_error("Expected model path [burst|stream] [capture.png] [pan|orbit] [registration.json]");
         const bool burst=argc>2 && QString::fromLocal8Bit(argv[2])=="burst";
-        const QJsonObject cfg{{"kind","model"},{"path",QString::fromLocal8Bit(argv[1])},
+        const bool pan=argc>4 && QString::fromLocal8Bit(argv[4])=="pan";
+        QJsonObject cfg{{"kind","model"},{"path",QString::fromLocal8Bit(argv[1])},
             {"settings",QJsonObject{{"lock_horizon",true},{"paused",true},{"grid",false},{"orthographic",true}}}};
+        if(argc>5) {
+            QFile registration(QString::fromLocal8Bit(argv[5]));
+            if(!registration.open(QIODevice::ReadOnly))throw std::runtime_error("Cannot read registration");
+            const auto saved=QJsonDocument::fromJson(registration.readAll()).object();
+            cfg["settings"]=saved["settings"]; cfg["camera"]=saved["camera"];
+        }
         QString error; bool loaded=false;
         const auto handle=createModel(cfg,nullptr,[&](bool ok,QString failure) {
             if(!ok)error=failure;
             loaded=true;
         },{});
         std::unique_ptr<QWidget> surface(handle.surface);
-        surface->resize(1000,680); surface->show(); handle.view->reload(cfg,error);
+        const int width=qEnvironmentVariableIntValue("ASSET_PREVIEW_PROFILE_WIDTH");
+        const int height=qEnvironmentVariableIntValue("ASSET_PREVIEW_PROFILE_HEIGHT");
+        surface->resize(width>0?std::clamp(width,100,7680):1000,height>0?std::clamp(height,100,4320):680);
+        surface->show(); handle.view->reload(cfg,error);
         QElapsedTimer deadline; deadline.start();
         auto wait=[&](auto done) {
             while(!done()) {
@@ -74,25 +85,25 @@ int main(int argc,char** argv) {
         const auto initial=handle.view->cameraState();
         Paints observer; observer.view=handle.view; surface->installEventFilter(&observer);
         auto* native=dynamic_cast<QObject*>(handle.view);
-        if(auto* window=qobject_cast<QOpenGLWindow*>(native))
-            QObject::connect(window,&QOpenGLWindow::frameSwapped,&observer,[&observer]{observer.frame();});
+        handle.view->framePresented=[&observer]{observer.frame();};
         auto mouse=[&](QEvent::Type type,QPointF point,Qt::MouseButton button,Qt::MouseButtons buttons) {
             QMouseEvent event(type,point,surface->mapToGlobal(point),button,buttons,Qt::NoModifier);
             QApplication::sendEvent(native,&event);
         };
-        QPointF point(300,300); mouse(QEvent::MouseButtonPress,point,Qt::LeftButton,Qt::LeftButton);
+        const auto button=pan?Qt::RightButton:Qt::LeftButton;
+        QPointF point(300,300); mouse(QEvent::MouseButtonPress,point,button,button);
         constexpr int count=96;
         observer.clock.start(); double stopped=0;
         for(int i=0;i<count;++i) {
             point+=QPointF(2,i%2?-.5:.5);
-            mouse(QEvent::MouseMove,point,Qt::NoButton,Qt::LeftButton);
+            mouse(QEvent::MouseMove,point,Qt::NoButton,button);
             if(!burst) {
                 const auto target=(i+1)*8.;
                 while(observer.clock.nsecsElapsed()/1e6<target){app.processEvents();QThread::msleep(1);}
             }
         }
         stopped=observer.clock.nsecsElapsed()/1e6;
-        mouse(QEvent::MouseButtonRelease,point,Qt::LeftButton,Qt::NoButton);
+        mouse(QEvent::MouseButtonRelease,point,button,Qt::NoButton);
         observer.finalInput=true;
         wait([&]{
             const auto metrics=handle.view->metrics();
@@ -117,13 +128,16 @@ int main(int argc,char** argv) {
         const auto thumbnail=handle.view->thumbnailSnapshot({256,160});
         if(thumbnail.isNull() || thumbnail.width()>256 || thumbnail.height()>160)
             throw std::runtime_error("Bounded departure thumbnail missing");
-        if(handle.view->metrics()["renders"]!=beforeThumbnail["renders"])
-            throw std::runtime_error("Departure thumbnail unnecessarily rendered the scene");
+        if(handle.view->metrics()["presented_frames"]!=beforeThumbnail["presented_frames"])
+            throw std::runtime_error("Departure capture presented an extra live frame");
         const auto digest=QCryptographicHash::hash(QByteArrayView(reinterpret_cast<const char*>(frame.constBits()),frame.sizeInBytes()),QCryptographicHash::Sha256).toHex();
         if(argc>3 && !frame.save(QString::fromLocal8Bit(argv[3])))throw std::runtime_error("Cannot save interaction frame");
         const QJsonObject result{{"renderer",renderer},{"platform",QGuiApplication::platformName()},
-            {"scope","Qt mouse delivery to native frameSwapped callback; no physical input or scanout clock"},
+            {"scope","Qt mouse delivery to worker presentation notification; no physical input or scanout clock"},
             {"mode",burst?"burst":"125Hz stream"},{"events",count},{"input_end_ms",stopped},
+            {"operation",pan?"pan":"orbit"},
+            {"width",surface->width()},{"height",surface->height()},
+            {"gltf_import",handle.view->metrics()["gltf_import"]},
             {"settled_ms",observer.settled},{"tail_ms",observer.settled-stopped},
             {"renders",renders-before},{"paint_ms",paints},{"initial_camera",initial},{"final_camera",handle.view->cameraState()},
             {"readbacks_during_input",readbacks},{"frame_transport",handle.view->metrics()["frame_transport"]},

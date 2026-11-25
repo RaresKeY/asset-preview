@@ -33,6 +33,8 @@ public:
     void refresh();
     bool setToolMode(const QString& mode);
     bool commitPendingCuts();
+    QJsonObject restartState() const;
+    void restoreRestartState(const QJsonObject&);
 
     std::function<void(QString)> reportError;
 
@@ -53,6 +55,9 @@ private:
     void updateSelection();
     void updateVisibility();
     void updateCuts();
+    void updateDisplay();
+    void queueDisplay(const QString&,QJsonValue);
+    bool flushDisplay();
     void updateCommentControls();
     void updateNoteSelection();
     void updatePartsSummary();
@@ -99,6 +104,11 @@ private:
     QPlainTextEdit *comment, *noteText;
     QComboBox *commentScope, *commentStatus;
     QTimer* cutTimer;
-    QGroupBox *partsBox, *cutsBox;
+    QTimer* displayTimer;
+    QCheckBox *partColors, *capCuts;
+    QSlider* explosion;
+    QLabel *explosionValue, *sectionSummary;
+    QJsonObject pendingDisplay;
+    QGroupBox *partsBox, *cutsBox, *displayBox;
     QString toolMode = "parts";
 };

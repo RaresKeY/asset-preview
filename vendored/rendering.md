@@ -1,5 +1,26 @@
 # Rendering and desktop conventions
 
+## Native Markdown compatibility
+
+The installed Code - OSS 1.138.0 Markdown extension's `dist/extension.js` enables
+HTML in its markdown-it renderer; its `media/markdown.css` constrains images to
+their container. Upstream reference: [Markdown engine](https://github.com/microsoft/vscode/blob/main/extensions/markdown-language-features/src/markdownEngine.ts).
+Qt's native mixed Markdown/HTML importer dropped text after inline HTML in the
+local probe, so the renderer retains its existing HTML-disabled Qt parse.
+
+`src/markdown_compat.*` uses MD4C's public source-event callbacks to identify real
+`br`/`img` tags, preserving code, escaped examples and destinations. Those tags
+become native text separators and image objects after Markdown parsing. MD4C is
+already a Qt Gui runtime dependency on the workstation; the public API is now a
+direct system dependency. Ordinary Markdown without candidate tags retains its
+single-parser path. No browser, JavaScript engine or new resource-loading path
+is introduced. [Dependency and license notice](THIRD_PARTY_NOTICES.md).
+
+This implements the common catalogue presentation subset, rather than Code's
+extension ecosystem or arbitrary HTML/CSS. The owning behavior and image/resource
+bounds live in [Files](../specs/files.md); measured checks and comparisons live
+in the existing verification record.
+
 An optional static-model inspection adapter uses installed VTK 9.7+ directly,
 through public importer/hierarchy, external-window, picking and clipping APIs.
 It is a separate lazy module and does not change ordinary F3D rendering. The
@@ -21,14 +42,16 @@ lazy and the application's allocator remains glibc. This is a package compatibil
 requirement, not an allocator migration.
 
 F3D supplies ordinary scene import, materials, camera and rendering on one native
-worker thread. Each visible scene owns an offscreen producer GL context. F3D's
-external-context API renders into shared GPU textures; an independent native
-QOpenGLWindow context blits the latest texture directly for display. A bounded
-three-target pool, replaceable mailbox and producer/display GL fences avoid
-per-frame CPU readback, image conversion and upload. Requested screenshots read
-the completed texture; departure thumbnails are downsized on the GPU before
-their small readback. Pending mouse motion
-is applied in bounded ordered batches before rendering so intermediate pointer
+worker thread. Each visible scene owns one GL context. Imports use an offscreen
+surface; live frames render directly into the embedded native QWindow and swap
+on the worker. A surface lifetime lock protects drawing against native surface
+teardown. There is no intermediate display texture or GUI presentation context.
+The worker interface has no image-frame callback. Camera input needs no GL
+context; live pose evaluation and rendering share one native context activation.
+Headless scene draws also avoid readback until an explicit capture is requested.
+Screenshots allocate a temporary capture target; departure thumbnails enqueue a
+finite bounded capture before scene destruction, keeping navigation asynchronous.
+Pending mouse motion is applied in bounded ordered batches before rendering so intermediate pointer
 positions do not each incur that cost. Static scenes schedule no continuing
 render/copy loop; off-page ordinary engines are destroyed.
 Video and component inspection retain embedded QOpenGLWindow surfaces and use
@@ -53,8 +76,11 @@ Python runtime; no comparative PySide6 memory benchmark is claimed.
 The host also supports F3D 4.x through `src/f3d_compat.h`. On that API, an
 optional reader in the existing lazy module uses the installed F3D plugin SDK
 factory ABI and public `vtkF3DGLTFImporter`/VTK image-array APIs. It retains the
-native importer, including armature shaders, and only hoists tuple-count/stride
-invariants from unsigned-byte component fills. No importer/shader source is
+native importer, including armature shaders, and hoists tuple-count/stride
+invariants from unsigned-byte component fills and batches qualified static opaque
+identity-transform triangle actors by material/attribute schema using public VTK
+append/mapper APIs. Animated/skinned, morph, transformed and translucent inputs
+retain their native route; Parts/Cuts still read the original file independently. No importer/shader source is
 copied. Packaged 3.5 builds and missing SDK prerequisites use the ordinary readers.
 See [Models](../specs/models.md) and the current profiling evidence for the finite
 parity/performance boundary. The installed 4.0/VTK 9.7.1 host graph additionally
@@ -170,3 +196,9 @@ only bounded stereo min/max bins, and the native seek slider paints them with a
 position-driven vertical playhead. Lifetime, local-format limits and fallback
 behavior are owned by [Audio](../specs/audio.md). API reference:
 [FFmpeg audio decoding](https://ffmpeg.org/doxygen/7.1/decode_audio_8c-example.html).
+
+The optional host F3D4 reader adapter also uses installed VTK OBJ/PLY readers and
+`vtkTriangleFilter` for source-polygon/triangulated edge inspection. `vtkIOPLY`
+is linked with the existing VTK libraries. This adds no downloaded dependency or
+new license family; existing VTK notices apply. The F3D3.5 bundle retains its
+native readers and is not claimed to support this adapter.

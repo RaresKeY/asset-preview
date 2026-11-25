@@ -1,21 +1,32 @@
 #include "animation_time.h"
 #include "crash_log.h"
+#include "registry_limits.h"
 #include "codex_panel.h"
 #include "reference_editor.h"
 #include <QDockWidget>
 #include "service.h"
+#include <QDialog>
+#include <QDialogButtonBox>
+#include <QLineEdit>
+#include <QtOpenGLWidgets/QOpenGLWidget>
 #include "native_overlay.h"
 #include "loading_label.h"
 #include "material_graph.h"
+#include "file_view.h"
+#include "selection_view.h"
+#include "preview_presentation.h"
 #include "model_frame.h"
 #include "inspection/paths.h"
 #include "video_controls.h"
 #include "fullscreen_notice.h"
 #include "animation_controls.h"
 #include "overview_grid.h"
+#include <QSplitter>
 #include "project_grid.h"
 #include "thumbnail_job.h"
 #include "project_identity.h"
+#include <QTreeWidgetItemIterator>
+#include <QInputDialog>
 #include <QSlider>
 #include "theme.h"
 #include <QImageReader>
@@ -57,6 +68,7 @@
 #include <QStandardPaths>
 #include <QStyle>
 #include <QToolBar>
+#include <QTreeWidget>
 #include <QInputDialog>
 #include <QResizeEvent>
 #include <QShowEvent>
@@ -86,9 +98,13 @@
 
 namespace {
 constexpr qsizetype MaxMessage = 1024 * 1024;
+using preview::MaxPreviewRegistrations;
 QJsonObject runtimeTiming;
 QJsonObject success(QJsonObject data = {}) { data.insert("ok", true); return data; }
 QJsonObject failure(const QString& error) { return {{"ok", false}, {"error", error}}; }
+QJsonObject previewLimitReached() {
+    return failure(QStringLiteral("Preview limit reached (%1)").arg(MaxPreviewRegistrations));
+}
 QString compactTriangleCount(qint64 count) {
     const QLocale locale;
     constexpr char suffixes[]={'\0','K','M','B'};
@@ -133,6 +149,10 @@ bool acceptFileDrag(QDropEvent* event) {
 }
 QString absolute(const QString& path) { return QDir::cleanPath(QFileInfo(path).absoluteFilePath()); }
 QString preferenceGroup(const QString& kind) { return kind=="model" || kind=="material" ? "3d" : kind; }
+QString comparisonGroup(const QJsonObject& config) {
+    const auto kind=config["kind"].toString();
+    return kind=="image"?"image":kind=="model" || kind=="material"?"3d":QString();
+}
 QString captureDirectory() { return screenshotDirectory(); }
 QJsonObject inspectionConfig(const Entry& entry) {
     auto config=entry.config, view=entry.inspectionView, options=config.value("inspection").toObject();
@@ -164,7 +184,7 @@ protected:
 class PreviewCard final : public QFrame {
 public:
     PreviewCard(QWidget* parent, const QString& title, const QString& path, const QString& kind,bool native)
-        : QFrame(parent), fullTitle(title), video(kind=="video") {
+        : QFrame(parent), fullTitle(title), fullPath(path), presentation(previewPresentation(kind)), video(kind=="video") {
         setFrameShape(QFrame::StyledPanel); setMinimumSize(100,100);
         content=new QVBoxLayout(this); content->setContentsMargins(0,0,0,0); content->setSpacing(0);
         header=new QFrame(this); header->setObjectName("viewOverlay");
@@ -191,6 +211,7 @@ public:
         options=new QToolButton(controls); options->setText("⋯"); options->setToolTip("Preview options");
         options->setAccessibleName("Preview options");
         remove=new QToolButton(controls); remove->setText("×"); remove->setToolTip("Remove this preview");
+        remove->setAccessibleName("Close preview");
         for (auto* button:{fit,reset,options,remove}) { button->setFixedSize(button==reset?50:32,28); button->setFocusPolicy(Qt::StrongFocus); buttons->addWidget(button); }
         selectBox=new PreviewCheckBox(controls); selectBox->setFixedSize(28,28);
         selectBox->setObjectName("selectPreview"); selectBox->setAccessibleName("Select preview: "+title);
@@ -201,6 +222,11 @@ public:
         footer->setStyleSheet("color:#e8edf3;background:#20262e;border:1px solid #414b57;border-radius:3px;padding:2px 5px;");
         triangles=new QLabel(this); triangles->setTextFormat(Qt::PlainText); setNativeOverlay(triangles,native);
         triangles->setStyleSheet(footer->styleSheet()); triangles->setAccessibleName("Triangle count"); triangles->hide();
+        if(kind=="model" || kind=="material") for(const auto& text:{"Perspective","Front","Right","Top"}) {
+            auto* label=new QLabel(text,this); setNativeOverlay(label,native);
+            label->setStyleSheet("QLabel {color:#d8dde3;background:#202226;border:1px solid #414348;padding:2px 6px;}");
+            label->setAttribute(Qt::WA_TransparentForMouseEvents); label->hide(); fourLabels.append(label);
+        }
         if (playbackKind(kind)) {
             playback=new VideoControls(this,kind=="audio");
             if (kind=="audio") playback->setStyleSheet(style);
@@ -297,29 +323,49 @@ public:
     void updateStatus() { updateOverlays(); place(); }
     void updateTriangles(const QJsonObject& config,const QJsonObject& metrics) {
         const auto kind=config["kind"].toString();
+        for(int i=0;i<fourLabels.size();++i) {
+            fourLabels[i]->setVisible(metrics["engine"].toBool() && metrics["backend"]!="vtk-gltf" && config["settings"].toObject()["four_view"].toBool());
+            if(i==0)fourLabels[i]->setText(config["settings"].toObject()["orthographic"].toBool()?"Orthographic":"Perspective");
+        }
         const bool visible=(kind=="model" || kind=="material") && metrics["engine"].toBool() &&
             config["settings"].toObject()["triangles"].toBool(true);
         const auto count=metrics["triangles"];
         triangleText=count.isDouble()?QString("%1 tris").arg(compactTriangleCount(count.toInteger())):QString("Tris —");
+        const auto topology=metrics["topology"].toObject();
+        const auto quadCount=topology["quads"].toInteger();
+        if(quadCount>0)triangleText=QString("%1 quads · %2").arg(compactTriangleCount(quadCount),triangleText);
         triangles->setToolTip(count.isDouble()?QString("%1 tris\nLoaded geometry · source triangles (including instances)").arg(QLocale().toString(count.toInteger())):
             "Triangle count is available for GLB, glTF, OBJ and material samples.");
+        if(quadCount>0)triangles->setToolTip(QString("%1 source faces · %2 quads · %3 n-gons\n%4 triangles after tessellation")
+            .arg(QLocale().toString(topology["faces"].toInteger()),QLocale().toString(quadCount),
+                QLocale().toString(topology["ngons"].toInteger()),QLocale().toString(count.toInteger())));
         triangles->setVisible(visible); place();
     }
     QJsonObject overlays(QWidget* window) const {
         QJsonObject result;
         for (const auto& item: {std::pair{"name",static_cast<QWidget*>(header)}, {"controls",static_cast<QWidget*>(controls)},
                                {"selection",static_cast<QWidget*>(selectBox)},
+                               {"close",static_cast<QWidget*>(remove)},
                                {"status",static_cast<QWidget*>(footer)}, {"triangles",static_cast<QWidget*>(triangles)},
                                {"playback",static_cast<QWidget*>(playback)},{"animation",static_cast<QWidget*>(animation)}}) {
             if (!item.second) continue;
             const auto p=item.second->mapTo(window,QPoint());
+            bool nativeProjectPane=false;
+            for(auto* parent=item.second->nativeParentWidget();parent;parent=parent->nativeParentWidget())
+                if(parent->objectName()=="projectPane") { nativeProjectPane=true; break; }
             result[item.first]=QJsonObject{{"x",p.x()},{"y",p.y()},{"width",item.second->width()},{"height",item.second->height()},
+                {"native_project_pane",nativeProjectPane},
                 {"visible",item.second->isVisible()},{"loading",item.second->property("loading").toBool()}};
         }
+        QJsonArray panes;
+        for(auto* label:fourLabels)panes.append(QJsonObject{{"label",label->text()},{"visible",label->isVisible()}});
+        result["axis_panes"]=panes;
         auto selection=result["selection"].toObject(); selection["checked"]=selectBox->isChecked(); result["selection"]=selection;
         return result;
     }
     void compose(QPainter& painter, QWidget* window) {
+        for(auto* label:fourLabels)if(label->isVisible())painter.drawPixmap(label->mapTo(window,QPoint()),label->grab());
+        if(presentation.integratedHeader) return;
         for (auto* widget: {static_cast<QWidget*>(header),static_cast<QWidget*>(controls),static_cast<QWidget*>(footer),
                            static_cast<QWidget*>(triangles),static_cast<QWidget*>(playback),static_cast<QWidget*>(animation)})
             if (widget && widget->isVisible()) {
@@ -330,15 +376,15 @@ public:
             }
     }
     QToolButton *fit, *reset, *options, *remove;
+    QWidget* actionBar() const { return controls; }
     QCheckBox* selectBox;
     VideoControls* playback=nullptr;
     AnimationControls* animation=nullptr;
-    bool model=false;
     QLabel* footer;
 protected:
     bool event(QEvent* event) override {
         const bool result=QFrame::event(event);
-        if (event->type()==QEvent::LayoutRequest && surface) place();
+        if (event->type()==QEvent::LayoutRequest && surface) place(false);
         return result;
     }
     void resizeEvent(QResizeEvent* event) override { QFrame::resizeEvent(event); place(); }
@@ -356,18 +402,26 @@ private:
         idleTransition=false;
     }
     void updateOverlays() {
-        header->setVisible(!idleHidden); controls->setVisible(!idleHidden);
+        header->setVisible(!idleHidden && !presentation.integratedHeader); controls->setVisible(!idleHidden);
         if (playback) playback->setVisible(!idleHidden);
         if (animation) animation->setVisible(animationAvailable);
         const bool steady=statusText.startsWith("Live");
-        footer->setVisible(!idleHidden || !steady);
+        footer->setVisible(presentation.integratedHeader?!steady:!idleHidden || !steady);
+        if(presentation.integratedHeader) {
+            footer->setText(statusText);
+            controls->setToolTip(fullTitle+"\n"+fullPath+"\n"+footer->toolTip());
+        }
     }
-    void place() {
+    void place(bool restack=true) {
+        if(presentation.integratedHeader) {
+            fit->hide(); reset->hide();
+            return;
+        }
         name->ensurePolished(); footer->ensurePolished(); triangles->ensurePolished(); controls->ensurePolished();
         const int inset=6;
         const bool dense=width()<300;
-        fit->setVisible(!dense && !playback); remove->setVisible(!dense);
-        reset->setVisible(model && !dense);
+        fit->setVisible(!dense && presentation.fit); remove->setVisible(!dense);
+        reset->setVisible(presentation.resetCamera && !dense);
         const int headerHeight=34;
         const int controlWidth=controls->sizeHint().width();
         controls->setGeometry(width()-inset-controlWidth,inset,controlWidth,headerHeight);
@@ -383,25 +437,43 @@ private:
         footer->setText(footer->fontMetrics().elidedText(statusText,Qt::ElideRight,std::max(0,badgeWidth-12)));
         footer->setGeometry(inset,inset+headerHeight+4,std::min(badgeWidth,footer->sizeHint().width()),24);
         triangles->setText(triangles->fontMetrics().elidedText(triangleText,Qt::ElideRight,std::max(0,badgeWidth-12)));
-        triangles->setGeometry(inset,std::max(inset,height()-inset-24),std::min(badgeWidth,triangles->sizeHint().width()),24);
-        header->raise(); controls->raise(); footer->raise(); triangles->raise();
+        int triangleTop=std::max(inset,height()-inset-24);
+        for(int i=0;i<fourLabels.size();++i) {
+            auto* label=fourLabels[i]; label->adjustSize();
+            const QPoint origin=surface?surface->pos():QPoint();
+            const QSize extent=surface?surface->size():size();
+            label->move(origin+QPoint((i%2)*extent.width()/2+inset,(i/2)*extent.height()/2+(i<2?70:inset)));
+        }
         if (playback) {
             playback->setCondensed(height()<145);
             const int barHeight=playback->sizeHint().height();
             playback->setGeometry(inset,std::max(inset,height()-inset-barHeight),badgeWidth,barHeight);
-            playback->layout()->activate(); playback->raise();
+            playback->layout()->activate();
         }
         if (animation && animationAvailable) {
             animation->setCondensed(height()<145);
             const int barHeight=animation->sizeHint().height();
             animation->setGeometry(inset,std::max(inset,height()-inset-barHeight),badgeWidth,barHeight);
-            animation->layout()->activate(); animation->raise();
-            triangles->move(inset,std::max(inset,animation->y()-28));
+            animation->layout()->activate();
+            triangleTop=std::max(inset,animation->y()-28);
+        }
+        // This is a native window. Moving it to the static-model position and
+        // then above the transport flashes both locations on playback reflow.
+        triangles->setGeometry(inset,triangleTop,std::min(badgeWidth,triangles->sizeHint().width()),24);
+        // Readout changes request layout while playing. Existing overlays keep
+        // their stacking order; cycling native siblings to the top adds churn.
+        if(restack) {
+            for(auto* label:fourLabels)label->raise();
+            header->raise(); controls->raise(); footer->raise(); triangles->raise();
+            if(playback)playback->raise();
+            if(animation && animationAvailable)animation->raise();
         }
     }
-    QString fullTitle, statusText, triangleText;
+    QString fullTitle, fullPath, statusText, triangleText;
+    PreviewPresentation presentation;
     QFrame *header, *controls;
     QLabel *name, *triangles;
+    QList<QLabel*> fourLabels;
     QVBoxLayout* content;
     bool video=false, videoReady=false, paused=false, idleHidden=false, keyboardControls=false;
     bool idleTransition=false;
@@ -455,10 +527,11 @@ bool Service::eventFilter(QObject* watched, QEvent* event) {
 }
 bool Service::start(QString& error) {
     QElapsedTimer clock; clock.start();
+    bool prunedProjects=false;
     thumbnailDirectory=preview::prepareThumbnailJobs(QFileInfo(socketPath).absolutePath());
     QFile state(statePath + "/previews.json");
     if (state.exists()) {
-        if (!state.open(QIODevice::ReadOnly) || state.size() > 4*1024*1024) { error="Cannot read preview state"; return false; }
+        if (!state.open(QIODevice::ReadOnly) || state.size() > preview::MaxRegistryBytes) { error="Cannot read preview state"; return false; }
         QJsonParseError parse;
         auto doc=QJsonDocument::fromJson(state.readAll(), &parse);
         if (parse.error != QJsonParseError::NoError || !doc.isObject() || doc.object()["version"].toInt() != 1 || !doc.object()["entries"].isArray()) {
@@ -477,17 +550,20 @@ bool Service::start(QString& error) {
         }
         preferences=doc.object()["preferences"].toObject();
         for (auto i=preferences.begin();i!=preferences.end();++i) {
-            if (!QSet<QString>{"3d","image","video","audio"}.contains(i.key()) || !i.value().isObject()) { error="Invalid saved preference group"; return false; }
+            if (!QSet<QString>{"3d","image","video","audio","file"}.contains(i.key()) || !i.value().isObject()) { error="Invalid saved preference group"; return false; }
             QJsonObject config{{"path",statePath+"/preference-validation"},{"kind",i.key()=="3d"?"model":i.key()},{"settings",i.value()}};
             const auto invalid=validate(config,true);
             if (!invalid.isEmpty()) { error="Invalid saved preferences: "+invalid; return false; }
         }
         for (const auto& row : doc.object()["entries"].toArray()) {
-            auto result=add(row.toObject(), true);
+            auto config=row.toObject();
+            // Older shortcut lookups inserted a null partner into unpaired registrations.
+            if (config.value("toggle_with").isNull()) config.remove("toggle_with");
+            auto result=add(config, true);
             if (!result["ok"].toBool()) { error="Invalid saved preview: " + result["error"].toString(); return false; }
         }
-        layout=doc.object()["layout"].toString("single");
-        if (layout != "single" && layout != "grid" && layout != "overview" && layout != "projects") { error="Invalid saved layout"; return false; }
+        layout=doc.object()["layout"].toString("overview");
+        if (layout != "single" && layout != "grid" && layout != "overview" && layout != "projects" && layout != "gallery") { error="Invalid saved layout"; return false; }
         gridSize=doc.object()["grid_size"].toInt(2);
         if (gridSize<2 || gridSize>4 || (doc.object().contains("grid_size") && doc.object()["grid_size"].toDouble()!=gridSize)) { error="Invalid saved grid size"; return false; }
         const auto state=doc.object();
@@ -500,7 +576,11 @@ bool Service::start(QString& error) {
                 project["label"].toString().trimmed().isEmpty() || project["label"].toString().size()>256 || !project["current"].isString()) { error="Invalid saved project"; return false; }
             const auto current=project["current"].toString();
             if (!current.isEmpty() && (!entries.contains(current) || entries[current]->config.value("project")!=id)) { error="Invalid saved project current preview"; return false; }
-            projects[id]=QJsonObject{{"label",project["label"]},{"current",current}}; projectOrder.append(id);
+            projects[id]=QJsonObject{{"label",project["label"]},{"current",current}};
+            if(project.contains("parent")) {
+                auto metadata=projects.value(id).toObject(); metadata["parent"]=project["parent"]; projects[id]=metadata;
+            }
+            projectOrder.append(id);
         }
         // Legacy raw clients may have project membership without a registry.
         for (const auto& id:order) {
@@ -508,6 +588,13 @@ bool Service::start(QString& error) {
             if (!project.isEmpty() && !projects.contains(project)) {
                 if (projects.size()>=256) { error="Project limit reached (256)"; return false; }
                 projects[project]=QJsonObject{{"label",project},{"current",id}}; projectOrder.append(project);
+            }
+        }
+        for(const auto& id:projectOrder) {
+            const auto metadata=projects.value(id).toObject();
+            if(metadata.contains("parent")) {
+                const auto invalid=validateProjectParent(id,metadata["parent"]);
+                if(!invalid.isEmpty()) { error="Invalid saved project parent: "+invalid; return false; }
             }
         }
         if ((state.contains("group_projects") && !state["group_projects"].isBool()) ||
@@ -522,15 +609,30 @@ bool Service::start(QString& error) {
             if (!doc.object()["comparison"].isArray()) { error="Invalid saved comparison"; return false; }
             for (const auto& id:doc.object()["comparison"].toArray()) {
                 const auto entry=entries.value(id.toString());
-                if (!id.isString() || !entry || (entry->config["kind"]!="model" && entry->config["kind"]!="material") || comparison.contains(id.toString())) { error="Invalid saved comparison preview"; return false; }
+                if (!id.isString() || !entry || comparisonGroup(entry->config).isEmpty() || comparison.contains(id.toString()) ||
+                    (!comparison.isEmpty() && comparisonGroup(entry->config)!=comparisonGroup(entries[comparison.first()]->config))) { error="Invalid saved comparison preview"; return false; }
                 comparison.append(id.toString());
             }
             if (!comparison.isEmpty() && comparison.size()!=2) { error="Comparison requires two previews"; return false; }
         }
         if (doc.object().contains("camera_sync") && !doc.object()["camera_sync"].isBool()) { error="Invalid saved camera sync"; return false; }
         cameraSync=doc.object()["camera_sync"].toBool(true);
+        // Older registries retained empty groups forever. Waiting groups now
+        // belong to the creating session, so restore only populated projects.
+        QSet<QString> populated;
+        for(const auto& id:projectOrder)if(!projectCurrent(id).isEmpty()) {
+            populated.insert(id); populated.insert(projects.value(id).toObject()["parent"].toString());
+        }
+        for(const auto& id:QStringList(projectOrder)) if(!populated.contains(id)) {
+            projects.remove(id); projectOrder.removeAll(id); prunedProjects=true;
+            if(projectFilterId==id)projectFilterId.clear();
+        }
     }
     if (!entries.contains(selected)) selected=order.value(0);
+    if(prunedProjects) {
+        try { save(); }
+        catch(const std::exception& e) { error=QString("Cannot prune old projects: ")+e.what(); return false; }
+    }
     if (entries.contains(selected) && entries[selected]->config.value("inspection").toObject()["enabled"].toBool()) inspectionId=selected;
     runtimeTiming["restore_ms"]=clock.nsecsElapsed()/1e6;
     Theme::apply(theme);
@@ -543,20 +645,37 @@ void Service::save() {
     QJsonArray rows;
     for (const auto& id : order) rows.append(entries[id]->config);
     QJsonArray projectState;
-    for (const auto& id:projectOrder) projectState.append(QJsonObject{{"id",id},{"label",projects.value(id).toObject()["label"]},{"current",projectCurrent(id)}});
+    QJsonObject nextProjects; QStringList nextProjectOrder;
+    QSet<QString> persistedProjects;
+    QSet<QString> parentsWithMembers;
+    for(const auto& id:projectOrder)if(!projectCurrent(id).isEmpty())
+        parentsWithMembers.insert(projects.value(id).toObject()["parent"].toString());
+    for(const auto& id:projectOrder) {
+        auto metadata=projects.value(id).toObject(); const auto current=projectCurrent(id);
+        // Membership comes from order, since bulk close persists before tearing
+        // down live entries. Keep never-populated waiting groups only in RAM.
+        if(current.isEmpty() && !metadata["current"].toString().isEmpty() && !parentsWithMembers.contains(id))continue;
+        metadata["current"]=current; nextProjects[id]=metadata; nextProjectOrder.append(id);
+        if(current.isEmpty() && !parentsWithMembers.contains(id))continue;
+        persistedProjects.insert(id);
+        auto row=metadata; row["id"]=id; projectState.append(row);
+    }
+    auto nextFilter=projectFilterId;
+    if(!nextFilter.isEmpty() && nextFilter!="@ungrouped" && !nextProjects.contains(nextFilter))nextFilter.clear();
+    auto savedFilter=nextFilter;
+    if(!savedFilter.isEmpty() && savedFilter!="@ungrouped" && !persistedProjects.contains(savedFilter))savedFilter.clear();
     QSaveFile file(statePath + "/previews.json");
     if (!file.open(QIODevice::WriteOnly)) throw std::runtime_error(file.errorString().toStdString());
     file.setPermissions(QFileDevice::ReadOwner|QFileDevice::WriteOwner);
-    auto data=QJsonDocument(QJsonObject{{"version",1},{"entries",rows},{"selected",selected},{"layout",layout},{"grid_size",gridSize},{"preferences",preferences},
+    const QJsonDocument document(QJsonObject{{"version",1},{"entries",rows},{"selected",selected},{"layout",layout},{"grid_size",gridSize},{"preferences",preferences},
         {"comparison",QJsonArray::fromStringList(comparison)},{"camera_sync",cameraSync},{"theme",theme},{"close_behavior",closeBehavior},
-        {"projects",projectState},{"project_grid_size",projectGridSize},{"group_projects",groupByProject},{"project_filter",projectFilterId}}).toJson();
+        {"projects",projectState},{"project_grid_size",projectGridSize},{"group_projects",groupByProject},{"project_filter",savedFilter}});
+    auto data=document.toJson();
+    if (data.size()>preview::MaxRegistryBytes) data=document.toJson(QJsonDocument::Compact);
+    if (data.size()>preview::MaxRegistryBytes) throw std::runtime_error("Preview registry exceeds its saved size limit");
     if (file.write(data) != data.size() || !file.commit()) throw std::runtime_error("Cannot save preview registry");
-    // Keep the in-memory fallback identical to the committed one. A later
-    // no-current reconnect of a removed ID must not resurrect an old pointer.
-    for (const auto& value:projectState) {
-        const auto project=value.toObject(); const auto id=project["id"].toString();
-        auto metadata=projects.value(id).toObject(); metadata["current"]=project["current"]; projects[id]=metadata;
-    }
+    // Publish cleanup and fallback pointers only after the atomic write succeeds.
+    projects=nextProjects; projectOrder=nextProjectOrder; projectFilterId=nextFilter;
 }
 QString Service::validate(QJsonObject& c, bool restore) {
     if (QJsonDocument(c).toJson(QJsonDocument::Compact).size()>8192) return "Preview configuration exceeds 8 KiB";
@@ -571,8 +690,19 @@ QString Service::validate(QJsonObject& c, bool restore) {
     if (!restore && QFileInfo(path).isDir()) return "Output must be a file";
     c["path"]=absolute(path);
     QString kind=c["kind"].toString("auto");
-    if (kind == "auto") kind=path.endsWith(".ptex",Qt::CaseInsensitive) || path.endsWith(".materialgraph.json",Qt::CaseInsensitive)?"graph":audioPath(path)?"audio":videoPath(path)?"video":imagePath(path)?"image":"model";
-    if (kind != "image" && kind != "model" && kind != "material" && kind != "video" && kind != "audio" && kind != "graph") return "Kind must be image, model, material, video, audio or graph";
+    if (kind == "auto") kind=path.endsWith(".selection.json",Qt::CaseInsensitive)?"selection":path.endsWith(".ptex",Qt::CaseInsensitive) || path.endsWith(".materialgraph.json",Qt::CaseInsensitive)?"graph":audioPath(path)?"audio":videoPath(path)?"video":imagePath(path)?"image":FilePreview::isTextPath(path)?"file":"model";
+    if (kind != "image" && kind != "model" && kind != "material" && kind != "video" && kind != "audio" && kind != "graph" && kind != "file" && kind != "selection") return "Kind must be image, model, material, video, audio, graph, file or selection";
+    if (c.contains("decisions")) {
+        const auto target=c["decisions"].toString();
+        if(kind!="selection" || !c["decisions"].isString() || target.size()>4096 || !QFileInfo(target).isAbsolute() ||
+            preview::inspection::pathIdentity(target)==preview::inspection::pathIdentity(path)) return "Decisions require a selection and a separate absolute output path";
+        c["decisions"]=absolute(target);
+    }
+    if(c.contains("before")) {
+        const auto before=c["before"].toString();
+        if(kind!="file" || !c["before"].isString() || before.isEmpty() || before.size()>4096 || !QFileInfo(before).isAbsolute() || (!restore && QFileInfo(before).isDir())) return "Before requires a file preview and an absolute file path";
+        c["before"]=absolute(before);
+    }
     if (!restore && !playbackKind(kind) && QFileInfo(path).size() > 256*1024*1024) return "Preview file exceeds 256 MiB";
     c["kind"]=kind;
     if (c.contains("inspection")) {
@@ -619,6 +749,11 @@ QString Service::validate(QJsonObject& c, bool restore) {
     if (id.isEmpty()) id=QUuid::createUuid().toString(QUuid::Id128).left(12);
     if (!QRegularExpression("^[A-Za-z0-9_-]{1,64}$").match(id).hasMatch()) return "ID must use letters, digits, underscores or dashes (max 64)";
     c["id"]=id;
+    if (c.contains("toggle_with")) {
+        const auto partner=c["toggle_with"].toString();
+        if (kind!="image" || partner==id || !QRegularExpression("^[A-Za-z0-9_-]{1,64}$").match(partner).hasMatch())
+            return "toggle_with requires the ID of a different image preview";
+    }
     QString label=c["label"].toString(QFileInfo(path).fileName());
     if (label.size()>200) return "Label exceeds 200 characters";
     c["label"]=label;
@@ -654,10 +789,31 @@ QString Service::validate(QJsonObject& c, bool restore) {
     if (c.contains("maps") && !c.value("maps").isObject()) return "maps must be an object";
     if (c.contains("settings") && !c.value("settings").isObject()) return "settings must be an object";
     auto settings=c.value("settings").toObject();
-    const QSet<QString> known{"grid","axes","edges","orthographic","nearest","light","background","shape","roughness","metallic","materials","textures","texture_quality","ovoxel_mode","lock_horizon","up_axis","front_axis","lighting","paused","muted","loop","triangles","animation","animation_speed","animation_stepped","animation_fps","preview_model","preview_shape"};
+    // Read registrations from the original four-camera implementation.
+    if(settings.contains("quad_view")) {
+        if(!settings["quad_view"].isBool())return "4 View requires a boolean";
+        if(!settings.contains("four_view"))settings.insert("four_view",settings.value("quad_view"));
+        settings.remove("quad_view");
+    }
+    const QSet<QString> known{"edge_topology","four_view","grid","axes","edges","orthographic","nearest","light","background","shape","roughness","metallic","materials","textures","texture_quality","ovoxel_mode","lock_horizon","up_axis","front_axis","lighting","paused","muted","loop","triangles","animation","animation_speed","animation_stepped","animation_fps","preview_model","preview_shape","file_mode","file_wrap","file_context"};
     for (auto i=settings.begin();i!=settings.end();++i) {
         if (!known.contains(i.key())) return "Unknown setting: " + i.key();
-        if(i.key()=="preview_model") {
+        if(i.key()=="edge_topology") {
+            if((kind!="model" && kind!="material") || !QSet<QString>{"source","triangles"}.contains(i.value().toString()))return "Edge topology requires a 3D preview and source or triangles";
+        }
+        else if(i.key()=="four_view") {
+            if((kind!="model" && kind!="material") || !i.value().isBool())return "4 View requires a 3D preview and boolean";
+        }
+        else if(i.key()=="nearest" && i.value()=="auto") {
+            if(kind!="image") return "Automatic filtering requires an image preview";
+        }
+        else if(i.key()=="file_mode") {
+            if(kind!="file" || !QSet<QString>{"source","rendered","inline","split"}.contains(i.value().toString())) return "File mode requires a file preview and source, rendered, inline or split";
+        }
+        else if(i.key()=="file_wrap" || i.key()=="file_context") {
+            if(kind!="file" || !i.value().isBool()) return "File display options require a file preview and boolean";
+        }
+        else if(i.key()=="preview_model") {
             const auto model=i.value().toString();
             if(kind!="graph" || !i.value().isString() || model.size()>4096 || (!model.isEmpty() && (!QFileInfo(model).isAbsolute() || !model.endsWith(".glb",Qt::CaseInsensitive) || QFileInfo(model).isDir())))return "Graph preview model requires an absolute GLB file path or empty string";
         }
@@ -708,7 +864,7 @@ QString Service::validate(QJsonObject& c, bool restore) {
     c["timeout"]=c.value("timeout").toDouble(120);
     return {};
 }
-QJsonObject Service::add(QJsonObject config, bool restore, bool makeCurrent, const QString& projectLabel) {
+QJsonObject Service::add(QJsonObject config, bool restore, bool makeCurrent, const QString& projectLabel,bool projectMetadataChanged) {
     const auto previousProjects=projects; const auto previousProjectOrder=projectOrder;
     bool committed=restore;
     const auto projectRollback=qScopeGuard([&] { if (!committed) { projects=previousProjects; projectOrder=previousProjectOrder; } });
@@ -716,7 +872,7 @@ QJsonObject Service::add(QJsonObject config, bool restore, bool makeCurrent, con
     const QString error=validate(config,restore);
     if (!error.isEmpty()) return failure(error);
     const QString id=config["id"].toString();
-    if (!entries.contains(id) && entries.size()>=256) return failure("Preview limit reached (256)");
+    if (!entries.contains(id) && entries.size()>=MaxPreviewRegistrations) return previewLimitReached();
     auto prior=entries.value(id);
     const bool existing=bool(prior);
     QJsonObject old=prior?prior->config:QJsonObject{};
@@ -751,7 +907,7 @@ QJsonObject Service::add(QJsonObject config, bool restore, bool makeCurrent, con
         if (makeCurrent || metadata["current"].toString().isEmpty()) metadata["current"]=id;
         projects[project]=metadata;
     }
-    const bool projectChanged=projects!=previousProjects;
+    const bool projectChanged=projectMetadataChanged || projects!=previousProjects;
     auto unchanged=[&]() {
         if (projectChanged) save();
         committed=true;
@@ -776,10 +932,21 @@ QJsonObject Service::add(QJsonObject config, bool restore, bool makeCurrent, con
             if (prior->stamps.value(path.toString())!=stamp(path.toString())) { inputsCurrent=false; break; }
         if (!prior->retries && inputsCurrent && (prior->status.startsWith("Live") || building) && currentPublication(*prior))
             return unchanged();
+        if (prior->view && config["command"].toArray().isEmpty() &&
+            !config.value("inspection").toObject()["enabled"].toBool() &&
+            (config["kind"]=="model" || config["kind"]=="material")) {
+            // Only the publication is stale: keep the native surface, worker
+            // and last-good scene, as an explicit reload does. Destroying the
+            // view here resets its counters and loses the visible fallback.
+            auto result=unchanged();
+            reload(id);
+            return result;
+        }
     }
     if (!prior) { prior=std::make_shared<Entry>(); entries[id]=prior; order.append(id); }
     prior->config=config;
-    if (comparison.contains(id) && config["kind"]!="model" && config["kind"]!="material") comparison.clear();
+    if (comparison.contains(id) && (comparisonGroup(config).isEmpty() ||
+        comparisonGroup(config)!=comparisonGroup(entries[comparison[id==comparison.first()?1:0]]->config))) comparison.clear();
     if (selected.isEmpty()) selected=id;
     if (!restore) {
         try { save(); }
@@ -844,7 +1011,8 @@ QJsonObject Service::select(const QString& id,bool updateViews,bool single,bool 
     if (makeCurrent && (project.isEmpty() || !projects.contains(project))) return failure("Current preview must belong to a project");
     const auto oldProject=projects.value(project);
     const bool promote=makeCurrent && oldProject.toObject()["current"]!=id;
-    if (!promote && selected==id && (!single || (layout=="single" && comparison.isEmpty() && inspectionId.isEmpty()))) return success();
+    if (!promote && selected==id && (!single || (layout=="single" && comparison.isEmpty() && inspectionId.isEmpty())) &&
+        (layout!="single" || overviewOrder().contains(id))) return success();
     if (window && !window->commitInspectionControls()) return failure("Could not apply the pending cut adjustment");
     const auto oldInspectionId=inspectionId;
     const auto inspected=entries.value(oldInspectionId);
@@ -866,12 +1034,16 @@ QJsonObject Service::select(const QString& id,bool updateViews,bool single,bool 
     inspectionId.clear();
     const auto previous=selected; selected=id;
     const auto previousLayout=layout;
+    const auto previousFilter=projectFilterId;
     if (single) layout="single";
+    // A single preview must remain reachable by its picker and arrows, even
+    // when it was opened from outside the current category.
+    if (layout=="single" && !overviewOrder().contains(id)) projectFilterId.clear();
     const auto oldComparison=comparison;
     if (single || (!comparison.isEmpty() && !comparison.contains(id))) comparison.clear();
     if (promote) { auto metadata=oldProject.toObject(); metadata["current"]=id; projects[project]=metadata; }
     try { save(); } catch (...) {
-        selected=previous; layout=previousLayout; comparison=oldComparison; inspectionId=oldInspectionId;
+        selected=previous; layout=previousLayout; projectFilterId=previousFilter; comparison=oldComparison; inspectionId=oldInspectionId;
         if (promote) projects[project]=oldProject;
         if (inspected) inspected->config=inspectedConfig;
         throw;
@@ -939,7 +1111,7 @@ QJsonObject Service::request(const QJsonObject& r) {
                     return failure("Cache events require limit 1..128 and a nonnegative integer after sequence");
                 auto result=cache.events(limit,quint64(after)); result["cache"]=cache.metrics(); return success(result);
             }
-            if (action=="clear") { projectPreloadDelay.stop(); preloader.target(); cache.clear(true); watchers(); if (window) window->refreshOverview(true); }
+            if (action=="clear") { ++thumbnailEpoch; projectPreloadDelay.stop(); preloader.target(); cache.clear(true); watchers(); if (window) window->refreshOverview(true); }
             return success({{"cache",cache.metrics()}});
         }
         if (method=="close_behavior") {
@@ -964,10 +1136,11 @@ QJsonObject Service::request(const QJsonObject& r) {
         }
         if (method=="defaults") {
             const auto group=r["group"].toString();
-            if (!QSet<QString>{"image","video","audio","3d"}.contains(group)) return failure("Invalid defaults group");
+            if (!QSet<QString>{"image","video","audio","3d","file"}.contains(group)) return failure("Invalid defaults group");
             if (!r["settings"].isObject()) return failure("settings must be an object");
             auto remembered=preferences.value(group).toObject();
             const auto patch=r["settings"].toObject();
+            if (patch.contains("four_view") || patch.contains("quad_view") || patch.contains("edge_topology")) return failure("4 View and edge topology are per-preview settings");
             if (patch.contains("front_axis")) return failure("Front axis is a per-model source setting");
             if (patch.contains("ovoxel_mode")) return failure("O-Voxel view is a per-model setting");
             if (patch.contains("animation") || patch.contains("animation_speed") || patch.contains("animation_stepped") || patch.contains("animation_fps")) return failure("Animation transport choices are per-model settings");
@@ -985,16 +1158,21 @@ QJsonObject Service::request(const QJsonObject& r) {
             if (r.contains("current") && (!r["current"].isString() || !entries.contains(r["current"].toString()) || entries[r["current"].toString()]->config.value("project")!=id)) return failure("Current preview must belong to the project");
             const auto action=r["action"].toString("upsert");
             if (action!="upsert" && action!="remove") return failure("Project action must be upsert, remove or list");
+            if(r.contains("parent")) {
+                const auto invalid=validateProjectParent(id,r["parent"]);
+                if(!invalid.isEmpty())return failure(invalid);
+            }
             if (action=="remove") {
                 if (!projects.contains(id)) return failure("Unknown project");
                 for (const auto& entry:entries) if (entry->config.value("project")==id) return failure("Remove a project's previews before removing the project");
+                for(const auto& value:projects)if(value.toObject()["parent"]==id)return failure("Remove or move the project's groups first");
             } else if (!projects.contains(id) && projects.size()>=256) return failure("Project limit reached (256)");
             const auto oldProjects=projects; const auto oldOrder=projectOrder; const auto oldFilter=projectFilterId;
             if (action=="remove") { projects.remove(id); projectOrder.removeAll(id); if (projectFilterId==id) projectFilterId.clear(); }
             else {
                 auto metadata=projects.value(id).toObject();
                 if (!projects.contains(id)) { metadata={{"label",id},{"current",""}}; projectOrder.append(id); }
-                for (const auto& key:{"label","current"}) if (r.contains(key)) metadata[key]=r[key];
+                for (const auto& key:{"label","current","parent"}) if (r.contains(key)) metadata[key]=r[key];
                 projects[id]=metadata;
             }
             try { save(); } catch (...) { projects=oldProjects; projectOrder=oldOrder; projectFilterId=oldFilter; throw; }
@@ -1003,14 +1181,36 @@ QJsonObject Service::request(const QJsonObject& r) {
         if (method=="add") {
             if (r.contains("make_current") && !r["make_current"].isBool()) return failure("make_current must be boolean");
             if (r.contains("project_label") && (!r["project_label"].isString() || r["project_label"].toString().trimmed().isEmpty() || r["project_label"].toString().size()>256)) return failure("Invalid project label");
-            return add(r["entry"].toObject(),false,r["make_current"].toBool(true),r["project_label"].toString());
+            // The parent and group are part of the same registration transaction.
+            const auto oldProjects=projects; const auto oldOrder=projectOrder;
+            bool committed=false;
+            const auto rollback=qScopeGuard([&] { if(!committed) { projects=oldProjects; projectOrder=oldOrder; } });
+            if(r.contains("parent_project")) {
+                const auto parent=r["parent_project"].toString();
+                const auto group=r["entry"].toObject()["project"].toString();
+                if(!r["parent_project"].isString() || !QRegularExpression("^[A-Za-z0-9_-]{1,64}$").match(parent).hasMatch() || group.isEmpty())return failure("A parent project requires valid project and group IDs");
+                if(r.contains("parent_project_label") && (!r["parent_project_label"].isString() || r["parent_project_label"].toString().trimmed().isEmpty() || r["parent_project_label"].toString().size()>256))return failure("Invalid parent project label");
+                const int needed=(!projects.contains(parent)?1:0)+(!projects.contains(group)?1:0);
+                if(projects.size()+needed>256)return failure("Project limit reached (256)");
+                if(!projects.contains(parent)) { projects[parent]=QJsonObject{{"label",parent},{"current",""}}; projectOrder.append(parent); }
+                const auto invalid=validateProjectParent(group,parent);
+                if(!invalid.isEmpty())return failure(invalid);
+                auto metadata=projects.value(parent).toObject();
+                if(r.contains("parent_project_label"))metadata["label"]=r["parent_project_label"];
+                projects[parent]=metadata;
+                if(!projects.contains(group)) { projects[group]=QJsonObject{{"label",group},{"current",""}}; projectOrder.append(group); }
+                metadata=projects.value(group).toObject(); metadata["parent"]=parent; projects[group]=metadata;
+            } else if(r.contains("parent_project_label"))return failure("parent_project_label requires parent_project");
+            auto result=add(r["entry"].toObject(),false,r["make_current"].toBool(true),r["project_label"].toString(),projects!=oldProjects);
+            committed=result["ok"].toBool(); return result;
         }
         if (method=="inspect") return inspectionRequest(r);
         if (method=="annotations") return annotationRequest(r);
+        if (method=="restart_state") return restartRequest(r);
         if (method=="reopen") {
             if (!inspectionId.isEmpty()) return failure("Return to Preview before reopening another asset");
             if (closedEntries.isEmpty()) return failure("No closed previews to reopen");
-            if (entries.size()>=256) return failure("Preview limit reached (256)");
+            if (entries.size()>=MaxPreviewRegistrations) return previewLimitReached();
             auto closed=closedEntries.last(); auto config=closed.config;
             const auto invalid=validate(config,true); if (!invalid.isEmpty()) return failure(invalid);
             const auto reopenId=config["id"].toString();
@@ -1019,8 +1219,20 @@ QJsonObject Service::request(const QJsonObject& r) {
             const auto oldProjects=projects; const auto oldProjectOrder=projectOrder;
             const auto project=config.value("project").toString();
             if (!project.isEmpty() && !projects.contains(project)) {
-                if (projects.size()>=256) return failure("Project limit reached (256)");
-                projects[project]=QJsonObject{{"label",project},{"current",reopenId}}; projectOrder.append(project);
+                auto metadata=closed.project;
+                const auto parent=metadata.value("parent").toString();
+                if(projects.size()+1+(!parent.isEmpty() && !projects.contains(parent)?1:0)>256)return failure("Project limit reached (256)");
+                if(!parent.isEmpty() && !projects.contains(parent)) {
+                    auto parentMetadata=closed.parent;
+                    if(parentMetadata.isEmpty())parentMetadata["label"]=parent;
+                    parentMetadata["current"]=""; projects[parent]=parentMetadata;
+                    projectOrder.insert(closed.parentIndex<0?int(projectOrder.size()):std::clamp(closed.parentIndex,0,int(projectOrder.size())),parent);
+                }
+                const auto invalid=validateProjectParent(project,parent);
+                if(!invalid.isEmpty()) { projects=oldProjects; projectOrder=oldProjectOrder; return failure(invalid); }
+                if(metadata.isEmpty())metadata["label"]=project;
+                metadata["current"]=reopenId; projects[project]=metadata;
+                projectOrder.insert(closed.projectIndex<0?int(projectOrder.size()):std::clamp(closed.projectIndex,0,int(projectOrder.size())),project);
             }
             auto entry=std::make_shared<Entry>(); entry->config=config; entries[reopenId]=entry;
             order.insert(std::clamp(closed.index,0,int(order.size())),reopenId); selected=reopenId; comparison.clear();
@@ -1038,7 +1250,8 @@ QJsonObject Service::request(const QJsonObject& r) {
                 ids.clear();
                 for (const auto& value:r["ids"].toArray()) {
                     const auto entry=entries.value(value.toString());
-                    if (!value.isString() || !entry || (entry->config["kind"]!="model" && entry->config["kind"]!="material") || ids.contains(value.toString())) return failure("Comparison requires distinct 3D previews");
+                    if (!value.isString() || !entry || comparisonGroup(entry->config).isEmpty() || ids.contains(value.toString()) ||
+                        (!ids.isEmpty() && comparisonGroup(entry->config)!=comparisonGroup(entries[ids.first()]->config))) return failure("Comparison requires two distinct images or two 3D previews");
                     ids.append(value.toString());
                 }
                 if (!ids.isEmpty() && ids.size()!=2) return failure("Comparison requires two previews");
@@ -1054,10 +1267,16 @@ QJsonObject Service::request(const QJsonObject& r) {
         if (method=="close_all") {
             const auto previousOrder=order; const auto previousSelected=selected;
             const auto oldComparison=comparison;
-            order.clear(); selected.clear(); comparison.clear();
-            try { save(); } catch (...) { order=previousOrder; selected=previousSelected; comparison=oldComparison; throw; }
-            for (const auto& id:previousOrder) if (id!=previousSelected) closedEntries.append({entries[id]->config,int(previousOrder.indexOf(id))});
-            if (entries.contains(previousSelected)) closedEntries.append({entries[previousSelected]->config,int(previousOrder.indexOf(previousSelected))});
+            const auto oldProjects=projects; const auto oldProjectOrder=projectOrder;
+            order.clear(); selected.clear(); comparison.clear(); projects={}; projectOrder.clear();
+            try { save(); } catch (...) { order=previousOrder; selected=previousSelected; comparison=oldComparison; projects=oldProjects; projectOrder=oldProjectOrder; throw; }
+            auto remember=[&](const QString& id) {
+                const auto project=entries[id]->config.value("project").toString();
+                const auto metadata=oldProjects.value(project).toObject(); const auto parent=metadata.value("parent").toString();
+                closedEntries.append({entries[id]->config,int(previousOrder.indexOf(id)),metadata,int(oldProjectOrder.indexOf(project)),oldProjects[parent].toObject(),int(oldProjectOrder.indexOf(parent))});
+            };
+            for (const auto& id:previousOrder) if (id!=previousSelected) remember(id);
+            if (entries.contains(previousSelected)) remember(previousSelected);
             while (closedEntries.size()>32) closedEntries.removeFirst();
             selectionHistory.clear();
             inspectionId.clear();
@@ -1066,8 +1285,8 @@ QJsonObject Service::request(const QJsonObject& r) {
             entries.clear(); cache.clear(false,"close_all"); reconcile(); return success();
         }
         if (method=="remove_many") {
-            if (!r["ids"].isArray() || r["ids"].toArray().isEmpty() || r["ids"].toArray().size()>256)
-                return failure("Close selected requires 1 to 256 preview IDs");
+            if (!r["ids"].isArray() || r["ids"].toArray().isEmpty() || r["ids"].toArray().size()>MaxPreviewRegistrations)
+                return failure(QStringLiteral("Close selected requires 1 to %1 preview IDs").arg(MaxPreviewRegistrations));
             QSet<QString> ids;
             for (const auto& value:r["ids"].toArray()) {
                 if (!value.isString() || !entries.contains(value.toString())) return failure("Unknown preview in close selection");
@@ -1075,6 +1294,7 @@ QJsonObject Service::request(const QJsonObject& r) {
             }
             const auto previousOrder=order, previousComparison=comparison;
             const auto previousSelected=selected;
+            const auto oldProjects=projects; const auto oldProjectOrder=projectOrder;
             for (const auto& id:ids) order.removeAll(id);
             if (ids.contains(selected)) {
                 selected.clear();
@@ -1094,7 +1314,9 @@ QJsonObject Service::request(const QJsonObject& r) {
             if (ids.contains(previousSelected)) closing.append(previousSelected);
             auto remaining=previousOrder;
             for (const auto& id:closing) {
-                closedEntries.append({entries[id]->config,int(remaining.indexOf(id))}); remaining.removeAll(id);
+                const auto project=entries[id]->config.value("project").toString();
+                const auto metadata=oldProjects.value(project).toObject(); const auto parent=metadata.value("parent").toString();
+                closedEntries.append({entries[id]->config,int(remaining.indexOf(id)),metadata,int(oldProjectOrder.indexOf(project)),oldProjects[parent].toObject(),int(oldProjectOrder.indexOf(parent))}); remaining.removeAll(id);
                 selectionHistory.removeAll(id);
             }
             while (closedEntries.size()>32) closedEntries.removeFirst();
@@ -1105,8 +1327,8 @@ QJsonObject Service::request(const QJsonObject& r) {
             reconcile(); return success();
         }
         if (method=="open") {
-            if (!r["paths"].isArray() || r["paths"].toArray().size()>256)
-                return failure("Open requires an array of at most 256 file paths");
+            if (!r["paths"].isArray() || r["paths"].toArray().size()>MaxPreviewRegistrations)
+                return failure(QStringLiteral("Open requires an array of at most %1 file paths").arg(MaxPreviewRegistrations));
             QStringList paths;
             QMap<QString,QJsonObject> candidates;
             QMap<QString,QString> byPath;
@@ -1139,7 +1361,7 @@ QJsonObject Service::request(const QJsonObject& r) {
                     candidates.insert(path,config);
                 }
             }
-            if (entries.size()+candidates.size()>256) return failure("Preview limit reached (256)");
+            if (entries.size()+candidates.size()>MaxPreviewRegistrations) return previewLimitReached();
             QJsonArray ids;
             QStringList added;
             const auto previousOrder=order;
@@ -1194,7 +1416,7 @@ QJsonObject Service::request(const QJsonObject& r) {
         if (method=="layout") {
             if (r.contains("layout") && !r["layout"].isString()) return failure("layout must be a string");
             QString next=r["layout"].toString(layout);
-            if (next!="single" && next!="grid" && next!="overview" && next!="projects") return failure("Layout must be single, grid, overview or projects");
+            if (next!="single" && next!="grid" && next!="overview" && next!="projects" && next!="gallery") return failure("Layout must be single, grid, overview, projects or gallery");
             const int size=r["grid_size"].toInt(gridSize);
             if (r.contains("grid_size") && (!r["grid_size"].isDouble() || r["grid_size"].toDouble()!=size || size<2 || size>4)) return failure("Grid size must be 2, 3 or 4");
             if (r.contains("group_projects") && !r["group_projects"].isBool()) return failure("group_projects must be boolean");
@@ -1202,22 +1424,26 @@ QJsonObject Service::request(const QJsonObject& r) {
             const int projectSize=r["project_grid_size"].toInt(projectGridSize);
             if (r.contains("project_grid_size") && (!r["project_grid_size"].isDouble() || r["project_grid_size"].toDouble()!=projectSize || (projectSize!=0 && (projectSize<2 || projectSize>4)))) return failure("Project grid size must be 0 (auto), 2, 3 or 4");
             const auto oldProjectSize=projectGridSize; const auto oldFilter=projectFilterId; const auto oldGrouping=groupByProject;
-            const auto previous=layout; const auto previousSize=gridSize;
+            const auto previous=layout; const auto previousSize=gridSize; const auto previousSelected=selected;
             const auto oldComparison=comparison;
             const auto oldInspectionId=inspectionId;
             const auto inspected=entries.value(inspectionId);
             const auto inspectedConfig=inspected?inspected->config:QJsonObject{};
-            if ((next=="overview" || next=="projects") && inspected) {
+            if ((next=="overview" || next=="projects" || next=="gallery") && inspected) {
                 if (window && !window->commitInspectionControls()) return failure("Could not apply the pending cut adjustment");
                 auto options=inspected->config.value("inspection").toObject(); options["enabled"]=false;
                 inspected->config["inspection"]=options; inspectionId.clear();
             }
             layout=next; gridSize=size; projectGridSize=projectSize;
             groupByProject=r["group_projects"].toBool(groupByProject); projectFilterId=r["project_filter"].toString(projectFilterId);
+            // Entering Single may reveal a selection outside the old filter,
+            // but an explicitly supplied filter is the caller's current intent.
+            if(next=="single" && !r.contains("project_filter") && entries.contains(selected) && !overviewOrder().contains(selected))projectFilterId.clear();
             if (r.contains("layout") || r.contains("grid_size")) comparison.clear();
+            if(next=="gallery") { const auto ids=overviewOrder(); if(!ids.contains(selected))selected=ids.isEmpty()?QString():ids.first(); }
             try { save(); } catch (...) {
                 projectGridSize=oldProjectSize; projectFilterId=oldFilter; groupByProject=oldGrouping;
-                layout=previous; gridSize=previousSize; comparison=oldComparison; inspectionId=oldInspectionId;
+                layout=previous; gridSize=previousSize; selected=previousSelected; comparison=oldComparison; inspectionId=oldInspectionId;
                 if (inspected) inspected->config=inspectedConfig;
                 throw;
             }
@@ -1237,6 +1463,9 @@ QJsonObject Service::request(const QJsonObject& r) {
             const auto previousOrder=order; const auto previousSelected=selected;
             const auto oldComparison=comparison;
             const int index=order.indexOf(id);
+            const auto project=e->config.value("project").toString();
+            const auto projectMetadata=projects.value(project).toObject(); const int projectIndex=projectOrder.indexOf(project);
+            const auto parent=projectMetadata.value("parent").toString(); const auto parentMetadata=projects.value(parent).toObject(); const int parentIndex=projectOrder.indexOf(parent);
             const auto destination=selected==id?closeTarget(id):selected;
             entries.remove(id); order.removeAll(id);
             if (comparison.contains(id)) comparison.clear();
@@ -1244,7 +1473,7 @@ QJsonObject Service::request(const QJsonObject& r) {
             try { save(); } catch (...) {
                 entries[id]=e; order=previousOrder; selected=previousSelected; comparison=oldComparison; throw;
             }
-            closedEntries.append({e->config,index}); if (closedEntries.size()>32) closedEntries.removeFirst();
+            closedEntries.append({e->config,index,projectMetadata,projectIndex,parentMetadata,parentIndex}); if (closedEntries.size()>32) closedEntries.removeFirst();
             selectionHistory.removeAll(id);
             selectionHistory.removeAll(selected);
             // Keep live views intact until the removal has been persisted.
@@ -1290,12 +1519,17 @@ QJsonObject Service::request(const QJsonObject& r) {
         }
         if (method=="settings") {
             auto config=e->config, settings=config["settings"].toObject();
-            const auto patch=r["settings"].toObject();
+            auto patch=r["settings"].toObject();
+            if(patch.contains("quad_view")) {
+                if(patch.contains("four_view"))return failure("Use four_view once");
+                patch["four_view"]=patch.take("quad_view");
+            }
             if (!r["settings"].isObject()) return failure("settings must be an object");
             if (patch.contains("animation") && e->view) {
                 const auto clips=e->view->metrics()["animations"].toArray();
                 if (!clips.isEmpty() && patch["animation"].toInt(-1)>=clips.size()) return failure("Animation clip is not available in this model");
             }
+            if (inspectionId==id && (patch.contains("four_view") || patch.contains("edge_topology")))return failure("Return to Preview to change 4 View or edge topology");
             if (inspectionId==id && (patch.contains("animation") || patch.contains("animation_speed") || patch.contains("animation_stepped") || patch.contains("animation_fps") || patch.contains("paused") || patch.contains("loop")))
                 return failure("Return to Preview to control animations; component inspection is static");
             for (auto i=patch.begin();i!=patch.end();++i) settings[i.key()]=i.value();
@@ -1310,7 +1544,7 @@ QJsonObject Service::request(const QJsonObject& r) {
             for (auto i=patch.begin();i!=patch.end();++i) {
                 const bool animationSetting=config["kind"]=="model" &&
                     (i.key()=="animation" || i.key()=="animation_speed" || i.key()=="animation_stepped" || i.key()=="animation_fps" || i.key()=="paused" || i.key()=="loop");
-                if (i.key()!="front_axis" && i.key()!="ovoxel_mode" && !animationSetting) remembered[i.key()]=i.value();
+                if (i.key()!="front_axis" && i.key()!="ovoxel_mode" && i.key()!="four_view" && i.key()!="edge_topology" && !animationSetting) remembered[i.key()]=i.value();
             }
             preferences[group]=remembered;
             try { save(); } catch (...) { e->config=old; preferences=previousPreferences; throw; }
@@ -1336,6 +1570,7 @@ void Service::status(Entry& e, const QString& text) {
 }
 QStringList Service::dependencies(const Entry& e) const {
     QStringList paths{e.config["path"].toString()};
+    if(e.config.contains("before")) paths.append(e.config["before"].toString());
     if(e.config["kind"]=="graph")paths.append(MaterialGraph::dependencies(e.config["path"].toString()));
     for (const auto& p:e.config["watch"].toArray()) paths.append(p.toString());
     for (const auto& p:e.config["maps"].toObject()) paths.append(p.toString());
@@ -1347,6 +1582,7 @@ QStringList Service::dependencies(const Entry& e) const {
 }
 PublicationSnapshot Service::outputStamps(const Entry& entry) const {
     QStringList paths{entry.config["path"].toString()};
+    if(entry.config.contains("before")) paths.append(entry.config["before"].toString());
     if(entry.config["kind"]=="graph")paths.append(MaterialGraph::dependencies(entry.config["path"].toString()));
     // Explicit watches can include imported dependencies that discovery misses.
     for (const auto& path:entry.config["watch"].toArray()) paths.append(path.toString());
@@ -1387,6 +1623,13 @@ bool Service::currentPublication(const Entry& entry) const {
 }
 void Service::recordPublication(Entry& entry) {
     if (entry.pendingOutputs.stamps.isEmpty() || !entry.view || entry.view->loading() || entry.view->metrics()["loads"].toInt()<1) return;
+    // Remember the camera of the first displayed frame as metadata, without
+    // treating an automatic fit as user input that synchronizes another view.
+    const auto kind=entry.config["kind"].toString();
+    if ((kind=="model" || kind=="material") && !entry.config.value("inspection").toObject()["enabled"].toBool()) {
+        const auto camera=entry.view->cameraState();
+        if (!camera.isEmpty()) entry.config["camera"]=camera;
+    }
     const auto current=outputStamps(entry);
     entry.publicationValid=entry.pendingOutputs.complete && current.complete && entry.pendingOutputs==current &&
         current.stamps.value(entry.config["path"].toString())!="missing";
@@ -1471,7 +1714,14 @@ void Service::changed() {
         if (dirty) {
             ++e->token; e->retries=0;
             if (source && !e->config["command"].toArray().isEmpty()) build(id);
-            if (output || !source || e->config["command"].toArray().isEmpty()) reload(id);
+            if (output || !source || e->config["command"].toArray().isEmpty()) {
+                // A retry can begin importing this save before the debounced
+                // watcher sees it. Keep that exact in-flight output; a newer
+                // output or changed generator input must still supersede it.
+                const bool importingCurrent=!source && e->view && e->view->loading() &&
+                    e->pendingOutputs.complete && e->pendingOutputs==outputStamps(*e);
+                if(!importingCurrent)reload(id);
+            }
         }
     }
     preloadReturnTarget(); watchers();
@@ -1498,7 +1748,7 @@ void Service::reload(const QString& id) {
         if (++e->retries<=3) {
             const auto token=e->token;
             QTimer::singleShot(200*(1<<e->retries),this,[this,id,token] {
-                const auto e=entries.value(id); if (e && e->active && e->token==token && !e->status.startsWith("Generator failed") && !e->status.startsWith("Generator timed out")) reload(id);
+                const auto e=entries.value(id); if (e && e->active && e->view && !e->view->loading() && e->token==token && !e->status.startsWith("Generator failed") && !e->status.startsWith("Generator timed out")) reload(id);
             });
         }
     }
@@ -1599,6 +1849,14 @@ void Service::syncCamera(const QString& id) {
     if (!cameraSync || comparison.size()!=2 || !comparison.contains(id) || syncingCamera) return;
     const auto source=entries.value(id), target=entries.value(comparison[id==comparison[0]?1:0]);
     if (!source || !target || !source->view || !target->view) return;
+    if (comparisonGroup(source->config)=="image") {
+        auto* image=dynamic_cast<ImageView*>(target->view);
+        if (!image) return;
+        const auto state=source->view->inspectionState();
+        target->config["image_view"]=state;
+        image->setImageView(state);
+        return;
+    }
     auto camera=source->view->cameraState(); const auto home=source->view->cameraHome(), targetHome=target->view->cameraHome();
     if (camera.isEmpty() || home.isEmpty() || targetHome.isEmpty() || target->view->cameraState().isEmpty()) return;
     syncingCamera=true;
@@ -1623,7 +1881,7 @@ void Service::inspectionChanged(const QString& id,const QJsonObject& state,bool 
     const auto entry=entries.value(id); if (!entry || !entry->active || state.isEmpty()) return;
     const auto key=entry->config["kind"].toString()=="image"?"image_view":"camera";
     entry->config[key]=state;
-    if (key==QString("camera")) syncCamera(id);
+    syncCamera(id);
     if (persist) {
         try { save(); }
         catch (const std::exception& error) { if (window) window->reportError(QString::fromUtf8(error.what())); }
@@ -1643,7 +1901,7 @@ void Service::deactivate(const QString& id) {
     if (e->view && e->config.value("inspection").toObject()["enabled"].toBool()) {
         QString error; const auto state=e->view->inspect({{"action","state"}},error);
         if (error.isEmpty()) {
-            for (const auto& key:{"cuts","hidden","selected","selection","revision","dependency_revision","orthographic"}) e->inspectionView[key]=state[key];
+            for (const auto& key:{"cuts","hidden","selected","selection","revision","dependency_revision","orthographic","display"}) e->inspectionView[key]=state[key];
             e->inspectionView["camera"]=e->view->cameraState();
         }
     }
@@ -1658,7 +1916,8 @@ void Service::deactivate(const QString& id) {
 }
 QString Service::thumbnailKey(Entry& entry) {
     const auto path=entry.config["path"].toString();
-    const auto source=preview::sourceCacheKey("overview-v1",path);
+    const auto kind=entry.config["kind"].toString();
+    const auto source=preview::sourceCacheKey(kind=="file" || kind=="video"?"overview-content-v1":"overview-v2",path);
     if (source.isEmpty()) return {};
     // OBJ texture membership can change without touching the OBJ itself.
     // Refresh that bounded manifest before fingerprinting a background result.
@@ -1686,11 +1945,13 @@ QString Service::thumbnailKey(Entry& entry) {
     QJsonObject visual;
     for (const auto& key:{"kind","settings","camera","image_view","maps","sample_model","inspection"}) visual[key]=entry.config.value(key);
     identity+=QJsonDocument(visual).toJson(QJsonDocument::Compact);
-    const auto key=QString::fromLatin1(QCryptographicHash::hash(identity,QCryptographicHash::Sha256).toHex());
+    const auto key=QString::fromLatin1(preview::sha256(identity).toHex());
     cache.identify(key,"thumbnail",path);
     return key;
 }
 void Service::rememberThumbnail(Entry& entry) {
+    // These have canonical derivatives independent of reading/playback position.
+    if(entry.config["kind"]=="file" || entry.config["kind"]=="video")return;
     if (!entry.view || !entry.surface || entry.view->loading()) return;
     const auto metrics=entry.view->metrics();
     if(metrics["loads"].toInt()<1 || metrics["command_pending"].toBool()) return;
@@ -1701,12 +1962,24 @@ void Service::rememberThumbnail(Entry& entry) {
     if (const auto* still=dynamic_cast<ImageView*>(entry.view)) {
         if (!cache.peekThumbnail(key).isNull()) return;
         image=still->thumbnail();
-        if(image.isNull())return; // Overview can prepare a missing cache-hit thumbnail asynchronously.
+        // Gallery keeps the selected tile visible. A full-payload cache hit has
+        // no separate decoder thumbnail; derive this one bounded copy from the
+        // already decoded pixels instead of leaving that tile as a placeholder.
+        if(image.isNull() && layout=="gallery")
+            image=still->pixels();
+        if(image.isNull())return;
     }
     else {
         const auto size=entry.surface->size()*entry.surface->devicePixelRatioF();
-        if (metrics["frame_transport"]!="shared_gpu_texture" && qint64(size.width())*size.height()*4>16*1024*1024) return;
-        image=entry.view->thumbnailSnapshot({preview::PreviewCache::ThumbnailWidth,preview::PreviewCache::ThumbnailHeight});
+        if (metrics["frame_transport"]!="native_window" && qint64(size.width())*size.height()*4>16*1024*1024) return;
+        QPointer<Service> guard(this); const auto id=entry.config["id"].toString();
+        const auto epoch=thumbnailEpoch; const std::weak_ptr<Entry> registration=entries.value(id);
+        entry.view->requestThumbnail({preview::PreviewCache::ThumbnailWidth,preview::PreviewCache::ThumbnailHeight},[guard,id,key,epoch,registration](QImage image) {
+            if(!guard || epoch!=guard->thumbnailEpoch || !guard->window || !guard->window->isVisible() || guard->window->isMinimized())return;
+            const auto entry=registration.lock();
+            if(entry && guard->entries.value(id)==entry && key==guard->thumbnailKey(*entry))guard->cache.putThumbnail(key,std::move(image));
+        });
+        return;
     }
     if (key==thumbnailKey(entry)) cache.putThumbnail(key,std::move(image));
 }
@@ -1756,30 +2029,58 @@ QString Service::projectCurrent(const QString& project) const {
         if (entries[*it]->config.value("project").toString()==project) return *it;
     return {};
 }
+QString Service::validateProjectParent(const QString& id,const QJsonValue& value) const {
+    if(!value.isString())return "Project parent must be a project ID or an empty string";
+    const auto parent=value.toString();
+    if(parent.isEmpty())return {};
+    if(parent==id || !projects.contains(parent))return "Project parent must be a different existing project";
+    if(!projects.value(parent).toObject()["parent"].toString().isEmpty())return "Groups belong directly to a top-level project";
+    for(const auto& metadata:projects)if(metadata.toObject()["parent"]==id)return "A project containing groups cannot itself be a group";
+    return {};
+}
+QStringList Service::orderedProjects() const {
+    QStringList result;
+    for(const auto& id:projectOrder)if(projects.value(id).toObject()["parent"].toString().isEmpty()) {
+        result.append(id);
+        for(const auto& child:projectOrder)if(projects.value(child).toObject()["parent"]==id)result.append(child);
+    }
+    return result;
+}
+bool Service::matchesProject(const QString& project,const QString& filter) const {
+    return filter.isEmpty() || (filter=="@ungrouped"?project.isEmpty():project==filter || projects.value(project).toObject()["parent"]==filter);
+}
 QJsonArray Service::projectRows() const {
     QJsonArray result; QMap<QString,QJsonArray> groups;
+    QHash<QString,QString> lastMembers;
+    QSet<QString> members;
     for(const auto& asset:order) {
         const auto& config=entries[asset]->config;
-        groups[config.value("project").toString()].append(QJsonObject{{"id",asset},{"label",config["label"]}});
+        const auto project=config.value("project").toString();
+        groups[project].append(QJsonObject{{"id",asset},{"label",config["label"]}});
+        lastMembers[project]=asset; members.insert(asset);
     }
     auto append=[&](const QString& id,const QString& label) {
-        const auto members=groups.value(id);
-        result.append(QJsonObject{{"id",id},{"label",label},{"current",projectCurrent(id)},{"entries",members}});
+        auto current=projects.value(id).toObject()["current"].toString();
+        if(!members.contains(current) || entries[current]->config.value("project").toString()!=id) current=lastMembers.value(id);
+        const auto parent=projects.value(id).toObject()["parent"].toString();
+        result.append(QJsonObject{{"id",id},{"label",label},{"current",current},{"entries",groups.value(id)},
+            {"parent",parent},{"parent_label",projects.value(parent).toObject()["label"].toString()}});
     };
-    for (const auto& id:projectOrder) append(id,projects.value(id).toObject()["label"].toString());
-    for (const auto& id:order) if (entries[id]->config.value("project").toString().isEmpty()) { append({},"Ungrouped"); break; }
+    for (const auto& id:orderedProjects()) append(id,projects.value(id).toObject()["label"].toString());
+    if(groups.contains({})) append({},"Ungrouped");
     return result;
 }
 QStringList Service::overviewOrder() const {
     QStringList result;
     auto accepts=[&](const QString& id) {
         const auto project=entries[id]->config.value("project").toString();
-        return projectFilterId.isEmpty() || (projectFilterId=="@ungrouped"?project.isEmpty():project==projectFilterId);
+        return matchesProject(project,projectFilterId);
     };
     if (groupByProject) {
-        for (const auto& project:projectRows()) for (const auto& item:project.toObject()["entries"].toArray()) {
-            const auto id=item.toObject()["id"].toString(); if (accepts(id)) result.append(id);
-        }
+        QHash<QString,QStringList> groups;
+        for(const auto& id:order) if(accepts(id)) groups[entries[id]->config.value("project").toString()].append(id);
+        for(const auto& project:orderedProjects()) result.append(groups.value(project));
+        result.append(groups.value({}));
     } else for (const auto& id:order) if (accepts(id)) result.append(id);
     return result;
 }
@@ -1795,6 +2096,7 @@ void Service::reconcile() {
         else if (!inspectionId.isEmpty() && entries.contains(inspectionId)) visible={inspectionId};
         else if (!comparison.isEmpty()) visible=comparison;
         else if (projectMode) {}
+        else if (layout=="gallery") { if(overviewOrder().contains(selected))visible={selected}; }
         else { int i=std::max(0,int(order.indexOf(selected)));
             const int count=pageSize(); visible=order.mid((i/count)*count,count); }
     }
@@ -1815,10 +2117,14 @@ void Service::reconcile() {
         activationScheduled=true;
         QTimer::singleShot(1,this,[this] { activationScheduled=false; reconcile(); });
     }
+    if (created && !comparison.isEmpty() && entries.value(selected) && comparisonGroup(entries[selected]->config)=="image") syncCamera(selected);
     phase("activate_ms");
     QStringList published; for(const auto& id:visible)if(entries[id]->active)published.append(id);
     if (window) { window->arrange(published); phase("arrange_ms"); window->navigation(); phase("navigation_ms"); window->refreshInspection(); }
-    if (!window || !window->isVisible() || window->isMinimized()) cache.clear(false,"hidden");
+    if (!window || !window->isVisible() || window->isMinimized()) {
+        // Clear also cancels captures that finish after a later Show.
+        ++thumbnailEpoch; cache.clear(false,"hidden");
+    }
     else cache.trimForPressure();
     preloadReturnTarget();
     if(window)window->prepareThumbnails();
@@ -1836,7 +2142,7 @@ QJsonObject Service::navigate(int delta) {
     if (layout=="projects") return success();
     if (!inspectionId.isEmpty()) return success();
     if (!comparison.isEmpty()) return success();
-    const auto navigationOrder=layout=="overview"?overviewOrder():order;
+    const auto navigationOrder=(layout=="overview" || layout=="single" || layout=="gallery")?overviewOrder():order;
     if (navigationOrder.isEmpty()) return success();
     int index=std::max(0,int(navigationOrder.indexOf(selected)));
     if (layout=="grid" && !(window && window->isolatesPreview())) {
@@ -1872,6 +2178,17 @@ void PreviewWindow::setupMenus(QToolButton* openButton) {
     };
     auto* file=menuBar()->addMenu("&File");
     action(file,"&Open Assets…","document-open",QKeySequence::Open,[openButton] { openButton->click(); });
+    action(file,"Compare &Files…","document-open",{},[this] {
+        const auto before=QFileDialog::getOpenFileName(this,"Compare files: choose before",QDir::homePath(),"All files (*)");
+        if(before.isEmpty()) return;
+        const auto after=QFileDialog::getOpenFileName(this,"Compare files: choose after",QFileInfo(before).absolutePath(),"All files (*)");
+        if(after.isEmpty()) return;
+        const auto result=service->request({{"method","add"},{"entry",QJsonObject{{"kind","file"},{"path",after},{"before",before},
+            {"label",QFileInfo(before).fileName()+" → "+QFileInfo(after).fileName()},{"settings",QJsonObject{{"file_mode","inline"}}}}}});
+        if(!result["ok"].toBool()) { reportError(result["error"].toString()); return; }
+        const auto opened=service->request({{"method","zoom"},{"id",result["id"]}});
+        if(!opened["ok"].toBool()) reportError(opened["error"].toString());
+    });
     file->addSeparator();
     saveAction=action(file,"Save &Screenshot","document-save",QKeySequence("Ctrl+Shift+S"),[this] { saveScreenshot(service->selected); });
     copyAction=action(file,"&Copy Image / Frame","edit-copy",QKeySequence("Ctrl+Shift+C"),[this] { saveScreenshot(service->selected,true); });
@@ -1897,7 +2214,11 @@ void PreviewWindow::setupMenus(QToolButton* openButton) {
     action(file,"&Quit","application-exit",QKeySequence::Quit,[invoke] { invoke({{"method","quit"}}); });
 
     auto* view=menuBar()->addMenu("&View");
+    auto* explorerAction=action(view,"Folder Explorer","sidebar-show",QKeySequence("Ctrl+B"),[this] { explorerToggle->click(); });
+    explorerAction->setCheckable(true);
+    connect(explorerToggle,&QToolButton::toggled,explorerAction,&QAction::setChecked);
     action(view,"Project Previews","view-grid",QKeySequence("Ctrl+9"),[invoke] { invoke({{"method","layout"},{"layout","projects"}}); });
+    action(view,"Image Gallery","view-preview",QKeySequence("Ctrl+8"),[invoke] { invoke({{"method","layout"},{"layout","gallery"}}); });
     action(view,"All Open Previews","view-grid",QKeySequence("Ctrl+0"),[invoke] { invoke({{"method","layout"},{"layout","overview"}}); });
     action(view,"Clear Image and Thumbnail Cache","edit-clear",{},[invoke] { invoke({{"method","cache"},{"action","clear"}}); });
     action(view,"Codex Sidebar","utilities-terminal",QKeySequence("Ctrl+Shift+K"),[this] {
@@ -1930,35 +2251,33 @@ void PreviewWindow::setupMenus(QToolButton* openButton) {
     view->addSeparator();
     auto* layoutMenu=view->addMenu("&Layout");
     auto* layoutGroup=new QActionGroup(layoutMenu); layoutGroup->setExclusive(true);
-    for (int i=0;i<6;++i) {
-        auto* item=layoutMenu->addAction(i==5?"Project Previews":i==4?"All Open Previews":i==0?"Single Preview":QString("%1 × %1 Grid").arg(i+1));
+    for (int i=0;i<7;++i) {
+        auto* item=layoutMenu->addAction(i==6?"Image Gallery":i==5?"Project Previews":i==4?"All Open Previews":i==0?"Single Preview":QString("%1 × %1 Grid").arg(i+1));
         item->setCheckable(true); item->setData(i); layoutGroup->addAction(item);
         connect(item,&QAction::triggered,this,[invoke,i] {
-            QJsonObject patch{{"method","layout"},{"layout",i==5?"projects":i==4?"overview":i==0?"single":"grid"}};
+            QJsonObject patch{{"method","layout"},{"layout",i==6?"gallery":i==5?"projects":i==4?"overview":i==0?"single":"grid"}};
             if (i>0 && i<4) patch["grid_size"]=i+1;
             invoke(patch);
         });
     }
     connect(layoutMenu,&QMenu::aboutToShow,this,[this,layoutGroup] {
-        const int index=service->layout=="projects"?5:service->layout=="overview"?4:service->layout=="single"?0:service->gridSize-1;
+        const int index=service->layout=="gallery"?6:service->layout=="projects"?5:service->layout=="overview"?4:service->layout=="single"?0:service->gridSize-1;
         for (auto* item:layoutGroup->actions()) item->setChecked(service->comparison.isEmpty() && item->data().toInt()==index);
     });
     connect(view,&QMenu::aboutToShow,this,[this,current] { current->setEnabled(!service->selected.isEmpty()); });
-    auto* compare=view->addMenu("&Compare With");
-    connect(compare,&QMenu::aboutToShow,this,[this,compare,invoke] {
-        compare->clear(); const auto source=service->entries.value(service->selected);
-        if (!source || (source->config["kind"]!="model" && source->config["kind"]!="material")) { compare->addAction("Select a 3D preview first")->setEnabled(false); return; }
-        for (const auto& id:service->order) {
-            const auto entry=service->entries[id]; if (id==service->selected || (entry->config["kind"]!="model" && entry->config["kind"]!="material")) continue;
-            auto* item=compare->addAction(entry->config["label"].toString());
-            connect(item,&QAction::triggered,this,[this,id,invoke] { invoke({{"method","compare"},{"ids",QJsonArray{service->selected,id}},{"camera_sync",true}}); });
-        }
-        if (compare->isEmpty()) compare->addAction("Open another 3D preview to compare")->setEnabled(false);
+    auto* compare=action(view,"&Compare With…","",{},[this] { compareWith(); });
+    connect(view,&QMenu::aboutToShow,this,[this,compare] {
+        const auto source=service->entries.value(service->selected);
+        compare->setEnabled(source && !comparisonGroup(source->config).isEmpty());
     });
     auto* sync=view->addAction("&Sync Comparison Cameras"); sync->setCheckable(true);
     connect(sync,&QAction::triggered,this,[invoke](bool enabled) { invoke({{"method","compare"},{"camera_sync",enabled}}); });
     auto* end=action(view,"&End Comparison","",{},[invoke] { invoke({{"method","compare"},{"ids",QJsonArray{}}}); });
-    connect(view,&QMenu::aboutToShow,this,[this,sync,end] { sync->setEnabled(!service->comparison.isEmpty()); sync->setChecked(service->cameraSync); end->setEnabled(!service->comparison.isEmpty()); });
+    connect(view,&QMenu::aboutToShow,this,[this,sync,end] {
+        const auto source=service->entries.value(service->selected);
+        sync->setText(source && source->config["kind"]=="image"?"&Sync Comparison Pan / Zoom":"&Sync Comparison Cameras");
+        sync->setEnabled(!service->comparison.isEmpty()); sync->setChecked(service->cameraSync); end->setEnabled(!service->comparison.isEmpty());
+    });
 
     auto* go=menuBar()->addMenu("&Go");
     auto* previousAction=go->addAction(QIcon::fromTheme("go-previous"),"&Previous\tLeft");
@@ -2013,33 +2332,46 @@ void PreviewWindow::setupMenus(QToolButton* openButton) {
     });
     auto* help=menuBar()->addMenu("&Help");
     action(help,"&Keyboard Shortcuts","help-contents",QKeySequence::HelpContents,[this] {
-        QMessageBox::information(this,"Keyboard Shortcuts","Point at a preview to target its shortcuts and menus.\nOutside previews, the last active preview stays the target.\n\nOpen assets: Ctrl+O\nSelect previews: checkbox / Ctrl+click\nSelect range: Shift+click · Add range: Ctrl+Shift+click\nClose checked previews: Close selected in toolbar / File menu\nOverview: Ctrl+Space toggles selection\nClose preview: Ctrl+W\nReopen closed preview: Ctrl+Shift+T\nPrevious / next: Left / Right\nFull screen: F11 · Exit: Esc or F11\nVideo full screen: double click\nFit view: F\nReset camera: Ctrl+Home\nEdges: E · Triangle count: M (3D)\nCamera: 1 front · 3 right · 7 top · 9 isometric\nCtrl+1 / 3 / 7: opposite view · Numpad supported\nSave screenshot: Ctrl+Shift+S\nCopy screenshot: Ctrl+Shift+C\nReload / rebuild: Ctrl+R\nAudio/video: Space pause · M mute · Home restart\nAudio/video seek: Shift+Left / Right\n3D animation: Space pause · Home restart · Shift+Left / Right seek");
+        QMessageBox::information(this,"Keyboard Shortcuts","Point at a preview to target its shortcuts and menus.\nOutside previews, the last active preview stays the target.\n\nOpen assets: Ctrl+O\nSelect previews: checkbox / Ctrl+click\nSelect range: Shift+click · Add range: Ctrl+Shift+click\nClose checked previews: Close selected in toolbar / File menu\nOverview: Ctrl+Space toggles selection\nClose preview: Ctrl+W\nReopen closed preview: Ctrl+Shift+T\nPrevious / next: Left / Right\nFull screen: F11 · Exit: Esc or F11\nVideo full screen: double click\nFit image / 3D / graph: F\nFiles: Alt+Z soft wrap · Ctrl+F find\nReset camera: Ctrl+Home\nEdges: E · Triangle count: M (3D)\nPerspective / orthographic: 5 or Numpad 5\n4 View: Ctrl+Alt+Q (3D Preview)\nCamera: 1 front · 3 right · 7 top · 9 isometric\nCtrl+1 / 3 / 7: opposite view · Numpad supported\nSave screenshot: Ctrl+Shift+S\nCopy screenshot: Ctrl+Shift+C\nReload / rebuild: Ctrl+R\nAudio/video: Space pause · M mute · Home restart\nAudio/video seek: Shift+Left / Right\n3D animation: Space pause · Home restart · Shift+Left / Right seek");
     });
     action(help,"&About Asset Preview","help-about",{},[this] { QMessageBox::about(this,"About Asset Preview","Asset Preview\nLive images, audio, models, videos and baked materials.\nMIT licensed. Dependencies retain their own licenses."); });
 }
 
 PreviewWindow::PreviewWindow(Service* s) : service(s) {
+    if(QGuiApplication::platformName()=="wayland" || QGuiApplication::platformName()=="xcb") {
+        // Establish the compositing surface before the window is shown. Qt
+        // otherwise recreates its native window when the first image is added.
+        auto* composition=new QOpenGLWidget(this);
+        composition->setObjectName("imageComposition");
+        composition->hide();
+    }
     thumbnailInputQuiet.setSingleShot(true);
     connect(&thumbnailInputQuiet,&QTimer::timeout,this,&PreviewWindow::scheduleThumbnailPreparation);
     hoverPosition=QCursor::pos();
     setWindowTitle("Asset Preview"); setWindowIcon(QIcon(QStringLiteral(":/icon.svg")));
     setMinimumSize(540,380); resize(1000,720); setAcceptDrops(true);
     auto* central=new QWidget; auto* vertical=new QVBoxLayout(central); vertical->setContentsMargins(8,6,8,6); vertical->setSpacing(6);
+    previewBody=central;
     auto* addButton=new QToolButton; addButton->setText("Open…"); addButton->setMinimumHeight(32);
     addButton->setIcon(QIcon::fromTheme("document-open",style()->standardIcon(QStyle::SP_DialogOpenButton)));
     addButton->setToolButtonStyle(Qt::ToolButtonTextBesideIcon); addButton->setAutoRaise(true);
     closeAllButton=new QToolButton; closeAllButton->setText("Close All"); closeAllButton->setMinimumHeight(32); closeAllButton->setAutoRaise(true);
     closeAllButton->setObjectName("closeAll"); closeAllButton->setToolTip("Close all previews and stop their generators; keep files and remembered settings");
     auto* controls=new QHBoxLayout;
+    explorerToggle=new QToolButton; explorerToggle->setObjectName("explorerToggle");
+    explorerToggle->setFixedSize(32,32); explorerToggle->setAutoRaise(true); explorerToggle->setCheckable(true);
+    explorerToggle->setIcon(QIcon::fromTheme("view-list-tree",style()->standardIcon(QStyle::SP_DirIcon)));
+    explorerToggle->setAccessibleName("Toggle folder explorer");
+    explorerToggle->setToolTip("Show / hide folder explorer (Ctrl+B)");
     previous=new QToolButton; next=new QToolButton; previous->setFixedSize(32,32); next->setFixedSize(32,32);
     previous->setIcon(QIcon::fromTheme("go-previous",style()->standardIcon(QStyle::SP_ArrowLeft)));
     next->setIcon(QIcon::fromTheme("go-next",style()->standardIcon(QStyle::SP_ArrowRight)));
     previous->setAutoRaise(true); next->setAutoRaise(true);
     previous->setAccessibleName("Previous preview or page"); next->setAccessibleName("Next preview or page");
     previous->setToolTip("Previous preview / page (Left)"); next->setToolTip("Next preview / page (Right)");
-    selection=new QComboBox; selection->setMinimumHeight(32); selection->setSizePolicy(QSizePolicy::Expanding,QSizePolicy::Fixed);
+    selection=new QComboBox; selection->setObjectName("previewSelection"); selection->setAccessibleName("Selected preview"); selection->setMinimumHeight(32); selection->setSizePolicy(QSizePolicy::Expanding,QSizePolicy::Fixed);
     selection->setSizeAdjustPolicy(QComboBox::AdjustToMinimumContentsLengthWithIcon); selection->setMinimumContentsLength(3);
-    density=new QComboBox; density->addItems({"Single","2×2","3×3","4×4","Overview","Projects"}); density->setMinimumHeight(32);
+    density=new QComboBox; density->addItems({"Single","2×2","3×3","4×4","Overview","Projects","Gallery"}); density->setMinimumHeight(32);
     density->setToolTip("Single / live grid / all open previews as lightweight thumbnails (Ctrl+0)");
     inspectionMode=new QComboBox; inspectionMode->setObjectName("inspectionMode");
     inspectionMode->addItem("Preview","preview"); inspectionMode->addItem("Part mode","parts"); inspectionMode->addItem("Cut mode","cuts");
@@ -2048,7 +2380,7 @@ PreviewWindow::PreviewWindow(Service* s) : service(s) {
     connect(inspectionMode,&QComboBox::activated,this,&PreviewWindow::switchInspectionMode);
     syncButton=new QCheckBox("Sync camera"); syncButton->setToolTip("Link orbit, pan and zoom in both comparison views"); syncButton->hide();
     position=new QLabel; position->setMinimumWidth(65); position->setAlignment(Qt::AlignRight|Qt::AlignVCenter);
-    controls->addWidget(previous); controls->addWidget(selection,1); controls->addWidget(next); controls->addWidget(position);
+    controls->addWidget(explorerToggle); controls->addWidget(previous); controls->addWidget(selection,1); controls->addWidget(next); controls->addWidget(position);
     auto* codexButton=new QToolButton; codexButton->setText("Codex ›"); codexButton->setObjectName("codexToggle"); codexButton->setAutoRaise(true);
     codexButton->setToolTip("Open / collapse the originating Codex conversation (Ctrl+Shift+K)");
     connect(codexButton,&QToolButton::clicked,this,[this] { if(codexDock && codexDock->isVisible()) collapseCodex(); else openCodex(); });
@@ -2086,6 +2418,10 @@ PreviewWindow::PreviewWindow(Service* s) : service(s) {
         const auto result=service->request({{"method","project"},{"id",project},{"current",current}});
         if (!result["ok"].toBool()) reportError(result["error"].toString());
     };
+    gallerySplitter=new QSplitter(Qt::Horizontal,canvas); gallerySplitter->setObjectName("gallerySplitter");
+    gallerySplitter->setChildrenCollapsible(false); gallerySplitter->setHandleWidth(5); gallerySplitter->hide();
+    galleryBody=new QWidget(gallerySplitter); galleryBody->setMinimumWidth(240);
+    galleryLayout=new QVBoxLayout(galleryBody); galleryLayout->setContentsMargins(0,0,0,0);
     overview=new OverviewGrid(&service->cache,service->thumbnailDirectory,canvas); overview->hide();
     overview->keyFor=[this](const QString& id) { const auto e=service->entries.value(id); return e?service->thumbnailKey(*e):QString(); };
     overview->configFor=[this](const QString& id) {
@@ -2095,27 +2431,67 @@ PreviewWindow::PreviewWindow(Service* s) : service(s) {
                 if (entry->config.contains(name)) config[name]=entry->config[name];
         return config;
     };
+    overview->thumbnailChanged=[this](const QString&) { if(comparisonGrid)comparisonGrid->refresh(); };
     overview->activated=[this](const QString& id) {
         markAnchor=id;
-        const auto result=service->request({{"method","zoom"},{"id",id}});
+        const auto result=service->request({{"method",service->layout=="gallery"?"select":"zoom"},{"id",id}});
         if (!result["ok"].toBool()) reportError(result["error"].toString());
-        else if (const auto e=service->entries.value(id);e && e->surface) e->surface->setFocus(Qt::OtherFocusReason);
+        else if (service->layout!="gallery") if (const auto e=service->entries.value(id);e && e->surface) e->surface->setFocus(Qt::OtherFocusReason);
     };
     overview->selected=[this](const QString& id) { selectCard(id); };
+    overview->galleryRequested=[updateProjectLayout](const QString& project) {
+        updateProjectLayout({{"layout","gallery"},{"project_filter",project.isEmpty()?QString("@ungrouped"):project}});
+    };
+    overview->closeGroupRequested=[this](const QString& project) {
+        QJsonArray ids;
+        for(const auto& id:service->order)
+            if(service->matchesProject(service->entries.value(id)->config.value("project").toString(),project.isEmpty()?QString("@ungrouped"):project))ids.append(id);
+        if(ids.isEmpty())return;
+        const auto result=service->request({{"method","remove_many"},{"ids",ids}});
+        if(!result["ok"].toBool())reportError(result["error"].toString());
+    };
     overview->marked=[this](const QString& id,Qt::KeyboardModifiers modifiers) { markCard(id,modifiers); };
+    overview->organizeRequested=[this](const QString& id,const QPoint& position) { organizeProject(id,position); };
     overview->viewportChanged=[this] {
         if(thumbnailWatchScheduled)return;
         thumbnailWatchScheduled=true;
         QTimer::singleShot(0,this,[this] { thumbnailWatchScheduled=false; service->watchers(); });
     };
-    vertical->addWidget(canvas,1); setCentralWidget(central);
+    vertical->addWidget(canvas,1);
+    explorerSplitter=new QSplitter(Qt::Horizontal,this); explorerSplitter->setObjectName("explorerSplitter");
+    explorerSplitter->setChildrenCollapsible(false); explorerSplitter->setHandleWidth(5);
+    explorer=new QTreeWidget(explorerSplitter); explorer->setObjectName("folderExplorer");
+    explorer->setAccessibleName("Preview categories and files"); explorer->setHeaderHidden(true);
+    explorer->setMinimumWidth(170); explorer->setUniformRowHeights(true); explorer->setIndentation(18);
+    explorer->setTextElideMode(Qt::ElideMiddle); explorer->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
+    explorer->setEditTriggers(QAbstractItemView::NoEditTriggers); explorer->installEventFilter(this);
+    explorer->setContextMenuPolicy(Qt::CustomContextMenu);
+    connect(explorer,&QWidget::customContextMenuRequested,this,[this](const QPoint& position) {
+        const auto* item=explorer->itemAt(position);
+        if(item && item->data(0,Qt::UserRole+1).toBool())organizeProject(item->data(0,Qt::UserRole).toString(),explorer->viewport()->mapToGlobal(position));
+    });
+    explorerSplitter->addWidget(central); explorerSplitter->setStretchFactor(0,0); explorerSplitter->setStretchFactor(1,1);
+    explorer->hide(); setCentralWidget(explorerSplitter);
+    connect(explorerToggle,&QToolButton::toggled,this,&PreviewWindow::setExplorerVisible);
+    auto openExplorerItem=[this](QTreeWidgetItem* item,bool gallery) {
+        if(!item)return;
+        const auto id=item->data(0,Qt::UserRole).toString();
+        const bool folder=item->data(0,Qt::UserRole+1).toBool();
+        if(folder && !gallery)return;
+        const auto result=!folder?service->request({{"method","zoom"},{"id",id}}):
+            service->request({{"method","layout"},{"layout","gallery"},{"project_filter",id}});
+        if(!result["ok"].toBool()) { reportError(result["error"].toString()); refreshExplorer(); }
+    };
+    connect(explorer,&QTreeWidget::currentItemChanged,this,[openExplorerItem](QTreeWidgetItem* item,QTreeWidgetItem*) { openExplorerItem(item,false); });
+    connect(explorer,&QTreeWidget::itemClicked,this,[openExplorerItem](QTreeWidgetItem* item,int) { openExplorerItem(item,false); });
+    connect(explorer,&QTreeWidget::itemActivated,this,[openExplorerItem](QTreeWidgetItem* item,int) { openExplorerItem(item,true); });
     statusBar()->showMessage("Drag files to add · Left / Right to switch · close to suspend");
     connect(statusBar(),&QStatusBar::messageChanged,this,[this](const QString& message) {
         if (message.isEmpty()) statusBar()->setVisible(!isFullScreen());
     });
     connect(addButton,&QToolButton::clicked,this,[this] {
         QJsonArray paths;
-        for (const auto& path:QFileDialog::getOpenFileNames(this,"Add asset previews",QDir::homePath(),"Assets (*.ptex *.materialgraph.json *.png *.jpg *.jpeg *.webp *.bmp *.svg *.glb *.gltf *.obj *.stl *.ply *.fbx *.post *.vxz *.ovoxel *.mp4 *.m4v *.mov *.mkv *.webm *.avi *.ogv *.mpg *.mpeg *.wmv *.gif *.wav *.wave *.mp3 *.flac *.ogg *.oga *.opus *.m4a *.aac *.aiff *.aif *.wma *.ape);;All files (*)"))
+        for (const auto& path:QFileDialog::getOpenFileNames(this,"Add asset previews",QDir::homePath(),"All files (*);;Assets (*.ptex *.materialgraph.json *.png *.jpg *.jpeg *.webp *.bmp *.svg *.glb *.gltf *.obj *.stl *.ply *.fbx *.post *.vxz *.ovoxel *.mp4 *.m4v *.mov *.mkv *.webm *.avi *.ogv *.mpg *.mpeg *.wmv *.gif *.wav *.wave *.mp3 *.flac *.ogg *.oga *.opus *.m4a *.aac *.aiff *.aif *.wma *.ape);;Documents and code (*.md *.markdown *.txt *.rst *.log *.diff *.patch *.json *.jsonl *.yaml *.yml *.toml *.ini *.cfg *.csv *.tsv *.xml *.html *.css *.py *.gd *.gdshader *.tscn *.tres *.godot *.cpp *.h *.hpp *.rs *.js *.ts *.sh *.fish *.cmake)"))
             paths.append(path);
         if (paths.isEmpty()) return;
         const auto result=service->request({{"method","open"},{"paths",paths}});
@@ -2127,7 +2503,7 @@ PreviewWindow::PreviewWindow(Service* s) : service(s) {
         if (!result["ok"].toBool()) reportError(result["error"].toString());
     });
     connect(density,&QComboBox::activated,this,[this](int index) {
-        QJsonObject request{{"method","layout"},{"layout",index==5?"projects":index==4?"overview":index==0?"single":"grid"}};
+        QJsonObject request{{"method","layout"},{"layout",index==6?"gallery":index==5?"projects":index==4?"overview":index==0?"single":"grid"}};
         if (index>0 && index<4) request["grid_size"]=index+1;
         const auto result=service->request(request);
         if (!result["ok"].toBool()) reportError(result["error"].toString());
@@ -2169,8 +2545,13 @@ PreviewWindow::PreviewWindow(Service* s) : service(s) {
     connect(left,&QShortcut::activated,this,[navigate] { navigate(-1); });
     auto* right=new QShortcut(this); right->setKeys({QKeySequence("Right"),QKeySequence("Alt+Right")});
     connect(right,&QShortcut::activated,this,[navigate] { navigate(1); });
-    for (const auto& binding : {std::pair{"E","edges"},std::pair{"M","triangles"}}) {
+    for (const auto& binding : {std::pair{"E","edges"},std::pair{"M","triangles"},std::pair{"5","orthographic"},std::pair{"Ctrl+Alt+Q","four_view"}}) {
         auto* shortcut=new QShortcut(QKeySequence(binding.first),this);
+        if (QString(binding.first)=="5") {
+            // Qt normalizes the keypad center to plain Clear with Num Lock off.
+            shortcut->setKeys({QKeySequence("5"),QKeySequence(int(Qt::KeypadModifier)|int(Qt::Key_5)),
+                QKeySequence(Qt::Key_Clear)});
+        }
         modelShortcuts.append(shortcut);
         shortcut->setAutoRepeat(false);
         connect(shortcut,&QShortcut::activated,this,[this,key=QString(binding.second)] {
@@ -2178,15 +2559,33 @@ PreviewWindow::PreviewWindow(Service* s) : service(s) {
             if (!entry) return;
             const auto kind=entry->config["kind"].toString();
             if (kind!="model" && kind!="material") return;
+            if(key=="four_view" && service->inspectionId==service->selected)return;
             const bool value=entry->config["settings"].toObject()[key].toBool(key=="triangles");
             const auto result=service->request({{"method","settings"},{"id",service->selected},
                 {"settings",QJsonObject{{key,!value}}}});
             if (!result["ok"].toBool()) reportError(result["error"].toString());
         });
     }
+    toggleImageShortcut=new QShortcut(QKeySequence(Qt::Key_T),this);
+    toggleImageShortcut->setAutoRepeat(false);
+    toggleImageShortcut->setEnabled(false);
+    connect(toggleImageShortcut,&QShortcut::activated,this,[this] {
+        const auto entry=service->entries.value(service->selected);
+        if (!entry) return;
+        const auto result=service->request({{"method","select"},{"id",entry->config.value("toggle_with")}});
+        if (!result["ok"].toBool()) reportError(result["error"].toString());
+    });
     setupMenus(addButton);
-    exitFullscreen=new QShortcut(QKeySequence("Esc"),this); exitFullscreen->setEnabled(false); exitFullscreen->setAutoRepeat(false);
-    connect(exitFullscreen,&QShortcut::activated,this,&PreviewWindow::leaveFullscreen);
+    auto* back=new QShortcut(QKeySequence("Esc"),this); back->setAutoRepeat(false);
+    connect(back,&QShortcut::activated,this,[this] {
+        if (isFullScreen()) { leaveFullscreen(); return; }
+        if (service->layout=="overview" && service->groupByProject && service->projectFilterId.isEmpty() &&
+            service->inspectionId.isEmpty() && service->comparison.isEmpty()) return;
+        canvas->setFocus(Qt::OtherFocusReason);
+        const auto result=service->request({{"method","layout"},{"layout","overview"},
+            {"group_projects",true},{"project_filter",""}});
+        if (!result["ok"].toBool()) reportError(result["error"].toString());
+    });
     fullscreenNotice=new FullscreenNotice(canvas);
     fullscreenNotice->exitRequested=[this] { leaveFullscreen(); };
     connect(qApp,&QApplication::focusChanged,this,[this](QWidget*,QWidget*) {
@@ -2195,13 +2594,208 @@ PreviewWindow::PreviewWindow(Service* s) : service(s) {
         for (auto* shortcut:findChildren<QShortcut*>(QString(),Qt::FindDirectChildrenOnly)) shortcut->setContext(context);
     });
     QSettings settings(service->statePath+"/window.ini",QSettings::IniFormat);
+    explorerWidth=std::clamp(settings.value("explorer_width",270).toInt(),170,600);
+    explorerToggle->setChecked(settings.value("explorer_visible",false).toBool());
     const auto fraction=settings.value("codex_fraction",7.0/16.0).toDouble();
     if (std::isfinite(fraction) && fraction>=.15 && fraction<=.85) codexFraction=fraction;
     restoreGeometry(settings.value("geometry").toByteArray());
 }
 PreviewWindow::~PreviewWindow() {
+    if(comparisonPicker) {
+        comparisonGrid=nullptr;comparisonSearch=nullptr;
+        comparisonPicker->disconnect(this);
+        delete comparisonPicker.data();
+    }
     QSettings settings(service->statePath+"/window.ini",QSettings::IniFormat);
     settings.setValue("codex_fraction",codexFraction);
+    settings.setValue("explorer_width",explorer->isHidden()?explorerWidth:explorer->width());
+}
+void PreviewWindow::setExplorerVisible(bool visible) {
+    if(!visible && !explorer->isHidden())explorerWidth=explorer->width();
+    explorer->setVisible(visible && !isFullScreen());
+    if(visible) {
+        refreshExplorer();
+        const int sidebar=std::min(explorerWidth,std::max(170,width()/3));
+        explorerSplitter->setSizes({sidebar,std::max(250,width()-sidebar-5)});
+    } else if(explorer->hasFocus())canvas->setFocus(Qt::OtherFocusReason);
+    QSettings settings(service->statePath+"/window.ini",QSettings::IniFormat);
+    settings.setValue("explorer_visible",visible); settings.setValue("explorer_width",explorerWidth);
+}
+void PreviewWindow::organizeProject(const QString& id,const QPoint& position) {
+    if(!service->projects.contains(id))return;
+    QMenu menu(this);
+    auto* move=menu.addMenu("Move to Project");
+    bool hasGroups=false;
+    for(const auto& value:service->projects)if(value.toObject()["parent"]==id) { hasGroups=true; break; }
+    move->setEnabled(!hasGroups);
+    auto assign=[this,id](const QString& parent) {
+        const auto result=service->request({{"method","project"},{"id",id},{"parent",parent}});
+        if(!result["ok"].toBool())reportError(result["error"].toString());
+    };
+    for(const auto& candidate:service->orderedProjects()) {
+        const auto metadata=service->projects.value(candidate).toObject();
+        if(candidate==id || !metadata.value("parent").toString().isEmpty())continue;
+        auto* action=move->addAction(projectIcon(candidate),metadata["label"].toString());
+        action->setCheckable(true); action->setChecked(service->projects.value(id).toObject()["parent"]==candidate);
+        connect(action,&QAction::triggered,this,[assign,candidate] { assign(candidate); });
+    }
+    if(!move->actions().isEmpty())move->addSeparator();
+    connect(move->addAction("New Project…"),&QAction::triggered,this,[this,assign] {
+        bool accepted=false;
+        const auto label=QInputDialog::getText(this,"New Project","Project name",QLineEdit::Normal,{},&accepted).trimmed();
+        if(!accepted || label.isEmpty())return;
+        const auto parent="project-"+QUuid::createUuid().toString(QUuid::Id128).left(16);
+        const auto result=service->request({{"method","project"},{"id",parent},{"label",label}});
+        if(!result["ok"].toBool()) { reportError(result["error"].toString()); return; }
+        assign(parent);
+    });
+    if(!service->projects.value(id).toObject()["parent"].toString().isEmpty())
+        connect(menu.addAction("Move Out of Project"),&QAction::triggered,this,[assign] { assign({}); });
+    menu.exec(position);
+}
+void PreviewWindow::refreshExplorer() {
+    QJsonArray snapshot;
+    // This is the same project/member order used by grouped Overview, without
+    // its display filter: every open registration stays reachable here.
+    for(const auto& value:service->projectRows()) {
+        auto group=value.toObject(); QJsonArray members;
+        for(const auto& member:group["entries"].toArray()) {
+            const auto id=member.toObject()["id"].toString(); const auto config=service->entries.value(id)->config;
+            members.append(QJsonObject{{"id",id},{"label",config["label"]},{"path",config["path"]},{"kind",config["kind"]}});
+        }
+        snapshot.append(QJsonObject{{"id",group["id"]},{"label",group["label"]},{"parent",group["parent"]},{"members",members}});
+    }
+    const QSignalBlocker blocker(explorer);
+    const bool rebuilt=snapshot!=explorerSnapshot;
+    if(rebuilt) {
+        QMap<QString,bool> expanded;
+        for(QTreeWidgetItemIterator it(explorer);*it;++it)if((*it)->data(0,Qt::UserRole+1).toBool())
+            expanded[(*it)->data(0,Qt::UserRole).toString()]=(*it)->isExpanded();
+        explorer->clear();
+        QMap<QString,QTreeWidgetItem*> folders;
+        for(const auto& value:snapshot) {
+            const auto group=value.toObject(); const auto id=group["id"].toString();
+            const auto parent=group["parent"].toString();
+            auto* folder=parent.isEmpty()?new QTreeWidgetItem(explorer,{group["label"].toString()}):
+                new QTreeWidgetItem(folders.value(parent),{group["label"].toString()});
+            folders[id]=folder;
+            folder->setData(0,Qt::UserRole+1,true);
+            folder->setData(0,Qt::UserRole,id.isEmpty()?QString("@ungrouped"):id);
+            folder->setIcon(0,style()->standardIcon(QStyle::SP_DirIcon));
+            folder->setToolTip(0,group["label"].toString()+"\nDouble-click or press Enter to open Gallery");
+            for(const auto& member:group["members"].toArray()) {
+                const auto entry=member.toObject(); const auto path=entry["path"].toString();
+                auto* file=new QTreeWidgetItem(folder,{entry["label"].toString(QFileInfo(path).fileName())});
+                file->setData(0,Qt::UserRole,entry["id"]);
+                file->setIcon(0,style()->standardIcon(QStyle::SP_FileIcon));
+                file->setToolTip(0,entry["label"].toString()+"\n"+path);
+            }
+            folder->setExpanded(expanded.value(folder->data(0,Qt::UserRole).toString(),false));
+        }
+        explorerSnapshot=snapshot;
+    }
+    if(rebuilt || explorerSelection!=service->selected) {
+        for(QTreeWidgetItemIterator it(explorer);*it;++it) {
+            auto* file=*it;
+            if(file->data(0,Qt::UserRole+1).toBool() || file->data(0,Qt::UserRole).toString()!=service->selected)continue;
+            const bool reveal=!explorerSelection.isEmpty() && explorerSelection!=service->selected;
+            auto* target=file;
+            for(auto* folder=file->parent();folder;folder=folder->parent()) {
+                if(reveal)folder->setExpanded(true);
+                else if(!folder->isExpanded())target=folder;
+            }
+            explorer->setCurrentItem(target);
+            if(reveal)explorer->scrollToItem(file);
+            break;
+        }
+        explorerSelection=service->selected;
+    }
+}
+QJsonObject PreviewWindow::explorerPresentation() const {
+    auto geometry=[this](const QWidget* widget,const QRect& rect) {
+        const auto at=widget->mapTo(this,rect.topLeft());
+        return QJsonObject{{"x",at.x()},{"y",at.y()},{"width",rect.width()},{"height",rect.height()}};
+    };
+    auto result=geometry(explorer,explorer->rect());
+    result["visible"]=explorer->isVisible(); result["expanded"]=explorerToggle->isChecked();
+    result["toggle"]=geometry(explorerToggle,explorerToggle->rect());
+    QJsonArray groups;
+    for(QTreeWidgetItemIterator it(explorer);*it;++it) {
+        const auto* folder=*it;
+        if(!folder->data(0,Qt::UserRole+1).toBool())continue;
+        auto group=geometry(explorer->viewport(),explorer->visualItemRect(folder));
+        group["id"]=folder->data(0,Qt::UserRole).toString(); group["label"]=folder->text(0); group["expanded"]=folder->isExpanded();
+        group["parent"]=folder->parent()?folder->parent()->data(0,Qt::UserRole).toString():QString();
+        QJsonArray files;
+        for(int j=0;j<folder->childCount();++j) {
+            const auto* file=folder->child(j);
+            if(file->data(0,Qt::UserRole+1).toBool())continue;
+            auto row=geometry(explorer->viewport(),explorer->visualItemRect(file));
+            row["id"]=file->data(0,Qt::UserRole).toString(); row["label"]=file->text(0); row["selected"]=file->isSelected(); files.append(row);
+        }
+        group["files"]=files; groups.append(group);
+    }
+    result["groups"]=groups; return result;
+}
+void PreviewWindow::compareWith() {
+    if(comparisonPicker) { comparisonPicker->raise();comparisonPicker->activateWindow();return; }
+    const auto source=service->entries.value(service->selected);
+    if(!source || comparisonGroup(source->config).isEmpty())return;
+    comparisonSource=service->selected;
+    auto* dialog=new QDialog(this);comparisonPicker=dialog;
+    dialog->setObjectName("comparisonPicker");dialog->setAttribute(Qt::WA_DeleteOnClose);
+    dialog->setWindowTitle("Compare with "+source->config["label"].toString());
+    dialog->setMinimumSize(340,280);
+    dialog->resize(std::clamp(width()-80,360,840),std::clamp(height()-80,320,600));
+    auto* layout=new QVBoxLayout(dialog);layout->setContentsMargins(8,8,8,8);layout->setSpacing(6);
+    comparisonSearch=new QLineEdit(dialog);comparisonSearch->setObjectName("comparisonSearch");
+    comparisonSearch->setPlaceholderText("Search previews…");comparisonSearch->setAccessibleName("Search comparison previews");
+    comparisonSearch->setClearButtonEnabled(true);layout->addWidget(comparisonSearch);
+    // This grid only displays cache entries; the existing window queue serves
+    // its visible demand, retaining the shared decode/process limits.
+    comparisonGrid=new OverviewGrid(&service->cache,{},dialog,true);
+    comparisonGrid->setObjectName("comparisonChoices");comparisonGrid->setAccessibleName("Comparison previews");
+    comparisonGrid->keyFor=overview->keyFor;layout->addWidget(comparisonGrid,1);
+    auto* buttons=new QDialogButtonBox(QDialogButtonBox::Cancel,dialog);layout->addWidget(buttons);
+    connect(buttons,&QDialogButtonBox::rejected,dialog,&QDialog::reject);
+    connect(comparisonSearch,&QLineEdit::textChanged,this,[this] { refreshComparisonPicker(); });
+    comparisonGrid->viewportChanged=[this] {
+        if(comparisonGrid)overview->selectionDemand(comparisonGrid->visibleIds(),true);
+        if(overview->viewportChanged)overview->viewportChanged();
+    };
+    comparisonGrid->activated=[this,dialog,sourceId=comparisonSource](const QString& id) {
+        if(comparisonPicker!=dialog || !dialog->isVisible())return;
+        const auto result=service->request({{"method","compare"},{"ids",QJsonArray{sourceId,id}},{"camera_sync",true}});
+        if(!result["ok"].toBool()) { reportError(result["error"].toString());return; }
+        if(comparisonPicker)comparisonPicker->accept();
+    };
+    connect(comparisonSearch,&QLineEdit::returnPressed,this,[this] {
+        if(comparisonGrid && !comparisonGrid->selectedId().isEmpty())comparisonGrid->activated(comparisonGrid->selectedId());
+    });
+    connect(dialog,&QDialog::finished,this,[this,dialog] {
+        if(comparisonPicker!=dialog)return;
+        comparisonPicker.clear();comparisonGrid=nullptr;comparisonSearch=nullptr;comparisonSource.clear();
+        overview->selectionDemand({},false);service->watchers();scheduleThumbnailPreparation();
+    });
+    prepareThumbnails();refreshComparisonPicker();
+    dialog->open();comparisonGrid->setFocus(Qt::OtherFocusReason);
+}
+void PreviewWindow::refreshComparisonPicker() {
+    if(!comparisonPicker || !comparisonGrid)return;
+    const auto source=service->entries.value(comparisonSource);
+    if(!source || comparisonGroup(source->config).isEmpty()) { comparisonPicker->reject();return; }
+    const auto query=comparisonSearch->text().trimmed();
+    QList<OverviewGrid::Item> choices;
+    for(const auto& id:service->order) {
+        const auto entry=service->entries.value(id);const auto& config=entry->config;
+        if(id==comparisonSource || comparisonGroup(config)!=comparisonGroup(source->config))continue;
+        const auto project=config["project"].toString();
+        const auto projectLabel=service->projects.value(project).toObject()["label"].toString(project.isEmpty()?"Ungrouped":project);
+        if(!query.isEmpty() && !(config["label"].toString()+"\n"+config["path"].toString()+"\n"+projectLabel).contains(query,Qt::CaseInsensitive))continue;
+        choices.append({id,config["label"].toString(),config["path"].toString(),config["kind"].toString(),project,projectLabel});
+    }
+    comparisonGrid->setItems(std::move(choices),comparisonGrid->selectedId());
+    overview->selectionDemand(comparisonGrid->visibleIds(),true);
 }
 void PreviewWindow::toggleFullscreen(bool focusPreview) {
     if (isFullScreen()) { leaveFullscreen(); return; }
@@ -2217,9 +2811,10 @@ void PreviewWindow::fullscreenChanged() {
     const bool full=isFullScreen();
     fullscreenMode=full;
     if (!full) fullscreenFocus=false;
-    fullscreenAction->setChecked(full); exitFullscreen->setEnabled(full);
+    fullscreenAction->setChecked(full);
     menuBar()->setVisible(!full);
     findChild<QToolBar*>("previewToolbar")->setVisible(!full);
+    explorer->setVisible(!full && explorerToggle->isChecked());
     statusBar()->setVisible(!full);
     for (const auto& entry:service->entries) if (entry->card) {
         auto* card=static_cast<PreviewCard*>(entry->card);
@@ -2230,16 +2825,32 @@ void PreviewWindow::fullscreenChanged() {
     else fullscreenNotice->dismiss();
 }
 QJsonObject PreviewWindow::presentation() const {
+    QJsonObject picker{{"visible",comparisonPicker && comparisonPicker->isVisible()}};
+    if(comparisonPicker && comparisonGrid && comparisonSearch) {
+        const auto at=comparisonPicker->mapToGlobal(QPoint())-mapToGlobal(QPoint());
+        const auto searchAt=comparisonSearch->mapTo(comparisonPicker,QPoint());
+        picker["x"]=at.x();picker["y"]=at.y();picker["width"]=comparisonPicker->width();picker["height"]=comparisonPicker->height();
+        picker["source"]=comparisonSource;picker["query"]=comparisonSearch->text();
+        picker["search"]=QJsonObject{{"x",searchAt.x()},{"y",searchAt.y()},{"width",comparisonSearch->width()},{"height",comparisonSearch->height()}};
+        picker["grid"]=comparisonGrid->describe(comparisonPicker);
+    }
     const auto modePosition=inspectionMode->mapTo(const_cast<PreviewWindow*>(this),QPoint());
     QStringList markedIds;
     for (const auto& id:service->order) if (marked.contains(id)) markedIds.append(id);
     const auto closePosition=closeAllButton->mapTo(const_cast<PreviewWindow*>(this),QPoint());
     return {{"fullscreen",isFullScreen()},{"single_preview",isolatesPreview()},
+        {"explorer",explorerPresentation()},
+        {"selection_control",QJsonObject{{"id",selection->currentData().toString()},{"text",selection->currentText()},
+            {"visible",selection->isVisible()},{"tooltip",selection->toolTip()}}},
+        {"comparison_picker",picker},
         {"marked",QJsonArray::fromStringList(markedIds)},
         {"close_selected",QJsonObject{{"x",closePosition.x()},{"y",closePosition.y()},{"width",closeAllButton->width()},
             {"height",closeAllButton->height()},{"visible",closeAllButton->isVisible() && !marked.isEmpty()},{"enabled",!marked.isEmpty()}}},
-        {"width",width()},{"height",height()},{"menu_visible",menuBar()->isVisible()},{"overview",overview->describe(const_cast<PreviewWindow*>(this))},
+        {"x",x()},{"y",y()},{"width",width()},{"height",height()},
+        {"active",isActiveWindow()},{"exposed",windowHandle() && windowHandle()->isExposed()},
+        {"menu_visible",menuBar()->isVisible()},{"overview",overview->describe(const_cast<PreviewWindow*>(this))},
         {"projects",projectGrid->describe(const_cast<PreviewWindow*>(this))},
+        {"gallery",QJsonObject{{"visible",gallerySplitter->isVisible()},{"selected",service->selected},{"sidebar_width",overview->width()}}},
         {"toolbar_visible",findChild<QToolBar*>("previewToolbar")->isVisible()},
         {"inspection_mode",inspectionMode->currentData().toString()},
         {"mode_control",QJsonObject{{"x",modePosition.x()},{"y",modePosition.y()},{"width",inspectionMode->width()},
@@ -2271,7 +2882,7 @@ QJsonObject PreviewWindow::referenceControls() const {
     return controls;
 }
 void PreviewWindow::composeNotice(QPainter& painter) { fullscreenNotice->compose(painter,this); }
-void PreviewWindow::present() {
+void PreviewWindow::present(bool activate) {
     // Repeated GUI requests must not undo maximized/fullscreen or desktop placement.
     const bool wasVisible=isVisible();
     if (isMinimized()) setWindowState(windowState() & ~Qt::WindowMinimized);
@@ -2293,25 +2904,44 @@ void PreviewWindow::present() {
     keepOnScreen();
     // X11 frame decorations become authoritative after the window is mapped.
     QTimer::singleShot(0,this,keepOnScreen);
-    raise(); activateWindow();
+    if(activate) { raise(); activateWindow(); }
+    // A rapid hide/show can retain QWindow focus after QWidget has cleared
+    // its active window. No new native focus change then restores shortcuts
+    // or hover targeting. Repair only that metadata when we already own focus.
+    if (windowHandle() && windowHandle()->isActive() && !QApplication::activeWindow() &&
+        !QApplication::activePopupWidget() && !QApplication::activeModalWidget()) {
+        QT_WARNING_PUSH
+        QT_WARNING_DISABLE_DEPRECATED
+        QApplication::setActiveWindow(this);
+        QT_WARNING_POP
+    }
 }
 void PreviewWindow::navigation() {
+    refreshComparisonPicker();
+    refreshExplorer();
     if (hoverTarget!=service->selected) {
         hoverTarget=service->selected;
         hoverPosition=QCursor::pos();
     }
+    const auto navigationOrder=(service->layout=="single" || service->layout=="gallery")?service->overviewOrder():service->order;
+    // Filters can hide a saved selection after restoration or background
+    // membership changes. Keep its actual name in the picker regardless.
+    auto pickerOrder=navigationOrder;
+    if(service->entries.contains(service->selected) && !pickerOrder.contains(service->selected))pickerOrder.append(service->selected);
     QSignalBlocker block(selection);
-    bool choicesChanged=selection->count()!=service->order.size();
-    if(!choicesChanged)for(int at=0;at<service->order.size();++at) {
-        const auto id=service->order[at];
+    bool choicesChanged=selection->count()!=pickerOrder.size();
+    if(!choicesChanged)for(int at=0;at<pickerOrder.size();++at) {
+        const auto id=pickerOrder[at];
         if(selection->itemData(at)!=id || selection->itemText(at)!=service->entries[id]->config["label"].toString()) { choicesChanged=true; break; }
     }
     if(choicesChanged) {
         selection->clear();
-        for (const auto& id:service->order) selection->addItem(service->entries[id]->config["label"].toString(),id);
+        for (const auto& id:pickerOrder) selection->addItem(service->entries[id]->config["label"].toString(),id);
     }
-    selection->setCurrentIndex(service->order.indexOf(service->selected));
-    const int i=std::max(0,int(service->order.indexOf(service->selected))), n=service->order.size();
+    selection->setCurrentIndex(pickerOrder.indexOf(service->selected));
+    const auto currentEntry=service->entries.value(service->selected);
+    selection->setToolTip(currentEntry?selection->currentText()+"\n"+currentEntry->config["path"].toString():QString());
+    const int i=std::max(0,int(navigationOrder.indexOf(service->selected))), n=navigationOrder.size();
     const int count=service->pageSize();
     previous->setEnabled(n>0 && i/count>0);
     next->setEnabled(n>0 && (i/count+1)*count<n);
@@ -2323,30 +2953,36 @@ void PreviewWindow::navigation() {
     saveAction->setEnabled(ready);
     copyAction->setEnabled(saveAction->isEnabled());
     const bool model=ready && (selected->config["kind"]=="model" || selected->config["kind"]=="material");
-    fitAction->setEnabled(ready && !playbackKind(selected->config["kind"].toString()));
+    fitAction->setEnabled(ready && previewPresentation(selected->config["kind"].toString()).fit);
     for (auto* item:modelActions) item->setEnabled(model);
     for (auto* item:modelShortcuts) item->setEnabled(model);
+    const auto alternate=selected ? service->entries.value(selected->config.value("toggle_with").toString()) : nullptr;
+    toggleImageShortcut->setEnabled(service->layout=="single" && service->comparison.isEmpty() &&
+        alternate && alternate->config.value("toggle_with").toString()==service->selected);
     for (const auto& id:service->order) if (service->entries[id]->card)
         static_cast<PreviewCard*>(service->entries[id]->card)->setSelected(id==service->selected);
-    const bool projectLayout=service->layout=="projects", overviewLayout=service->layout=="overview";
-    projectTools->setVisible((projectLayout || overviewLayout) && service->inspectionId.isEmpty() && service->comparison.isEmpty() && !isolatesPreview());
-    groupProjects->setVisible(overviewLayout); projectDensity->setVisible(projectLayout);
+    const bool projectLayout=service->layout=="projects", overviewLayout=service->layout=="overview", galleryLayoutActive=service->layout=="gallery";
+    projectTools->setVisible((projectLayout || overviewLayout || galleryLayoutActive) && service->inspectionId.isEmpty() && service->comparison.isEmpty() && !isolatesPreview());
+    groupProjects->setVisible(overviewLayout || galleryLayoutActive); projectDensity->setVisible(projectLayout);
     { QSignalBlocker b(groupProjects); groupProjects->setChecked(service->groupByProject); }
     { QSignalBlocker b(projectDensity); projectDensity->setCurrentIndex(service->projectGridSize==0?0:service->projectGridSize-1); }
     { QSignalBlocker b(projectFilter);
-      bool changed=projectFilter->count()!=service->projectOrder.size()+2;
-      if(!changed)for(int at=0;at<service->projectOrder.size();++at) {
-          const auto id=service->projectOrder[at];
-          if(projectFilter->itemData(at+1)!=id || projectFilter->itemText(at+1)!=service->projects.value(id).toObject()["label"].toString()) { changed=true; break; }
-      }
+      const auto ids=service->orderedProjects();
+      auto label=[this](const QString& id) {
+          const auto metadata=service->projects.value(id).toObject();
+          return (metadata.value("parent").toString().isEmpty()?QString():QString("    ↳ "))+metadata["label"].toString();
+      };
+      bool changed=projectFilter->count()!=ids.size()+2;
+      if(!changed)for(int at=0;at<ids.size();++at)
+          if(projectFilter->itemData(at+1)!=ids[at] || projectFilter->itemText(at+1)!=label(ids[at])) { changed=true; break; }
       if(changed) {
           projectFilter->clear(); projectFilter->addItem("All projects",QString());
-          for (const auto& id:service->projectOrder) projectFilter->addItem(projectIcon(id),service->projects.value(id).toObject()["label"].toString(),id);
+          for(const auto& id:ids)projectFilter->addItem(projectIcon(id),label(id),id);
           projectFilter->addItem("Ungrouped","@ungrouped");
       }
       projectFilter->setCurrentIndex(projectFilter->findData(service->projectFilterId)); }
     QSignalBlocker densityBlock(density);
-    density->setCurrentIndex(service->layout=="projects"?5:service->layout=="overview"?4:service->layout=="single"?0:service->gridSize-1);
+    density->setCurrentIndex(service->layout=="gallery"?6:service->layout=="projects"?5:service->layout=="overview"?4:service->layout=="single"?0:service->gridSize-1);
     density->setEnabled(service->comparison.isEmpty());
     if (inspectAction) {
         inspectAction->setEnabled(selected && selected->config["kind"]=="model");
@@ -2367,11 +3003,19 @@ void PreviewWindow::navigation() {
             "Part and cut modes require a static GLB/glTF model and the optional inspection backend");
         inspectionMode->setCurrentIndex(inspected?(selected->inspectionTool=="cuts"?2:1):0);
     }
-    { QSignalBlocker blocker(syncButton); syncButton->setVisible(!service->comparison.isEmpty()); syncButton->setChecked(service->cameraSync); }
+    {
+        QSignalBlocker blocker(syncButton);
+        const auto source=service->entries.value(service->selected);
+        const bool image=source && source->config["kind"]=="image";
+        syncButton->setText(width()<760?"Sync":image?"Sync pan / zoom":"Sync camera");
+        syncButton->setToolTip(image?"Link pan, zoom and Fit in both comparison images":"Link orbit, pan and zoom in both comparison views");
+        syncButton->setVisible(!service->comparison.isEmpty()); syncButton->setChecked(service->cameraSync);
+    }
     if (projectLayout && service->inspectionId.isEmpty() && service->comparison.isEmpty() && !isolatesPreview()) {
         previous->setEnabled(false); next->setEnabled(false); position->setText(QString("%1 projects").arg(projectGrid->count())); return;
     }
-    if (overviewVisible()) {
+    if(galleryLayoutActive) overview->select(service->selected,true);
+    if (service->layout=="overview" && overviewVisible()) {
         previous->setEnabled(false); next->setEnabled(false); position->setText(QString("%1 open").arg(service->overviewOrder().size()));
         overview->select(service->selected); return;
     }
@@ -2380,7 +3024,7 @@ void PreviewWindow::navigation() {
         previous->setEnabled(false); next->setEnabled(false); density->setEnabled(false);
         position->setText("Inspect 3D"); return;
     }
-    position->setText(n==0?"0 / 0":service->layout=="single"?QString("%1 / %2").arg(i+1).arg(n):QString("%1–%2 / %3").arg((i/count)*count+1).arg(std::min((i/count+1)*count,n)).arg(n));
+    position->setText(n==0?"0 / 0":(service->layout=="single" || galleryLayoutActive)?QString("%1 / %2").arg(i+1).arg(n):QString("%1–%2 / %3").arg((i/count)*count+1).arg(std::min((i/count+1)*count,n)).arg(n));
 }
 void PreviewWindow::switchInspectionMode(int index) {
     const auto entry=service->entries.value(service->selected);
@@ -2398,7 +3042,10 @@ QStringList PreviewWindow::prepareProjects() {
     QJsonArray rows;
     for (const auto& value:service->projectRows()) {
         const auto id=value.toObject()["id"].toString();
-        if (service->projectFilterId.isEmpty() || (service->projectFilterId=="@ungrouped"?id.isEmpty():id==service->projectFilterId)) rows.append(value);
+        bool container=false;
+        for(const auto& metadata:service->projects)if(metadata.toObject()["parent"]==id && !id.isEmpty()) { container=true; break; }
+        if(container && value.toObject()["entries"].toArray().isEmpty())continue;
+        if(service->matchesProject(id,service->projectFilterId))rows.append(value);
     }
     projectGrid->show(); projectGrid->setProjects(rows,service->projectGridSize);
     return projectGrid->visibleIds();
@@ -2407,22 +3054,45 @@ void PreviewWindow::arrange(const QStringList& ids) {
     while (auto* item=grid->takeAt(0)) { if (item->widget() && item->widget()->property("empty").toBool()) delete item->widget(); delete item; }
     for (int i=0;i<4;++i) { grid->setRowStretch(i,0); grid->setColumnStretch(i,0); }
     const int inset=isFullScreen()?0:8, verticalInset=isFullScreen()?0:6;
-    centralWidget()->layout()->setContentsMargins(inset,verticalInset,inset,verticalInset);
-    centralWidget()->layout()->setSpacing(6);
+    previewBody->layout()->setContentsMargins(inset,verticalInset,inset,verticalInset);
+    previewBody->layout()->setSpacing(6);
     grid->setSpacing(6); statusBar()->setVisible(!isFullScreen());
     const bool showProjects=service->layout=="projects" && service->inspectionId.isEmpty() && service->comparison.isEmpty() && !isolatesPreview();
     projectGrid->setVisible(showProjects);
+    const bool showGallery=service->layout=="gallery" && service->inspectionId.isEmpty() && service->comparison.isEmpty() && !isolatesPreview();
+    gallerySplitter->setVisible(showGallery);
+    while(auto* item=galleryLayout->takeAt(0)) { if(item->widget() && item->widget()->property("empty").toBool())delete item->widget(); delete item; }
+    if(showGallery && overview->parentWidget()!=gallerySplitter) {
+        overview->setParent(gallerySplitter); overview->setMinimumWidth(140);
+        gallerySplitter->insertWidget(0,overview);
+        gallerySplitter->setStretchFactor(0,0); gallerySplitter->setStretchFactor(1,1);
+        const int sidebar=width()<760?std::max(140,width()/3):380;
+        gallerySplitter->setSizes({sidebar,std::max(240,width()-sidebar-20)});
+    } else if(!showGallery && overview->parentWidget()!=canvas) {
+        overview->setParent(canvas); overview->setMinimumWidth(0);
+    }
+    overview->setCompact(showGallery);
     const bool showOverview=service->layout=="overview" && service->inspectionId.isEmpty() && service->comparison.isEmpty();
-    overview->setVisible(showOverview);
-    if (showOverview) {
+    overview->setVisible(showOverview || showGallery);
+    if (showOverview || showGallery) {
         QList<OverviewGrid::Item> items;
         for (const auto& id:service->overviewOrder()) {
             const auto& c=service->entries[id]->config; const auto project=c.value("project").toString();
             items.append({id,c["label"].toString(),c["path"].toString(),c["kind"].toString(),project,
-                project.isEmpty()?"Ungrouped":service->projects.value(project).toObject()["label"].toString()});
+                project.isEmpty()?"Ungrouped":service->projects.value(project).toObject()["label"].toString(),
+                service->projects.value(project).toObject()["parent"].toString(),
+                service->projects.value(service->projects.value(project).toObject()["parent"].toString()).toObject()["label"].toString()});
         }
         overview->setItems(std::move(items),service->selected,service->groupByProject);
-        grid->addWidget(overview,0,0); grid->setRowStretch(0,1); grid->setColumnStretch(0,1); overview->setFocus(Qt::OtherFocusReason);
+        grid->addWidget(showGallery?static_cast<QWidget*>(gallerySplitter):overview,0,0); grid->setRowStretch(0,1); grid->setColumnStretch(0,1);
+        if(showGallery) {
+            for(const auto& id:ids) {
+                auto* card=service->entries[id]->card;
+                if(card->parentWidget()!=galleryBody)card->setParent(galleryBody);
+                galleryLayout->addWidget(card); card->show();
+            }
+            if(ids.isEmpty()) { auto* empty=new QLabel("Select a preview",galleryBody); empty->setProperty("empty",true); empty->setAlignment(Qt::AlignCenter); galleryLayout->addWidget(empty); }
+        } else overview->setFocus(Qt::OtherFocusReason);
     } else if (showProjects) {
         grid->addWidget(projectGrid,0,0); grid->setRowStretch(0,1); grid->setColumnStretch(0,1);
         for (const auto& id:ids) {
@@ -2448,11 +3118,16 @@ void PreviewWindow::createCard(Entry& e) {
     e.pendingOutputs=service->outputStamps(e);
     const auto kind=e.config["kind"].toString();
     const bool native=playbackKind(kind) || kind=="model" || kind=="material";
-    QWidget* parent=canvas;
+    QWidget* parent=service->layout=="gallery" && service->inspectionId.isEmpty() && service->comparison.isEmpty() && !isolatesPreview()?galleryBody:canvas;
     if(service->layout=="projects" && service->inspectionId.isEmpty() && service->comparison.isEmpty() && !isolatesPreview())
-        if(auto* pane=projectGrid->cardParent(id))parent=pane;
+        if(auto* pane=projectGrid->cardParent(id)) {
+            parent=pane;
+            // Establish the pane boundary before native overlays choose their
+            // platform parent; the GL surface is constructed later. Raster-only
+            // panes keep their normal backing store and input routing.
+            if(native) pane->setAttribute(Qt::WA_NativeWindow);
+        }
     auto* card=new PreviewCard(parent,e.config["label"].toString(),e.config["path"].toString(),kind,native);
-    card->model=e.config["kind"].toString()=="model" || e.config["kind"].toString()=="material";
     e.card=card; e.statusLabel=card->footer; e.optionsButton=card->options;
     service->status(e,e.status);
     QWidget* widget=nullptr;
@@ -2467,7 +3142,7 @@ void PreviewWindow::createCard(Entry& e) {
                 if (++entry->retries<=3) {
                     const auto token=entry->token;
                     QTimer::singleShot(200*(1<<entry->retries),service,[this,id,token] {
-                        const auto e=service->entries.value(id); if (e && e->active && e->token==token && !e->status.startsWith("Generator failed") && !e->status.startsWith("Generator timed out")) service->reload(id);
+                        const auto e=service->entries.value(id); if (e && e->active && e->view && !e->view->loading() && e->token==token && !e->status.startsWith("Generator failed") && !e->status.startsWith("Generator timed out")) service->reload(id);
                     });
                 }
             }
@@ -2475,6 +3150,41 @@ void PreviewWindow::createCard(Entry& e) {
             if(!entry->status.startsWith("Generator failed") && !entry->status.startsWith("Generator timed out")) service->status(*entry,ok?(building?"Building · preview updated":"Live · image ready"):(building?"Building · waiting · ":"Waiting · ")+error);
             if(id==service->selected)navigation();
             if (service->inspectionId==id) service->inspectionEvent(id);
+        };
+    }
+    else if(e.config["kind"]=="file") {
+        auto* file=new FileView(e.card); e.view=file; widget=file;
+        file->setCardWidgets(card->actionBar(),card->footer);
+        file->playbackSettingsRequested=[this,id](QJsonObject patch) {
+            const auto result=service->request({{"method","settings"},{"id",id},{"settings",patch}});
+            if(!result["ok"].toBool()) reportError(result["error"].toString());
+        };
+    }
+    else if(e.config["kind"]=="selection") {
+        auto* selection=new SelectionView(e.card); e.view=selection; widget=selection;
+        selection->setCardWidgets(card->actionBar(),card->footer);
+        selection->openPreview=[this,id](QString path,QString title) {
+            QTimer::singleShot(0,this,[this,id,path=std::move(path),title=std::move(title)] {
+                const auto origin=service->entries.value(id);
+                if (!origin || !origin->active) return;
+                if (!QFileInfo(path).isFile()) { reportError("Preview file is unavailable"); return; }
+                const auto project=origin->config["project"].toString();
+                const QString kind=Selection::isImagePath(path)?"image":"model";
+                const auto matching=std::find_if(service->order.begin(),service->order.end(),[&](const QString& candidate) {
+                    const auto& config=service->entries.value(candidate)->config;
+                    return config["path"]==path && config["project"].toString()==project && config["kind"]==kind;
+                });
+                QString target;
+                if (matching!=service->order.end()) target=*matching;
+                else {
+                    QJsonObject config{{"path",path},{"kind",kind},{"label",title+(kind=="image"?" · image":"")},{"project",project}};
+                    const auto added=service->request({{"method","add"},{"entry",config},{"make_current",false}});
+                    if (!added["ok"].toBool()) { reportError(added["error"].toString()); return; }
+                    target=added["id"].toString();
+                }
+                const auto result=service->request({{"method","select"},{"id",target}});
+                if (!result["ok"].toBool()) reportError(result["error"].toString());
+            });
         };
     }
     else if(e.config["kind"]=="graph") { auto* graph=new MaterialGraphView(e.card); e.view=graph; widget=graph; }
@@ -2491,7 +3201,7 @@ void PreviewWindow::createCard(Entry& e) {
                 else if (++e->retries<=3) {
                     const auto token=e->token;
                     QTimer::singleShot(200*(1<<e->retries),service,[this,id,token] {
-                        const auto e=service->entries.value(id); if (e && e->active && e->token==token && !e->status.startsWith("Generator failed") && !e->status.startsWith("Generator timed out")) service->reload(id);
+                        const auto e=service->entries.value(id); if (e && e->active && e->view && !e->view->loading() && e->token==token && !e->status.startsWith("Generator failed") && !e->status.startsWith("Generator timed out")) service->reload(id);
                     });
                 }
             }
@@ -2597,7 +3307,11 @@ void PreviewWindow::createCard(Entry& e) {
     widget->setToolTip(e.config["kind"]=="video"?"Space to pause · double click for full screen · F11 full screen · Esc exit · Shift+Left / Right seek · Home restart · M mute":
         e.config["kind"]=="audio"?"Space / double click to pause · Shift+Left / Right seek · Home restart · M mute":
         e.config["kind"].toString()=="image"?"Scroll to zoom · drag to pan · double click to fit":
-        e.config["kind"]=="graph"?"Click a node to inspect · double click or + to expand · Ctrl+scroll to zoom":"Drag to orbit · right / middle drag to pan · scroll to zoom · double click to fit · E edges / lines · M triangle count");
+        e.config["kind"]=="graph"?"Click a node to inspect · double click or + to expand · Ctrl+scroll to zoom":
+        e.config["kind"]=="selection"?"Accept or deny individual options · click a selected decision again to clear it":
+        e.config["kind"]=="file"?"Ctrl+F find · F3 next match · Shift+F3 previous match · Ctrl+Shift+Space full context":"Drag to orbit · right / middle drag to pan · scroll to zoom · double click to fit · 5 perspective / orthographic · E edges / lines · M triangle count");
+    if (e.config.contains("toggle_with"))
+        widget->setToolTip(widget->toolTip()+" · T to toggle paired image in Single view");
     connect(card->fit,&QToolButton::clicked,this,[this,id] {
         const auto e=service->entries.value(id); if (!e || !e->view) return;
         e->view->fit();
@@ -2655,7 +3369,14 @@ void PreviewWindow::prepareThumbnails() {
     for(const auto& id:service->order) {
         const auto entry=service->entries.value(id);
         if(!entry->active)continue;
-        active.insert(id);
+        if(entry->config["kind"]!="file" && entry->config["kind"]!="video")active.insert(id);
+        if((service->layout=="gallery" || comparisonPicker) && entry->config["kind"]=="image" && entry->view && !entry->view->loading() && entry->publicationValid) {
+            const auto key=service->thumbnailKey(*entry);
+            if(!key.isEmpty() && service->cache.peekThumbnail(key).isNull()) {
+                service->rememberThumbnail(*entry);
+                if(!service->cache.peekThumbnail(key).isNull())overview->refresh();
+            }
+        }
         ready &= !entry->view || !entry->view->loading();
         ready &= !entry->process || entry->process->state()==QProcess::NotRunning;
         const auto& members=projectMembers[entry->config.value("project").toString()];
@@ -2718,6 +3439,9 @@ void PreviewWindow::closeMarked() {
 void PreviewWindow::hoverCard(const QString& id,const QPoint& position,bool explicitInput) {
     if (!isActiveWindow() || QApplication::activePopupWidget() || QApplication::activeModalWidget() ||
         QGuiApplication::mouseButtons()!=Qt::NoButton) return;
+    // Hover is only a navigation hint. Keep typing in Find (and other text
+    // fields) uninterrupted until an explicit click, scroll or selection.
+    if (!explicitInput && qobject_cast<QLineEdit*>(QApplication::focusWidget())) return;
     const auto entry=service->entries.value(id);
     if (!entry || !entry->active || !entry->surface || !entry->surface->isVisible()) return;
     // Layout/mask changes can send Enter without pointer movement. Retain
@@ -2735,6 +3459,13 @@ void PreviewWindow::hoverCard(const QString& id,const QPoint& position,bool expl
     if (service->selected==id) entry->surface->setFocus(Qt::MouseFocusReason);
 }
 bool PreviewWindow::eventFilter(QObject* object,QEvent* event) {
+    if(object==explorer && event->type()==QEvent::ShortcutOverride) {
+        const auto* key=static_cast<QKeyEvent*>(event);
+        if(key->modifiers()==Qt::NoModifier && (key->key()==Qt::Key_Left || key->key()==Qt::Key_Right ||
+            key->key()==Qt::Key_Home || key->key()==Qt::Key_End || key->key()==Qt::Key_Space)) {
+            event->accept(); return true;
+        }
+    }
     if (object==codexDock && event->type()==QEvent::Resize && !resizingCodex && !codexResizePending &&
         codexDock->isVisible() && (QGuiApplication::mouseButtons() & Qt::LeftButton)) {
         // Only an explicit splitter drag updates the preference. Window
@@ -2842,7 +3573,7 @@ bool PreviewWindow::eventFilter(QObject* object,QEvent* event) {
             if (nativeInput) entry->surface->setFocus(Qt::MouseFocusReason);
         }
     }
-    if (!id.isEmpty() && event->type()==QEvent::ContextMenu) {
+    if (!id.isEmpty() && event->type()==QEvent::ContextMenu && !object->property("previewContentContextMenu").toBool()) {
         auto* context=static_cast<QContextMenuEvent*>(event); selectCard(id);
         QMenu menu(this); populatePreviewMenu(&menu,id,true); menu.exec(context->globalPos());
         const auto entry=service->entries.value(id); if (entry && entry->card) static_cast<PreviewCard*>(entry->card)->activity();
@@ -2897,11 +3628,12 @@ void PreviewWindow::resizeCodex() {
     resizingCodex=false;
 }
 QImage PreviewWindow::captureWindow() {
+    if(comparisonPicker && comparisonPicker->isVisible())return comparisonPicker->grab().toImage();
     if (auto* editor=findChild<QDialog*>("referenceEditor"); editor && editor->isVisible()) return editor->grab().toImage();
     if (auto* modal=QApplication::activeModalWidget(); modal && isAncestorOf(modal)) return modal->grab().toImage();
     auto image=grab().toImage(); QPainter painter(&image);
     if (projectGrid->isVisible()) painter.setClipRect(QRect(projectGrid->viewport()->mapTo(this,QPoint()),projectGrid->viewport()->size()));
-    for (const auto& entry:service->entries) if (entry->active && entry->view && entry->config["kind"]!="image")
+    for (const auto& entry:service->entries) if (entry->active && entry->view)
         painter.drawImage(QRect(entry->surface->mapTo(this,QPoint()),entry->surface->size()),entry->view->snapshot());
     for (const auto& entry:service->entries) if (entry->active && entry->card) static_cast<PreviewCard*>(entry->card)->compose(painter,this);
     painter.setClipping(false); composeNotice(painter); return image;
@@ -2951,7 +3683,8 @@ void PreviewWindow::populatePreviewMenu(QMenu* menu,const QString& id,bool conte
     };
     action(isFullScreen()?"Exit &Full Screen\tEsc / F11":"&Full Screen\tF11","view-fullscreen",
         [this,kind] { toggleFullscreen(kind=="video"); });
-    if (!playbackKind(kind)) action("&Fit View\tF","zoom-fit-best",[entry] { if (entry->view) entry->view->fit(); });
+    if (previewPresentation(kind).fit) action("&Fit View\tF","zoom-fit-best",[entry] { if (entry->view) entry->view->fit(); });
+    if (auto* file=dynamic_cast<FileView*>(entry->view)) file->addNavigationActions(menu);
     if (kind=="model" || kind=="material") {
         action("&Reset Camera\tCtrl+Home","view-refresh",[entry] { if (entry->view) entry->view->resetView(); });
         cameraViews(menu->addMenu("Camera &Views"),id);
@@ -2966,7 +3699,8 @@ void PreviewWindow::populatePreviewMenu(QMenu* menu,const QString& id,bool conte
         if (!result["ok"].toBool()) reportError(result["error"].toString());
     };
     const bool inspector=service->inspectionId==id && entry->config.value("inspection").toObject()["enabled"].toBool();
-    populateSettings(menu,inspector?QString("inspection"):kind,entry->config["settings"].toObject(),patch);
+    populateSettings(menu,inspector?QString("inspection"):kind,entry->config["settings"].toObject(),patch,false,
+        kind=="image" && entry->view && entry->view->metrics()["nearest"].toBool());
     const auto suffix=QFileInfo(entry->config["path"].toString()).suffix().toLower();
     if(kind=="model" && !inspector && (suffix=="vxz" || suffix=="ovoxel")) {
         auto* voxelMenu=menu->addMenu("O-Voxel View");
@@ -3043,8 +3777,10 @@ void PreviewWindow::options(const QString& id) {
     const auto current=service->entries.value(id); if (current && current->card) static_cast<PreviewCard*>(current->card)->activity();
 }
 void PreviewWindow::populateSettings(QMenu* menu,const QString& kind,const QJsonObject& settings,
-    const std::function<void(QJsonObject)>& patch,bool defaults) {
+    const std::function<void(QJsonObject)>& patch,bool defaults,bool automaticNearest) {
     if(kind=="graph") {menu->addSection("Recipe layout and saved-map previews");return;}
+    if(kind=="file") {menu->addSection("File view, wrapping and context controls are above the document");return;}
+    if(kind=="selection") {menu->addSection("Batch, single-option and decision filters are above the selection");return;}
     auto number=[&](const QString& label,const QString& key,double fallback,double maximum) {
         const auto value=settings[key].toDouble(fallback);
         auto* action=menu->addAction(QString("%1 · %2…").arg(label).arg(value));
@@ -3062,22 +3798,42 @@ void PreviewWindow::populateSettings(QMenu* menu,const QString& kind,const QJson
         auto* sub=menu->addMenu(label);
         for (int i=0;i<values.size();++i) {
             auto* action=sub->addAction(labels[i]); action->setCheckable(true); action->setChecked(settings[key].toString(fallback)==values[i]);
-            connect(action,&QAction::triggered,this,[patch,key,value=values[i]] { patch({{key,value}}); });
+            connect(action,&QAction::triggered,this,[patch,key,value=values[i]] {
+                QJsonObject changes{{key,value}};
+                if(key=="edge_topology")changes["edges"]=true;
+                patch(changes);
+            });
+            if(key=="edge_topology")action->setToolTip(values[i]=="source"?
+                "Show original polygon boundaries. OBJ/PLY can retain quads; GLB/glTF surfaces contain triangles.":
+                "Show triangle edges, including tessellation diagonals. Supported for OBJ, PLY and GLB/glTF.");
         }
     };
-    if (kind=="image") toggle("&Pixel Filtering","nearest");
+    if (kind=="image") {
+        const bool nearest=settings["nearest"].toBool(automaticNearest);
+        auto* aa=menu->addAction("&Anti-aliasing"); aa->setCheckable(true); aa->setChecked(!nearest);
+        connect(aa,&QAction::toggled,this,[patch](bool enabled) { patch({{"nearest",!enabled}}); });
+        auto* automatic=menu->addAction("A&utomatic anti-aliasing"); automatic->setCheckable(true);
+        automatic->setChecked(!settings["nearest"].isBool());
+        automatic->setToolTip("Disable AA for raster images up to 256 × 256 pixels; smooth larger images and vectors.");
+        connect(automatic,&QAction::toggled,this,[patch,nearest](bool enabled) {
+            patch({{"nearest",enabled?QJsonValue("auto"):QJsonValue(nearest)}});
+        });
+    }
     else if (playbackKind(kind)) {
         toggle("&Paused\tSpace","paused",kind=="audio"); toggle("&Muted\tM","muted",kind!="audio"); toggle("&Loop","loop",true);
 
     }
     else {
         menu->addSection("Display");
-        toggle("Show Triangle &Count\tM","triangles",true);
+        if(!defaults && kind!="inspection")toggle("&4 View\tCtrl+Alt+Q","four_view");
+        toggle("Show Face &Counts\tM","triangles",true);
         toggle("Show &Materials","materials",true);
         toggle("Show &Textures","textures",true)->setEnabled(settings["materials"].toBool(true));
         toggle("Lock &horizon","lock_horizon",true);
         if (kind!="inspection") { toggle("Ground Grid","grid",true); toggle("Axis Indicator","axes"); }
-        toggle("Show Edges / Lines\tE","edges"); toggle("Orthographic Camera","orthographic");
+        toggle("Show Edges / Lines\tE","edges");
+        if(!defaults && kind!="inspection")choice("Edge topology","edge_topology",{"Quads / source faces","Triangulated faces"},{"source","triangles"},"source");
+        toggle("Orthographic Camera\t5 / Numpad 5","orthographic");
         choice("Floor / up axis","up_axis",{"Y up · XZ floor","Z up · XY floor"},{"y","z"},"y");
         if (kind!="inspection") {
             if(kind=="model" || defaults)
@@ -3101,7 +3857,12 @@ void PreviewWindow::resizeEvent(QResizeEvent* e) {
     if (!selection) return;
     refreshMarked();
     position->setVisible(width()>=700);
-    syncButton->setText(width()<760?"Sync":"Sync camera");
+    const auto source=service->entries.value(service->selected);
+    syncButton->setText(width()<760?"Sync":source && source->config["kind"]=="image"?"Sync pan / zoom":"Sync camera");
+    if(explorer && explorer->isVisible() && width()<760 && explorer->width()>width()/3)
+        explorerSplitter->setSizes({std::max(170,width()/3),std::max(250,width()*2/3)});
+    if (gallerySplitter && gallerySplitter->isVisible() && width()<760 && overview->width()>width()/3)
+        gallerySplitter->setSizes({std::max(140,width()/3),std::max(240,width()*2/3)});
     if (dockVisible) QTimer::singleShot(0,this,[this] { resizeCodex(); codexResizePending=false; });
 }
 void PreviewWindow::closeEvent(QCloseEvent* event) {
@@ -3110,6 +3871,10 @@ void PreviewWindow::closeEvent(QCloseEvent* event) {
     settings.setValue("codex_fraction",codexFraction);
     for (const auto& entry:service->entries) if (entry->active) service->rememberThumbnail(*entry);
     hide(); service->reconcile(); event->ignore();
+}
+void PreviewWindow::hideEvent(QHideEvent* event) {
+    if(comparisonPicker)comparisonPicker->reject();
+    QMainWindow::hideEvent(event);
 }
 void PreviewWindow::changeEvent(QEvent* e) {
     QMainWindow::changeEvent(e);

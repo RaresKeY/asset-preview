@@ -246,6 +246,15 @@ void validateView(const QJsonObject& view) {
     }
     if (view.contains("orthographic") && !view["orthographic"].isBool())
         fail("view.orthographic must be boolean");
+    if(view.contains("display")) {
+        const auto display=objectValue(view["display"],"view.display");
+        for(auto it=display.begin();it!=display.end();++it) {
+            if(it.key()=="explosion") {
+                if(!it.value().isDouble() || !std::isfinite(it.value().toDouble()) || it.value().toDouble()<0 || it.value().toDouble()>2)
+                    fail("view.display.explosion must be between 0 and 2");
+            } else if((it.key()!="part_colors" && it.key()!="cap_cuts") || !it.value().isBool()) fail("Invalid view.display option");
+        }
+    }
     if (view.contains("cuts")) {
         for (const auto& item : arrayValue(view["cuts"], "view.cuts", 6)) {
             const auto cut = objectValue(item, "view cut");

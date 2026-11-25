@@ -60,6 +60,24 @@ class SourceSettings(unittest.TestCase):
                 invoke('project','current','chair','image')
                 self.assertEqual(rpc.call_args.args[0],{'method':'project','id':'chair','current':'image'})
 
+    def test_project_groups_are_scoped_to_the_owner(self):
+        with patch.object(client,'start'), patch.object(client,'rpc',return_value={'ok':True,'id':'image'}) as rpc:
+            invoke('add','image.png','--project','game','--project-label','Game','--group','props','--group-label','Props')
+            first=rpc.call_args.args[0]
+            self.assertEqual(first['parent_project'],'game')
+            self.assertEqual(first['parent_project_label'],'Game')
+            self.assertEqual(first['project_label'],'Props')
+            invoke('add','other.png','--project','game','--group','props')
+            self.assertEqual(first['entry']['project'],rpc.call_args.args[0]['entry']['project'])
+            invoke('add','image.png','--project','other','--group','props')
+            self.assertNotEqual(first['entry']['project'],rpc.call_args.args[0]['entry']['project'])
+            invoke('project','create','legacy-gallery','--parent','game')
+            self.assertEqual(rpc.call_args.args[0]['parent'],'game')
+            for arguments in [('add','image.png','--group-label','Props'),
+                              ('add','image.png','--group','../bad'),
+                              ('add','image.png','--group','props','--ungrouped')]:
+                with self.assertRaises(RuntimeError): invoke(*arguments)
+
     def test_open_paths_shorthand_and_option_separator(self):
         with patch.object(client, 'start') as start, patch.object(client, 'rpc', return_value={'ok': True}) as rpc:
             for arguments, names in [

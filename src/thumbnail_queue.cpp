@@ -27,7 +27,8 @@ QImage smallImage(const QString& path) {
     const auto size=reader.size(); const auto format=reader.imageFormat();
     const int bytes=format==QImage::Format_Invalid?16:std::max(4,int(QImage::toPixelFormat(format).bitsPerPixel()+7)/8);
     if (!size.isValid() || qint64(size.width())*size.height()*bytes>32*1024*1024) return {};
-    reader.setScaledSize(size.scaled(preview::PreviewCache::ThumbnailWidth,preview::PreviewCache::ThumbnailHeight,Qt::KeepAspectRatio));
+    if(size.width()>preview::PreviewCache::ThumbnailWidth || size.height()>preview::PreviewCache::ThumbnailHeight)
+        reader.setScaledSize(size.scaled(preview::PreviewCache::ThumbnailWidth,preview::PreviewCache::ThumbnailHeight,Qt::KeepAspectRatio));
     return reader.read().convertToFormat(QImage::Format_RGBA8888);
 }
 }
@@ -112,7 +113,7 @@ void ThumbnailQueue::schedule(int delay,bool debounce) {
 }
 void ThumbnailQueue::work() {
     if(!enabled || !cache->allowsPreload())return;
-    // Visible images first, then visible models; nearby/remaining work follows
+    // Visible images first, then visible content; nearby/remaining work follows
     // only after a finite quiet period. No queued worker backlog can outrank a
     // newly visible request. The two decode slots are independent of F3D.
     QStringList order; order.reserve(items.size());
@@ -138,7 +139,7 @@ void ThumbnailQueue::work() {
         const auto it=byId.constFind(id); if(it==byId.cend())continue;
         const auto& item=*it; const bool front=visibleSet.contains(id);
         if(!front && quiet.elapsed()<BackgroundDelay) { schedule(BackgroundDelay-int(quiet.elapsed()),false); break; }
-        if(!front && item.kind!="image" && item.kind!="model" && item.kind!="material")continue;
+        if(!front && item.kind!="image" && item.kind!="model" && item.kind!="material" && item.kind!="file" && item.kind!="video")continue;
         if(dirty.contains(id) || !keys.contains(id) || !hydrated.contains(id)) {
             if(prepared>=4 || (prepared && slice.elapsed()>=8)) { schedule(1,false); break; }
             ++prepared;
@@ -161,7 +162,7 @@ void ThumbnailQueue::work() {
             // warming. Decode cancellation is cooperative, never a GUI wait.
             if(decodes.size()>=(front?ImageWorkers:1))continue;
             attempted.insert(key); decode(item,key,front);
-        } else if(item.kind=="model" || item.kind=="material") {
+        } else if(item.kind=="model" || item.kind=="material" || item.kind=="file" || item.kind=="video") {
             if(process) {
                 if(front && !renderForeground && !cancelled)cancelRender();
                 continue;
@@ -214,7 +215,8 @@ void ThumbnailQueue::decode(const Item& item,const QString& key,bool front) {
 void ThumbnailQueue::render(const Item& item,const QString& key,bool front) {
     const auto config=configFor?configFor(item.id):QJsonObject{};
     const QFileInfo source(item.path); const auto request=QJsonDocument(config).toJson(QJsonDocument::Compact);
-    if(config.isEmpty() || root.isEmpty() || !source.isFile() || source.size()>256*1024*1024 || request.size()>64*1024)return;
+    const qint64 sourceLimit=item.kind=="video"?qint64(8)*1024*1024*1024:item.kind=="file"?2*1024*1024:256*1024*1024;
+    if(config.isEmpty() || root.isEmpty() || !source.isFile() || source.size()>sourceLimit || request.size()>64*1024)return;
     directory=std::make_unique<QTemporaryDir>(root+"/job-XXXXXX");
     if(!directory->isValid()) { directory.reset(); return; }
     QFile input(directory->filePath("request.json"));
@@ -240,8 +242,9 @@ void ThumbnailQueue::render(const Item& item,const QString& key,bool front) {
         lastError=details["error"].toString();
         if(!success && !cancelled && lastError.isEmpty())lastError="Thumbnail worker failed";
         if(timedOut)lastError="Thumbnail timed out";
+        const auto category=item.kind=="file" || item.kind=="video"?item.kind:QStringLiteral("model");
         cache->observe("thumbnail",valid?"generated":image.isNull()?"skipped":"discarded",key,image.sizeInBytes(),
-            valid?(front?"visible_model":"background_model"):timedOut?"timeout":cancelled?"cancelled":"bounded_or_failed",elapsed->nsecsElapsed()/1000,details);
+            valid?(front?"visible_":"background_")+category:timedOut?"timeout":cancelled?"cancelled":"bounded_or_failed",elapsed->nsecsElapsed()/1000,details);
         if(valid) { publish(key,image); ++rendered; }
         process.clear(); directory.reset(); renderId.clear(); renderKey.clear(); child->deleteLater();
         notify(); if(sourcesChanged)sourcesChanged(); schedule(valid?1:25,!valid);

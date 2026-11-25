@@ -4,6 +4,49 @@ preview_project_root="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)"
 preview_test_mode="${1:-functional}"
 if (( $# )); then shift; fi
 case "$preview_test_mode" in
+    project-grid|project-grid-gpu)
+        preview_test_directory="$(mktemp -d /tmp/asset-preview-project-grid.XXXXXX)"
+        trap 'rm -rf -- "$preview_test_directory"' EXIT
+        read -r -a preview_qt_flags <<< "$(pkg-config --cflags --libs Qt6Widgets)"
+        c++ -std=c++20 -O2 -fPIC -Wall -Wextra -Werror -I"$preview_project_root/src" \
+            "$preview_project_root/tests/project_grid.cpp" "$preview_project_root/src/project_grid.cpp" \
+            -o "$preview_test_directory/project-grid-check" "${preview_qt_flags[@]}"
+        if [[ "$preview_test_mode" == project-grid-gpu ]]; then
+            "$preview_project_root/tools/offscreen.sh" "$preview_test_directory/project-grid-check"
+        else
+            QT_QPA_PLATFORM=offscreen "$preview_test_directory/project-grid-check"
+        fi
+        ;;
+    selection|selection-gpu)
+        preview_test_directory="$(mktemp -d /tmp/asset-preview-selection.XXXXXX)"
+        trap 'rm -rf -- "$preview_test_directory"' EXIT
+        read -r -a preview_qt_flags <<< "$(pkg-config --cflags --libs Qt6Widgets Qt6Test Qt6OpenGL)"
+        c++ -std=c++20 -O2 -fPIC -Wall -Wextra -Werror -I"$preview_project_root/src" \
+            "$preview_project_root/tests/selection_preview.cpp" "$preview_project_root/src/selection_document.cpp" \
+            "$preview_project_root/src/selection_view.cpp" "$preview_project_root/src/file_document.cpp" \
+            -o "$preview_test_directory/selection-check" "${preview_qt_flags[@]}"
+        if [[ "$preview_test_mode" == selection-gpu ]]; then
+            "$preview_project_root/tools/offscreen.sh" env ASSET_PREVIEW_GPU_TEST=1 "$preview_test_directory/selection-check"
+        else
+            QT_QPA_PLATFORM=offscreen "$preview_test_directory/selection-check"
+        fi
+        QT_QPA_PLATFORM=offscreen python "$preview_project_root/tests/selection_integration.py" "$@"
+        ;;
+    files|files-gpu)
+        preview_test_directory="$(mktemp -d /tmp/asset-preview-files.XXXXXX)"
+        trap 'rm -rf -- "$preview_test_directory"' EXIT
+        read -r -a preview_qt_flags <<< "$(pkg-config --cflags --libs Qt6Widgets Qt6Test Qt6OpenGL md4c)"
+        c++ -std=c++20 -O2 -fPIC -Wall -Wextra -Werror -I"$preview_project_root/src" \
+            "$preview_project_root/tests/file_preview.cpp" "$preview_project_root/src/file_document.cpp" \
+            "$preview_project_root/src/file_view.cpp" "$preview_project_root/src/markdown_compat.cpp" -o "$preview_test_directory/file-check" "${preview_qt_flags[@]}"
+        if [[ "$preview_test_mode" == files-gpu ]]; then
+            "$preview_project_root/tools/offscreen.sh" env ASSET_PREVIEW_GPU_TEST=1 "$preview_test_directory/file-check"
+            "$preview_project_root/tools/offscreen.sh" env ASSET_PREVIEW_FILES_NATIVE=1 ASSET_PREVIEW_CLIPBOARD_PROBE="$preview_test_directory/file-check" python "$preview_project_root/tests/files_integration.py" "$@"
+        else
+            QT_QPA_PLATFORM=offscreen "$preview_test_directory/file-check"
+            QT_QPA_PLATFORM=offscreen python "$preview_project_root/tests/files_integration.py" "$@"
+        fi
+        ;;
     thumbnail-queue)
         preview_test_directory="$(mktemp -d /tmp/asset-preview-thumbnails.XXXXXX)"
         trap 'rm -rf -- "$preview_test_directory"' EXIT
@@ -43,19 +86,23 @@ case "$preview_test_mode" in
             -o "$preview_test_directory/dispatch-check" "${preview_qt_flags[@]}"
         QT_QPA_PLATFORM=offscreen "$preview_test_directory/dispatch-check"
         ;;
-    async-loading|model-snapshot-gpu|model-interaction-gpu)
+    async-loading|async-loading-gpu|model-snapshot-gpu|model-interaction-gpu)
         preview_test_directory="$(mktemp -d /tmp/asset-preview-async.XXXXXX)"
         trap 'rm -rf -- "$preview_test_directory"' EXIT
-        read -r -a preview_qt_flags <<< "$(pkg-config --cflags --libs Qt6Widgets Qt6OpenGL)"
+        read -r -a preview_qt_flags <<< "$(pkg-config --cflags --libs Qt6Widgets Qt6OpenGL Qt6OpenGLWidgets)"
         preview_compile_flags=(-std=c++20 -O2 -fPIC -Wall -Wextra -Werror
             -I"$preview_project_root/src" -I"$preview_project_root/build/generated")
-        if [[ "$preview_test_mode" == async-loading ]]; then
+        if [[ "$preview_test_mode" == async-loading* ]]; then
             c++ "${preview_compile_flags[@]}" -shared "$preview_project_root/tests/model_worker_fixture.cpp" \
                 -o "$preview_test_directory/asset-preview-f3d.so" "${preview_qt_flags[@]}"
             c++ "${preview_compile_flags[@]}" -DASSET_PREVIEW_HAS_INSPECTION=0 \
                 "$preview_project_root/tests/async_loading.cpp" "$preview_project_root/src/model_surface.cpp" "$preview_project_root/src/viewer.cpp" \
                 -o "$preview_test_directory/async-check" "${preview_qt_flags[@]}"
-            QT_QPA_PLATFORM=offscreen "$preview_test_directory/async-check"
+            if [[ "$preview_test_mode" == async-loading-gpu ]]; then
+                "$preview_project_root/tools/offscreen.sh" env ASSET_PREVIEW_GPU_TEST=1 "$preview_test_directory/async-check"
+            else
+                QT_QPA_PLATFORM=offscreen "$preview_test_directory/async-check"
+            fi
         else
             preview_tls_flags=()
             if [[ -e /usr/lib/libjemalloc.so ]]; then
@@ -88,6 +135,7 @@ case "$preview_test_mode" in
         ;;
     terminal-gpu) exec "$preview_project_root/tools/offscreen.sh" python "$preview_project_root/tests/terminal_environment_integration.py" "$@" ;;
     backend-compatibility) python "$preview_project_root/tests/backend_compatibility.py" "$@" ;;
+    rebuild-activation) python "$preview_project_root/tests/rebuild_activation.py" "$@" ;;
     preview-cache)
         preview_test_directory="$(mktemp -d /tmp/asset-preview-cache.XXXXXX)"
         trap 'rm -rf -- "$preview_test_directory"' EXIT
@@ -99,8 +147,16 @@ case "$preview_test_mode" in
         ;;
     projects) QT_QPA_PLATFORM=offscreen python "$preview_project_root/tests/projects_integration.py" "$@" ;;
     projects-gpu) exec "$preview_project_root/tools/offscreen.sh" env ASSET_PREVIEW_GPU_TEST=1 python "$preview_project_root/tests/projects_integration.py" "$@" ;;
+    gallery) QT_QPA_PLATFORM=offscreen python "$preview_project_root/tests/gallery_integration.py" "$@" ;;
+    gallery-gpu) exec "$preview_project_root/tools/offscreen.sh" env ASSET_PREVIEW_GPU_TEST=1 python "$preview_project_root/tests/gallery_integration.py" "$@" ;;
     overview) QT_QPA_PLATFORM=offscreen python "$preview_project_root/tests/overview_integration.py" "$@" ;;
     overview-gpu) exec "$preview_project_root/tools/offscreen.sh" env ASSET_PREVIEW_GPU_TEST=1 python "$preview_project_root/tests/overview_integration.py" "$@" ;;
+    thumbnail-publication-gpu) exec "$preview_project_root/tools/offscreen.sh" env ASSET_PREVIEW_GPU_TEST=1 python "$preview_project_root/tests/thumbnail_publication.py" "$@" ;;
+    content-thumbnails) QT_QPA_PLATFORM=offscreen python "$preview_project_root/tests/content_thumbnails.py" "$@" ;;
+    content-thumbnails-gpu) exec "$preview_project_root/tools/offscreen.sh" env ASSET_PREVIEW_GPU_TEST=1 python "$preview_project_root/tests/content_thumbnails.py" "$@" ;;
+    topology-gpu) exec "$preview_project_root/tools/offscreen.sh" env ASSET_PREVIEW_GPU_TEST=1 python "$preview_project_root/tests/topology_integration.py" "$@" ;;
+    four-view-gpu|quad-view-gpu) exec "$preview_project_root/tools/offscreen.sh" env ASSET_PREVIEW_GPU_TEST=1 python "$preview_project_root/tests/four_view_integration.py" "$@" ;;
+    model-reload-publication-gpu) exec "$preview_project_root/tools/offscreen.sh" env ASSET_PREVIEW_GPU_TEST=1 python "$preview_project_root/tests/model_reload_publication.py" "$@" ;;
     material-model)
         preview_test_directory="$(mktemp -d /tmp/asset-preview-material-model.XXXXXX)"
         trap 'rm -rf -- "$preview_test_directory"' EXIT
@@ -199,6 +255,8 @@ case "$preview_test_mode" in
             -o "$preview_test_directory/texture-preview-check" "${preview_qt_flags[@]}"
         "$preview_test_directory/texture-preview-check"
         ;;
+    gltf-image-decode-gpu) exec "$preview_project_root/tools/offscreen.sh" env ASSET_PREVIEW_GPU_TEST=1 python "$preview_project_root/tests/gltf_image_decode.py" "$@" ;;
+    gltf-batching-gpu) exec "$preview_project_root/tools/offscreen.sh" env ASSET_PREVIEW_GPU_TEST=1 python "$preview_project_root/tests/gltf_batching.py" "$@" ;;
     gltf-import)
         preview_test_directory="$(mktemp -d /tmp/asset-preview-import-check.XXXXXX)"
         trap 'rm -rf -- "$preview_test_directory"' EXIT
@@ -212,5 +270,5 @@ case "$preview_test_mode" in
     optimization-gpu) exec "$preview_project_root/tools/offscreen.sh" env ASSET_PREVIEW_GPU_TEST=1 python "$preview_project_root/tests/optimization_integration.py" "$@" ;;
     functional) QT_QPA_PLATFORM=offscreen python "$preview_project_root/tests/integration.py" "$@" ;;
     gpu) exec "$preview_project_root/tools/offscreen.sh" env ASSET_PREVIEW_GPU_TEST=1 python "$preview_project_root/tests/integration.py" "$@" ;;
-    *) printf 'Usage: %s [functional|thumbnail-queue|wayland-gpu|overview-paint|overview-paint-wayland|overview-dispatch|async-loading|model-snapshot-gpu|model-interaction-gpu|responsiveness|responsiveness-gpu|crash-logging|gpu|projects|projects-gpu|overview|overview-gpu|preview-cache|cache-diagnostics|terminal-gpu|backend-compatibility|references-gpu|compact-gpu|reference-media-gpu|codex-origin|material-model|audio-waveform|animation|animation-gpu|video-controls|metadata|texture-preview|gltf-import|placement|inspection-document|inspection-cli|inspection-matching|inspection-panel|packaged|theme|theme-gpu|optimization|optimization-gpu] [unittest arguments]\n' "$0" >&2; exit 2 ;;
+    *) printf 'Usage: %s [functional|topology-gpu|four-view-gpu|gallery|gallery-gpu|files|files-gpu|thumbnail-queue|content-thumbnails|content-thumbnails-gpu|thumbnail-publication-gpu|model-reload-publication-gpu|wayland-gpu|overview-paint|overview-paint-wayland|overview-dispatch|async-loading|async-loading-gpu|model-snapshot-gpu|model-interaction-gpu|responsiveness|responsiveness-gpu|crash-logging|gpu|projects|projects-gpu|overview|overview-gpu|preview-cache|cache-diagnostics|terminal-gpu|backend-compatibility|rebuild-activation|references-gpu|compact-gpu|reference-media-gpu|codex-origin|material-model|audio-waveform|animation|animation-gpu|video-controls|metadata|texture-preview|gltf-import|gltf-image-decode-gpu|placement|inspection-document|inspection-cli|inspection-matching|inspection-panel|packaged|theme|theme-gpu|optimization|optimization-gpu] [unittest arguments]\n' "$0" >&2; exit 2 ;;
 esac

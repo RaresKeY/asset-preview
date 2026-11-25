@@ -102,6 +102,7 @@ int main(int argc, char** argv) {
             h.client.start()
             process = h.client._SPAWNED[-1]
             try:
+                h.client.rpc({"method": "layout", "layout": "single"})
                 path = root / "asset.obj"
                 path.write_text("fixture")
                 h.client.rpc({"method": "add", "entry": {"id": "model", "path": str(path)}})
@@ -132,6 +133,7 @@ int main(int argc, char** argv) {
                     h.client.start()
                     process = h.client._SPAWNED[-1]
                     try:
+                        h.client.rpc({"method": "layout", "layout": "single"})
                         for kind, extension in (("model", "obj"), ("video", "mp4"), ("audio", "wav")):
                             path = root / f"asset.{extension}"
                             path.write_bytes(b"fixture")

@@ -3,19 +3,15 @@
 #include <QOffscreenSurface>
 #include <QOpenGLContext>
 #include <QSize>
+#include <QWindow>
 #include <memory>
 
-// The producer context belongs exclusively to the render thread. Its offscreen
-// surface is created/destroyed on the GUI thread. The native display context
-// shares GL resources, never the producer's current-context state or FBOs.
+// The context belongs to the render thread. Imports use the offscreen surface;
+// display rendering uses the native window under the surface lifetime lock.
 struct ModelGpuContext {
     QOpenGLContext* context=nullptr;
     QOffscreenSurface* surface=nullptr;
-};
-struct ModelGpuFrame {
-    QMutex mutex;
-    QSize size;
-    GLuint texture=0,framebuffer=0;
-    GLsync ready=nullptr,consumed=nullptr;
-    quint64 serial=0;
+    QMutex mutex{};
+    QWindow* window=nullptr;
+    bool exposed=false;
 };

@@ -2,10 +2,13 @@
 
 Register the authoritative saved image with a stable ID. PNG, JPEG, WebP, BMP,
 TIFF, SVG, EXR and HDR route to image preview automatically; animated GIF uses
-video playback. Image zoom/pan, pixel filtering and checker/dark/light backgrounds
+video playback. Image zoom/pan, anti-aliasing and checker/dark/light backgrounds
 are inspection choices, not modifications to the source. Source saves refresh
 an active view without repeated registration. Hidden views retain configuration
 only. Use the owning project's finite capture/export wrapper for rendered proof.
+Automatic AA keeps raster sources up to 256 × 256 crisp; larger images and SVGs
+stay smooth. Anti-aliasing checked means smoothing is on. Use Automatic
+anti-aliasing to restore resolution-based selection after a manual choice.
 
 For a shaded material sample, use `material ALBEDO --normal NORMAL --orm ORM`
 with sphere/cube/plane as needed. Albedo is sRGB; tangent normal and packed ORM

@@ -8,6 +8,7 @@ Dependencies retain their individual licenses.
 | Dependency | Upstream license/source |
 |---|---|
 | Qt 6 Core, Gui, Widgets, Network, OpenGL | [Qt licensing](https://www.qt.io/licensing/open-source-lgpl-obligations), LGPL-3.0 / GPL / commercial options depending on distribution |
+| MD4C (native Markdown preview) | [MD4C notice and license](vendored/THIRD_PARTY_NOTICES.md), MIT |
 | KDE KF6 Parts (optional host terminal integration) | [KParts source/licenses](https://invent.kde.org/frameworks/kparts), LGPL-2.0-or-later / LGPL-2.1-or-later per component |
 | Konsole KPart (optional, host-installed) | [Konsole source/licenses](https://invent.kde.org/utilities/konsole), GPL-2.0-or-later; not bundled in existing release artifacts |
 | F3D / libf3d | [F3D license](https://github.com/f3d-app/f3d/blob/v3.5.0/LICENSE.md), BSD-3-Clause |

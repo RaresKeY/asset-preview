@@ -27,15 +27,32 @@ class CrashLogging(unittest.TestCase):
         cls.fixture = tempfile.TemporaryDirectory(prefix="preview-native-fault-")
         root = Path(cls.fixture.name)
         source = root / "fault.cpp"
-        source.write_text('''#include "crash_log.h"
+        # Include the production implementation to hold its diagnostic buffer
+        # deterministically, reproducing a concurrent Qt message publication.
+        source.write_text('''#include "crash_log.cpp"
 #include <QByteArray>
 #include <QDebug>
+#include <QJsonArray>
 #include <stdexcept>
 #include <sys/mman.h>
 int main(int argc, char** argv) {
     preview::CrashLog log(QString::fromLocal8Bit(argv[1]));
     QString error;
     if (!log.beginSession(error)) return log.finish(1);
+    if (argc>2 && QByteArray(argv[2])=="context") {
+        preview::CrashLog::context({{"keep","retained"},{"obsolete",42},
+            {"last_request",QJsonObject{{"method","select"},{"id","old"}}}});
+        QJsonObject state{{"obsolete",QJsonValue::Null},{"nullable",QJsonValue::Null},
+            {"selected","new"},{"previews",QJsonArray{QJsonObject{{"id","new"},{"status","Loading"}}}}};
+        for (int i=0;i<2000;++i) preview::CrashLog::context(state);
+        state["previews"]=QJsonArray{QJsonObject{{"id","new"},{"status","Live"},
+            {"settings",QJsonObject{{"nearest",true}}}}};
+        buffersBusy.test_and_set();
+        preview::CrashLog::context(state);
+        buffersBusy.clear();
+        for (int i=0;i<2000;++i) preview::CrashLog::context({});
+        std::abort();
+    }
     if (argc > 2) {
         auto* address=static_cast<volatile int*>(mmap(nullptr,4096,PROT_NONE,MAP_PRIVATE|MAP_ANONYMOUS,-1,0));
         *address=42;
@@ -49,7 +66,7 @@ int main(int argc, char** argv) {
         flags = shlex.split(subprocess.check_output(["pkg-config", "--cflags", "--libs", "Qt6Core"], text=True))
         subprocess.run(["c++", "-std=c++20", "-O2", "-fPIC", "-fno-omit-frame-pointer", "-Wall", "-Wextra", "-Werror",
                         '-DASSET_PREVIEW_VERSION="fixture"', "-I" + str(ROOT / "src"), "-I" + str(ROOT / "build/generated"),
-                        str(source), str(ROOT / "src/crash_log.cpp"), "-o", str(cls.native_fault), *flags],
+                        str(source), "-o", str(cls.native_fault), *flags],
                        check=True, capture_output=True, text=True)
 
     @classmethod
@@ -153,6 +170,20 @@ int main(int argc, char** argv) {
             self.stop(restarted)
             self.assertEqual(self.log.read_text(), report)
             self.assertNotIn("event=unclean_exit", report)
+
+    def test_repeated_context_preserves_partial_merges_and_latest_nested_state(self):
+        process=subprocess.Popen([str(self.native_fault),str(self.state),"context"],
+                                 stderr=subprocess.DEVNULL,preexec_fn=no_core)
+        self.processes.append(process)
+        self.assertEqual(process.wait(timeout=5),-signal.SIGABRT)
+        line=next(line for line in self.log.read_text().splitlines() if line.startswith("preview_context="))
+        context=json.loads(line.removeprefix("preview_context="))
+        self.assertEqual(context["keep"],"retained")
+        self.assertIsNone(context["obsolete"])
+        self.assertIsNone(context["nullable"])
+        self.assertEqual(context["selected"],"new")
+        self.assertEqual(context["last_request"],{"method":"select","id":"old"})
+        self.assertEqual(context["previews"],[{"id":"new","status":"Live","settings":{"nearest":True}}])
 
     def test_qt_fatal_during_startup_includes_recent_diagnostics(self):
         process = self.spawn(QT_QPA_PLATFORM="asset-preview-missing-platform")

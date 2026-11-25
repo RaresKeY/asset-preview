@@ -2,6 +2,7 @@
 #include "thumbnail_queue.h"
 #include "project_identity.h"
 #include <QHash>
+#include <QContextMenuEvent>
 #include <QJsonArray>
 #include <QKeyEvent>
 #include <QMouseEvent>
@@ -12,31 +13,37 @@
 #include <QStyle>
 #include <QStyleOptionButton>
 #include <QToolTip>
+#include <QToolButton>
 #include <QTimer>
 #include <algorithm>
 
-namespace { constexpr int Gap=12,TileWidth=172,TileHeight=146; }
-OverviewGrid::OverviewGrid(preview::PreviewCache* store,const QString& jobDirectory,QWidget* parent):QAbstractScrollArea(parent),cache(store),queue(new ThumbnailQueue(store,jobDirectory,this)) {
+namespace { constexpr int Gap=12,TileWidth=172,TileHeight=146,HeadingInset=3,HeadingIconSize=20,HeadingActionGap=8; }
+OverviewGrid::OverviewGrid(preview::PreviewCache* store,const QString& jobDirectory,QWidget* parent,bool choose):QAbstractScrollArea(parent),cache(store),selectionOnly(choose),queue(choose?nullptr:new ThumbnailQueue(store,jobDirectory,this)) {
     setObjectName("overviewGrid"); setFrameShape(QFrame::NoFrame);
     setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
     setFocusPolicy(Qt::StrongFocus); setAccessibleName("All open previews");
     viewport()->setAttribute(Qt::WA_OpaquePaintEvent); viewport()->setMouseTracking(true);
-    queue->keyFor=[this](const QString& id) { return keyFor?keyFor(id):QString(); };
-    queue->configFor=[this](const QString& id) { return configFor?configFor(id):QJsonObject{}; };
-    queue->changed=[this](const QString& id,const QString& key) {
-        if(!isVisible())return;
-        for(int i=0;i<items.size();++i)if(items[i].id==id) {
-            const auto r=tile(i);
-            if(r.intersects(viewport()->rect())) { keys[id]=key; updateTile(id); }
-            break;
-        }
-    };
-    queue->activityChanged=[this] { thumbnailState(); };
-    queue->sourcesChanged=[this] { if(viewportChanged)viewportChanged(); };
-    spinner.setInterval(80);
+    if(queue) {
+        queue->keyFor=[this](const QString& id) { return keyFor?keyFor(id):QString(); };
+        queue->configFor=[this](const QString& id) { return configFor?configFor(id):QJsonObject{}; };
+        queue->changed=[this](const QString& id,const QString& key) {
+            if(thumbnailChanged)thumbnailChanged(id);
+            if(!isVisible())return;
+            for(int i=0;i<items.size();++i)if(items[i].id==id) {
+                const auto r=tile(i);
+                if(r.intersects(viewport()->rect())) { keys[id]=key; updateTile(id); }
+                break;
+            }
+        };
+        queue->activityChanged=[this] { thumbnailState(); };
+        queue->sourcesChanged=[this] { if(viewportChanged)viewportChanged(); };
+    }
+    spinner.setTimerType(Qt::PreciseTimer); spinner.setInterval(16);
     connect(&spinner,&QTimer::timeout,this,[this] {
-        spinAngle=(spinAngle+30)%360;
-        for(const auto& id:loading)updateTile(id);
+        for(int i=0;i<items.size();++i)if(loading.contains(items[i].id)) {
+            const auto damage=spinnerRect(i).toAlignedRect().adjusted(-2,-2,2,2);
+            if(damage.intersects(viewport()->rect()))viewport()->update(damage);
+        }
     });
     connect(verticalScrollBar(),&QScrollBar::valueChanged,this,[this] {
         if(reflowing)return;
@@ -44,7 +51,7 @@ OverviewGrid::OverviewGrid(preview::PreviewCache* store,const QString& jobDirect
     });
 }
 OverviewGrid::~OverviewGrid() {
-    queue->changed={}; queue->activityChanged={}; queue->sourcesChanged={}; delete queue;
+    if(queue) { queue->changed={}; queue->activityChanged={}; queue->sourcesChanged={}; delete queue; }
 }
 int OverviewGrid::columns() const { return layoutColumns; }
 QRect OverviewGrid::tile(int i) const {
@@ -54,6 +61,10 @@ QRect OverviewGrid::paintArea(int i) const {
     // Antialiased strokes can touch physical pixels outside the logical tile,
     // especially at fractional scale. Every partial invalidation must cover them.
     return tile(i).adjusted(-2,-2,2,2);
+}
+QRectF OverviewGrid::spinnerRect(int i) const {
+    const auto imageArea=tile(i).adjusted(6,6,-6,-40);
+    return QRectF(imageArea.right()-20,imageArea.bottom()-20,14,14);
 }
 QRect OverviewGrid::checkbox(int i) const {
     const auto r=tile(i);
@@ -66,7 +77,7 @@ void OverviewGrid::setMarked(const QSet<QString>& ids) {
 void OverviewGrid::setItems(QList<Item> next,const QString& id,bool groups) {
     bool changed=items.size()!=next.size() || grouped!=groups;
     grouped=groups;
-    if (!changed) for (int i=0;i<items.size();++i) if (items[i].id!=next[i].id || items[i].path!=next[i].path || items[i].label!=next[i].label || items[i].kind!=next[i].kind || items[i].project!=next[i].project || items[i].projectLabel!=next[i].projectLabel) { changed=true; break; }
+    if (!changed) for (int i=0;i<items.size();++i) if (items[i].id!=next[i].id || items[i].path!=next[i].path || items[i].label!=next[i].label || items[i].kind!=next[i].kind || items[i].project!=next[i].project || items[i].projectLabel!=next[i].projectLabel || items[i].parent!=next[i].parent || items[i].parentLabel!=next[i].parentLabel) { changed=true; break; }
     if (changed) {
         QSet<QString> surviving;
         for(const auto& item:next)surviving.insert(item.id);
@@ -86,7 +97,7 @@ void OverviewGrid::setItems(QList<Item> next,const QString& id,bool groups) {
     }
     QString target=id;
     if (std::none_of(items.begin(),items.end(),[&](const auto& item) { return item.id==target; })) target=items.isEmpty()?QString():items.first().id;
-    if(!hasWarmItems) {
+    if(queue && !hasWarmItems) {
         QList<ThumbnailQueue::Item> targets;
         for(const auto& item:items)targets.append({item.id,item.path,item.kind});
         queue->setItems(targets);
@@ -113,7 +124,15 @@ OverviewGrid::ScrollAnchor OverviewGrid::scrollAnchor(const QSet<QString>& survi
             return {items[i].id,tile(i).top()};
     return {};
 }
+void OverviewGrid::setCompact(bool value) {
+    if(compact==value)return;
+    const auto anchor=scrollAnchor(); compact=value;
+    setAccessibleName(value?"Gallery thumbnails":"All open previews");
+    reflow(anchor); syncDemand();
+}
 void OverviewGrid::reflow(const ScrollAnchor& anchor) {
+    const int Gap=compact ? 8 : ::Gap;
+    const int TileWidth=compact ? 110 : ::TileWidth,TileHeight=compact ? 116 : ::TileHeight;
     if(reflowing)return;
     const QScopedValueRollback guard(reflowing,true);
     QSize extent;
@@ -123,11 +142,17 @@ void OverviewGrid::reflow(const ScrollAnchor& anchor) {
         const int available=std::max(cols,extent.width()-Gap*(cols+1));
         QList<QRect> nextTiles; QList<Heading> nextHeadings;
         nextTiles.reserve(items.size());
-        int y=Gap,col=0; QString previous; bool first=true;
+        int y=Gap,col=0; QString previous,previousRoot; bool first=true;
         for(const auto& item:items) {
             if(grouped && (first || item.project!=previous)) {
                 if(col) { y+=TileHeight+Gap; col=0; }
-                nextHeadings.append({item.project,item.projectLabel,QRect(Gap,y,std::max(1,extent.width()-2*Gap),28)}); y+=34;
+                const auto root=item.parent.isEmpty()?item.project:item.parent;
+                if(!item.parent.isEmpty() && (first || root!=previousRoot)) {
+                    nextHeadings.append({root,item.parentLabel,QRect(Gap,y,std::max(1,extent.width()-2*Gap),28)}); y+=34;
+                }
+                const int indent=item.parent.isEmpty()?0:18;
+                nextHeadings.append({item.project,item.projectLabel,QRect(Gap+indent,y,std::max(1,extent.width()-2*Gap-indent),28),!item.parent.isEmpty()}); y+=34;
+                previousRoot=root;
             }
             // Divide edges, so rounding remainder is distributed across columns.
             const int left=Gap+col*Gap+col*available/cols;
@@ -148,9 +173,53 @@ void OverviewGrid::reflow(const ScrollAnchor& anchor) {
         verticalScrollBar()->setValue(tiles[i].top()-anchor.top); break;
     }
     updateHover(hoverPosition);
+    syncHeadingButtons();
     pruneKeys();
     // Reflow can move every tile/header, including inside an existing viewport.
     viewport()->update();
+}
+void OverviewGrid::syncHeadingButtons() {
+    QSet<QString> retained;
+    for(const auto& heading:headings) {
+        retained.insert(heading.id);
+        auto& buttons=headingButtons[heading.id];
+        auto*& button=buttons.gallery;
+        if(!button) {
+            button=new QToolButton(viewport());
+            button->setObjectName("overviewGalleryButton");
+            button->setText("View in Gallery");
+            button->setFocusPolicy(Qt::StrongFocus);
+            connect(button,&QToolButton::clicked,this,[this,id=heading.id] {
+                // Layout navigation may reparent this viewport and remove headers.
+                QTimer::singleShot(0,this,[this,id] { if(galleryRequested)galleryRequested(id); });
+            });
+            buttons.close=new QToolButton(viewport());
+            buttons.close->setObjectName("overviewCloseGroupButton");
+            buttons.close->setAutoRaise(true);
+            buttons.close->setText("×");
+            buttons.close->setFocusPolicy(Qt::StrongFocus);
+            connect(buttons.close,&QToolButton::clicked,this,[this,id=heading.id] {
+                QTimer::singleShot(0,this,[this,id] { if(closeGroupRequested)closeGroupRequested(id); });
+            });
+        }
+        button->setAccessibleName("View "+heading.label+" in Gallery");
+        button->setToolTip("View "+heading.label+" in Gallery");
+        buttons.close->setAccessibleName("Close "+heading.label);
+        buttons.close->setToolTip("Close all previews in "+heading.label+"; keep files");
+        const auto r=heading.rect.translated(0,-verticalScrollBar()->value());
+        const int width=std::max(1,std::min(button->sizeHint().width(),r.width()-HeadingIconSize-HeadingActionGap));
+        buttons.close->setGeometry(r.right()-HeadingIconSize+1,r.top()+HeadingInset,HeadingIconSize,HeadingIconSize);
+        button->setGeometry(buttons.close->x()-HeadingActionGap-width,r.top()+HeadingInset,width,HeadingIconSize);
+        button->setVisible(!compact && r.intersects(viewport()->rect()));
+        buttons.close->setVisible(!compact && r.intersects(viewport()->rect()));
+    }
+    for(auto it=headingButtons.begin();it!=headingButtons.end();) {
+        if(!retained.contains(it.key())) {
+            for(auto* button:{it->gallery,it->close}) { button->hide(); button->deleteLater(); }
+            it=headingButtons.erase(it);
+        }
+        else ++it;
+    }
 }
 QStringList OverviewGrid::visibleIds() const {
     QStringList ids;
@@ -169,12 +238,14 @@ void OverviewGrid::paintEvent(QPaintEvent* event) {
     QPainter p(viewport()); p.setRenderHint(QPainter::Antialiasing);
     const auto pal=palette(); p.fillRect(viewport()->rect(),pal.brush(QPalette::Base));
     if (items.isEmpty()) {
-        p.setPen(pal.color(QPalette::PlaceholderText)); p.drawText(viewport()->rect(),Qt::AlignCenter,"No open previews\nOpen or drop assets to build your overview."); return;
+        p.setPen(pal.color(QPalette::PlaceholderText)); p.drawText(viewport()->rect(),Qt::AlignCenter,selectionOnly?"No matching previews":"No open previews\nOpen or drop assets to build your overview."); return;
     }
     for (const auto& heading:headings) {
         const auto r=heading.rect.translated(0,-verticalScrollBar()->value()); if (!event->region().intersects(r)) continue;
-        projectIcon(heading.id).paint(&p,QRect(r.left(),r.top()+3,20,20));
-        p.setPen(pal.color(QPalette::Text)); p.drawText(r.adjusted(27,0,0,0),Qt::AlignVCenter,p.fontMetrics().elidedText(heading.label,Qt::ElideRight,r.width()-30));
+        projectIcon(heading.id).paint(&p,QRect(r.left(),r.top()+HeadingInset,HeadingIconSize,HeadingIconSize));
+        const auto* button=headingButtons.value(heading.id).gallery;
+        const int reserve=!compact && button?r.right()-button->x()+1+HeadingActionGap:0;
+        p.setPen(pal.color(QPalette::Text)); p.drawText(r.adjusted(27,0,-reserve,0),Qt::AlignVCenter,p.fontMetrics().elidedText(heading.label,Qt::ElideRight,std::max(0,r.width()-30-reserve)));
         p.setPen(pal.color(QPalette::Mid)); p.drawLine(r.bottomLeft(),r.bottomRight());
     }
     for (int i=0;i<items.size();++i) {
@@ -187,13 +258,16 @@ void OverviewGrid::paintEvent(QPaintEvent* event) {
         const auto image=cache->peekThumbnail(keys.value(item.id));
         if (!image.isNull()) {
             const auto size=image.size().scaled(imageArea.size(),Qt::KeepAspectRatio);
-            p.setRenderHint(QPainter::SmoothPixmapTransform); p.drawImage(QRect(imageArea.center()-QPoint(size.width()/2,size.height()/2),size),image);
+            const bool enlargePixels=item.kind=="image" && size.width()>=image.width() && size.height()>=image.height();
+            p.setRenderHint(QPainter::SmoothPixmapTransform,!enlargePixels);
+            p.drawImage(QRect(imageArea.center()-QPoint(size.width()/2,size.height()/2),size),image);
         } else {
             p.setPen(pal.color(QPalette::PlaceholderText)); auto font=p.font(); font.setBold(true); p.setFont(font);
-            p.drawText(imageArea,Qt::AlignCenter,item.kind=="image"?"Image":item.kind=="model"?"3D":item.kind=="material"?"Material":item.kind=="audio"?"Audio":item.kind=="video"?"Video":"Graph");
+            p.drawText(imageArea,Qt::AlignCenter,item.kind=="image"?"Image":item.kind=="model"?"3D":item.kind=="material"?"Material":item.kind=="audio"?"Audio":item.kind=="video"?"Video":item.kind=="file"?"File":item.kind=="selection"?"Selection":"Graph");
             if(loading.contains(item.id)) {
                 p.setPen(QPen(pal.color(QPalette::Highlight),2,Qt::SolidLine,Qt::RoundCap));
-                p.drawArc(QRectF(imageArea.right()-20,imageArea.bottom()-20,14,14),-spinAngle*16,250*16);
+                const auto elapsed=spinClock.isValid()?spinClock.elapsed():0;
+                p.drawArc(spinnerRect(i),-int(elapsed%960)*360*16/960,250*16);
             }
         }
         auto font=p.font(); font.setBold(false); p.setFont(font); p.setPen(pal.color(QPalette::Text));
@@ -202,6 +276,7 @@ void OverviewGrid::paintEvent(QPaintEvent* event) {
         p.drawText(r.adjusted(9,r.height()-19,-9,-3),Qt::AlignLeft|Qt::AlignVCenter,p.fontMetrics().elidedText(item.projectLabel+" · "+item.kind.toUpper(),Qt::ElideRight,r.width()-18));
         p.setFont(viewport()->font());
         if (i==hover) { p.setBrush(pal.color(QPalette::Highlight).lighter(120)); p.setOpacity(.08); p.setPen(Qt::NoPen); p.drawRoundedRect(r.adjusted(2,2,-2,-2),4,4); p.setOpacity(1); }
+        if(selectionOnly)continue;
         const auto box=checkbox(i);
         p.fillRect(box,pal.brush(QPalette::Window));
         QStyleOptionButton option; option.initFrom(this); option.rect=box.adjusted(5,5,-5,-5);
@@ -218,14 +293,24 @@ void OverviewGrid::warmItems(QList<Item> all,QStringList next,QSet<QString> show
     hasWarmItems=true; nearby=std::move(next); active=std::move(shown); warmReady=ready; warmEnabled=enabled;
     QList<ThumbnailQueue::Item> targets; targets.reserve(all.size());
     for(const auto& item:all)targets.append({item.id,item.path,item.kind});
-    queue->setItems(targets); syncDemand();
+    if(queue)queue->setItems(targets);
+    syncDemand();
 }
-QStringList OverviewGrid::workingIds() const { return queue->workingIds(); }
-bool OverviewGrid::backgroundAllowed() const { return queue->backgroundAllowed(); }
+QStringList OverviewGrid::workingIds() const { return queue?queue->workingIds():QStringList{}; }
+bool OverviewGrid::backgroundAllowed() const { return queue && queue->backgroundAllowed(); }
+void OverviewGrid::selectionDemand(QStringList ids,bool open) {
+    selectionIds=std::move(ids);selectionOpen=open;syncDemand();
+}
 void OverviewGrid::syncDemand() {
+    if(!queue) {
+        for(const auto& id:visibleIds())keys[id]=keyFor?keyFor(id):QString();
+        pruneKeys();return;
+    }
     const bool enabled=window()->isVisible() && !window()->isMinimized();
-    queue->demand(isVisible()?visibleIds():QStringList{},nearby,active,
-        enabled && (isVisible() || (hasWarmItems && warmEnabled)),hasWarmItems && warmReady && warmEnabled);
+    auto excluded=active;
+    if(selectionOpen)for(const auto& id:selectionIds)excluded.remove(id);
+    queue->demand(selectionOpen?selectionIds:isVisible()?visibleIds():QStringList{},selectionOpen?QStringList{}:nearby,excluded,
+        enabled && (selectionOpen || isVisible() || (hasWarmItems && warmEnabled)),!selectionOpen && hasWarmItems && warmReady && warmEnabled);
     thumbnailState();
 }
 void OverviewGrid::thumbnailState() {
@@ -234,33 +319,33 @@ void OverviewGrid::thumbnailState() {
     const QSet<QString> visible(visibleList.begin(),visibleList.end());
     bool animate=false;
     for(const auto& id:loading)if(isVisible() && visible.contains(id)) { animate=true; break; }
-    if(animate && !spinner.isActive())spinner.start(); else if(!animate)spinner.stop();
+    if(animate && !spinner.isActive()) { spinClock.start(); spinner.start(); } else if(!animate)spinner.stop();
     for(const auto& id:previous-loading)updateTile(id);
     for(const auto& id:loading-previous)updateTile(id);
 }
-void OverviewGrid::invalidate() { keys.clear(); queue->refresh(true); viewport()->update(); syncDemand(); }
+void OverviewGrid::invalidate() { keys.clear(); if(queue)queue->refresh(true); viewport()->update(); syncDemand(); }
 void OverviewGrid::refresh() {
     if(isVisible())for(const auto& id:visibleIds())keys[id]=keyFor?keyFor(id):QString();
-    pruneKeys(); queue->refresh(); viewport()->update(); syncDemand();
+    pruneKeys(); if(queue)queue->refresh(); viewport()->update(); syncDemand();
 }
 void OverviewGrid::resizeEvent(QResizeEvent* e) {
     QAbstractScrollArea::resizeEvent(e);
     if(reflowing)return;
     reflow(scrollAnchor()); syncDemand(); if(viewportChanged)viewportChanged();
 }
-void OverviewGrid::showEvent(QShowEvent* e) { QAbstractScrollArea::showEvent(e); reflow(scrollAnchor()); syncDemand(); }
+void OverviewGrid::showEvent(QShowEvent* e) { QAbstractScrollArea::showEvent(e); reflow(scrollAnchor()); syncDemand(); if(selectionOnly && viewportChanged)viewportChanged(); }
 void OverviewGrid::hideEvent(QHideEvent* e) { keys.clear(); hover=-1; hoverPosition={-1,-1}; spinner.stop(); QAbstractScrollArea::hideEvent(e); syncDemand(); }
 void OverviewGrid::scrollContentsBy(int,int) {
     // Repaint from the logical scroll origin instead of shifting rounded device
     // pixels, which can drift relative to later partial paints at fractional DPR.
-    viewport()->update();
+    syncHeadingButtons(); viewport()->update();
 }
 void OverviewGrid::mousePressEvent(QMouseEvent* e) {
     if (e->button()!=Qt::LeftButton) return;
     setFocus(Qt::MouseFocusReason);
     for (int i=0;i<items.size();++i) if (tile(i).contains(e->position().toPoint())) {
         const auto id=items[i].id;
-        if (checkbox(i).contains(e->position().toPoint()) || (e->modifiers() & (Qt::ControlModifier|Qt::ShiftModifier))) {
+        if (!selectionOnly && (checkbox(i).contains(e->position().toPoint()) || (e->modifiers() & (Qt::ControlModifier|Qt::ShiftModifier)))) {
             if (marked) marked(id,e->modifiers());
             return;
         }
@@ -279,9 +364,16 @@ void OverviewGrid::updateHover(QPoint position) {
     if(hover!=next) { const auto previous=hover; hover=next; if(previous>=0)viewport()->update(paintArea(previous)); if(hover>=0)viewport()->update(paintArea(hover)); }
     else if(hover>=0 && wasOverCheckbox!=checkbox(hover).contains(position))viewport()->update(paintArea(hover));
 }
+void OverviewGrid::contextMenuEvent(QContextMenuEvent* event) {
+    for(const auto& heading:headings)if(heading.rect.translated(0,-verticalScrollBar()->value()).contains(event->pos())) {
+        if(organizeRequested && !heading.id.isEmpty())organizeRequested(heading.id,event->globalPos());
+        event->accept(); return;
+    }
+    QAbstractScrollArea::contextMenuEvent(event);
+}
 bool OverviewGrid::viewportEvent(QEvent* event) {
     if (event->type()==QEvent::ToolTip) {
-        if (hover>=0 && hover<items.size()) QToolTip::showText(QCursor::pos(),items[hover].label+"\n"+items[hover].path+"\nClick to open · Checkbox / Ctrl+click to select · Shift+click for a range",viewport());
+        if (hover>=0 && hover<items.size()) QToolTip::showText(QCursor::pos(),items[hover].label+"\n"+items[hover].path+(selectionOnly?"\nClick to compare":"\nClick to open · Checkbox / Ctrl+click to select · Shift+click for a range"),viewport());
         return true;
     }
     if (event->type()==QEvent::Leave)updateHover({-1,-1});
@@ -290,7 +382,7 @@ bool OverviewGrid::viewportEvent(QEvent* event) {
 void OverviewGrid::keyPressEvent(QKeyEvent* e) {
     int at=0; for (int i=0;i<items.size();++i) if (items[i].id==current) { at=i; break; }
     int next=at;
-    if (e->key()==Qt::Key_Space && (e->modifiers() & Qt::ControlModifier)) {
+    if (!selectionOnly && e->key()==Qt::Key_Space && (e->modifiers() & Qt::ControlModifier)) {
         if (!current.isEmpty() && marked) marked(current,e->modifiers());
         return;
     }
@@ -312,12 +404,24 @@ QJsonObject OverviewGrid::describe(QWidget* window) const {
         const auto r=tile(i); const auto origin=viewport()->mapTo(window,r.topLeft());
         const auto box=checkbox(i); const auto boxOrigin=viewport()->mapTo(window,box.topLeft());
         visible.append(QJsonObject{{"id",items[i].id},{"project",items[i].project},{"x",origin.x()},{"y",origin.y()},{"width",r.width()},{"height",r.height()},
+            {"thumbnail_ready",!cache->peekThumbnail(keys.value(items[i].id)).isNull()},
             {"checked",checked.contains(items[i].id)},
             {"checkbox",QJsonObject{{"x",boxOrigin.x()},{"y",boxOrigin.y()},{"width",box.width()},{"height",box.height()}}}});
     }
-    QJsonArray groups; for (const auto& heading:headings) groups.append(QJsonObject{{"id",heading.id},{"label",heading.label}});
-    auto result=queue->metrics();
-    result["visible"]=isVisible(); result["grouped"]=grouped; result["groups"]=groups;
+    QJsonArray groups;
+    for(const auto& heading:headings) {
+        QJsonObject group{{"id",heading.id},{"label",heading.label},{"nested",heading.nested}};
+        const auto buttons=headingButtons.value(heading.id);
+        for(const auto& action:{std::pair{"gallery_button",buttons.gallery},std::pair{"close_button",buttons.close}}) {
+            if(const auto* button=action.second;button && button->isVisible()) {
+                const auto origin=button->mapTo(window,QPoint());
+                group[action.first]=QJsonObject{{"x",origin.x()},{"y",origin.y()},{"width",button->width()},{"height",button->height()}};
+            }
+        }
+        groups.append(group);
+    }
+    auto result=queue?queue->metrics():QJsonObject{};
+    result["visible"]=isVisible(); result["compact"]=compact; result["grouped"]=grouped; result["groups"]=groups;
     result["native"]=bool(internalWinId());
     int nativeAncestors=0;
     for(auto* parent=parentWidget();parent && !parent->isWindow();parent=parent->parentWidget())

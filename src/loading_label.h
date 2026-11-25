@@ -1,4 +1,5 @@
 #pragma once
+#include <QElapsedTimer>
 #include <QLabel>
 #include <QPainter>
 #include <QTimer>
@@ -8,27 +9,29 @@
 class LoadingLabel final : public QLabel {
 public:
     explicit LoadingLabel(QWidget* parent=nullptr):QLabel(parent) {
-        tick.setInterval(80);
-        connect(&tick,&QTimer::timeout,this,[this] { angle=(angle+30)%360; update(QRect(3,0,20,height())); });
+        tick.setTimerType(Qt::PreciseTimer); tick.setInterval(16);
+        connect(&tick,&QTimer::timeout,this,[this] { update(QRect(3,0,20,height())); });
     }
     void setLoading(bool value) {
         if(busy==value)return;
         busy=value; setProperty("loading",busy); setIndent(busy?19:0);
-        if(busy && isVisible())tick.start(); else tick.stop();
+        if(busy && isVisible())start(); else tick.stop();
         updateGeometry(); update();
     }
 protected:
-    void showEvent(QShowEvent* event) override { QLabel::showEvent(event); if(busy)tick.start(); }
+    void showEvent(QShowEvent* event) override { QLabel::showEvent(event); if(busy)start(); }
     void hideEvent(QHideEvent* event) override { tick.stop(); QLabel::hideEvent(event); }
     void paintEvent(QPaintEvent* event) override {
         QLabel::paintEvent(event);
         if(!busy)return;
         QPainter painter(this); painter.setRenderHint(QPainter::Antialiasing);
         painter.setPen(QPen(QColor("#82d9c8"),1.6,Qt::SolidLine,Qt::RoundCap));
-        painter.drawArc(QRectF(7,(height()-12)/2.0,12,12),-angle*16,250*16);
+        const auto elapsed=clock.isValid()?clock.elapsed():0;
+        painter.drawArc(QRectF(7,(height()-12)/2.0,12,12),-int(elapsed%960)*360*16/960,250*16);
     }
 private:
     QTimer tick;
+    QElapsedTimer clock;
     bool busy=false;
-    int angle=0;
+    void start() { clock.start(); tick.start(); }
 };

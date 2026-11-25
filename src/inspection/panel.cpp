@@ -18,6 +18,7 @@
 #include <QLabel>
 #include <QLineEdit>
 #include <QPlainTextEdit>
+#include <QPixmap>
 #include <QPushButton>
 #include <QScrollArea>
 #include <QSignalBlocker>
@@ -267,6 +268,32 @@ InspectionPanel::InspectionPanel(std::function<QJsonObject(const QJsonObject&)> 
     connect(undoVisibility,&QPushButton::clicked,this,[this] { request("inspect","restore",{{"last",true}}); });
     connect(restoreVisibility,&QPushButton::clicked,this,[this] { request("inspect","restore",{{"all",true}}); });
 
+    displayBox=new QGroupBox("Part display",content);
+    displayBox->setObjectName("inspectionDisplayGroup");
+    auto* displayLayout=new QGridLayout(displayBox);
+    displayLayout->setContentsMargins(8,8,8,8); displayLayout->setSpacing(4);
+    partColors=new QCheckBox("Color each part",displayBox);
+    partColors->setObjectName("inspectionPartColors");
+    partColors->setToolTip("Give each component a consistent solid color; selection stays amber");
+    displayLayout->addWidget(partColors,0,0,1,3);
+    displayLayout->addWidget(label(displayBox,"Explode"),1,0);
+    explosion=new CutSlider(displayBox); explosion->setObjectName("inspectionExplosion");
+    explosion->setAccessibleName("Part explosion"); explosion->setRange(0,200); explosion->setPageStep(10);
+    explosion->setToolTip("Separate components without changing the source model. Zero restores the assembly.");
+    explosionValue=label(displayBox,"0%"); explosionValue->setMinimumWidth(34);
+    displayLayout->addWidget(explosion,1,1); displayLayout->addWidget(explosionValue,1,2);
+    auto* assemble=button(displayBox,"Reassemble","inspectionReassemble","Reset part explosion to zero");
+    displayLayout->addWidget(assemble,2,0,1,3); displayLayout->setColumnStretch(1,1);
+    layout->insertWidget(layout->indexOf(partsBox),displayBox);
+    displayTimer=new QTimer(this); displayTimer->setSingleShot(true); displayTimer->setInterval(16);
+    connect(displayTimer,&QTimer::timeout,this,[this] { flushDisplay(); });
+    connect(partColors,&QCheckBox::toggled,this,[this](bool checked) { queueDisplay("part_colors",checked); });
+    connect(explosion,&QSlider::valueChanged,this,[this](int value) {
+        explosionValue->setText(QString::number(value)+"%"); queueDisplay("explosion",value/100.0);
+    });
+    connect(explosion,&QSlider::sliderReleased,this,[this] { displayTimer->stop(); flushDisplay(); });
+    connect(assemble,&QPushButton::clicked,this,[this] { explosion->setValue(0); });
+
     cutsBox=new QGroupBox("Planar cuts",content);
     cutsBox->setObjectName("inspectionCutsGroup");
     auto* cutsLayout=new QGridLayout(cutsBox);
@@ -334,12 +361,20 @@ InspectionPanel::InspectionPanel(std::function<QJsonObject(const QJsonObject&)> 
         });
     }
     cutsLayout->setColumnStretch(1,1);
-    auto* cutHint=label(cutsBox,"Drag a slider to enable and move its plane. Positions use model units; enabled cuts keep the intersection.");
-    cutsLayout->addWidget(cutHint,6,0,1,3);
+    capCuts=new QCheckBox("Fill cut faces",cutsBox); capCuts->setChecked(true);
+    capCuts->setObjectName("inspectionCapCuts");
+    capCuts->setToolTip("Show solid-color sections on closed parts. Open surfaces remain open.");
+    cutsLayout->addWidget(capCuts,6,0,1,3);
+    connect(capCuts,&QCheckBox::toggled,this,[this](bool checked) { queueDisplay("cap_cuts",checked); });
+    sectionSummary=label(cutsBox,"Closed parts receive solid-color cut faces.");
+    sectionSummary->setObjectName("inspectionSectionSummary");
+    cutsLayout->addWidget(sectionSummary,7,0,1,3);
+    auto* cutHint=label(cutsBox,"Drag a slider to move and enable a cut. Positions use model units; multiple cuts keep their intersection.");
+    cutsLayout->addWidget(cutHint,8,0,1,3);
     resetCutButton=button(cutsBox,"Reset cuts","inspectionResetCuts","Disable all cuts and reset their positions");
-    cutsLayout->addWidget(resetCutButton,7,0,1,3);
+    cutsLayout->addWidget(resetCutButton,9,0,1,3);
     connect(resetCutButton,&QPushButton::clicked,this,[this] { resetCuts(); });
-    layout->insertWidget(layout->indexOf(partsBox),cutsBox);
+    layout->addWidget(cutsBox);
 
     auto* commentsBox=new QGroupBox("Comments",content);
     auto* commentsLayout=new QVBoxLayout(commentsBox);
@@ -471,8 +506,18 @@ void InspectionPanel::showError(const QString& text) {
 void InspectionPanel::refresh() { request("inspect","state"); }
 
 bool InspectionPanel::commitPendingCuts() {
-    cutTimer->stop();
-    return pendingCuts.isEmpty() || flushCuts();
+    cutTimer->stop(); displayTimer->stop();
+    return (pendingCuts.isEmpty() || flushCuts()) && (pendingDisplay.isEmpty() || flushDisplay());
+}
+
+QJsonObject InspectionPanel::restartState() const {
+    return {{"draft",comment->toPlainText()},{"scope",commentScope->currentData().toString()},{"status",commentStatus->currentData().toString()}};
+}
+void InspectionPanel::restoreRestartState(const QJsonObject& saved) {
+    comment->setPlainText(saved["draft"].toString());
+    const auto scope=commentScope->findData(saved["scope"].toString()),status=commentStatus->findData(saved["status"].toString());
+    if(scope>=0) commentScope->setCurrentIndex(scope);
+    if(status>=0) commentStatus->setCurrentIndex(status);
 }
 
 bool InspectionPanel::setToolMode(const QString& mode) {
@@ -481,6 +526,7 @@ bool InspectionPanel::setToolMode(const QString& mode) {
     if (!commitPendingCuts()) return false;
     toolMode=next;
     partsBox->setVisible(toolMode=="parts");
+    displayBox->setVisible(toolMode=="parts");
     if (auto* scroll=findChild<QScrollArea*>("inspectionScroll"))
         scroll->ensureWidgetVisible(cutsBox);
     return true;
@@ -495,7 +541,7 @@ void InspectionPanel::setState(const QString& nextId, const QJsonObject& next) {
     const bool wasLoaded=loaded;
     id=nextId; state=next; loaded=state["loaded"].toBool();
     stateKnown=true;
-    if (changedBinding || !loaded) { cutTimer->stop(); pendingCuts.clear(); }
+    if (changedBinding || !loaded) { cutTimer->stop(); pendingCuts.clear(); displayTimer->stop(); pendingDisplay={}; }
     if (changedId) {
         ++partsGeneration; ++notesGeneration;
         partsRequested=false; notesRequested=false;
@@ -531,6 +577,7 @@ void InspectionPanel::setState(const QString& nextId, const QJsonObject& next) {
     if (firstUpdate || changedModel || previous["selected"]!=state["selected"] || previous["selection"]!=state["selection"] || previous["capabilities"]!=state["capabilities"] ||
         previous["hidden"]!=state["hidden"] || wasLoaded!=loaded) updateSelection();
     if (firstUpdate || changedBinding || previous["cuts"]!=state["cuts"] || previous["bounds"]!=state["bounds"] || wasLoaded!=loaded) updateCuts();
+    if(firstUpdate || changedBinding || previous["display"]!=state["display"] || previous["sections"]!=state["sections"] || wasLoaded!=loaded) updateDisplay();
     updateCommentControls();
     updateNoteSelection();
     if (loaded && (!partsRequested || inventoryId!=id || inventoryRevision!=state["revision"])) beginParts();
@@ -641,7 +688,7 @@ void InspectionPanel::loadPartsPage(quint64 generation) {
     partsOffset+=received;
     partsTotal=std::max(partsOffset,result["total"].toInt(partsOffset));
     partsMore=received>0 && result["has_more"].toBool(partsOffset<partsTotal);
-    updateVisibility(); filterParts(); updateSelection();
+    updateVisibility(); filterParts(); updateSelection(); updateDisplay();
     if (partsMore && parts.size()<RowLimit) {
         partsLoading=true;
         QTimer::singleShot(0,this,[this,generation] { loadPartsPage(generation); });
@@ -692,6 +739,38 @@ void InspectionPanel::updateCuts() {
         cut.keep->setEnabled(loaded); cut.slider->setEnabled(loaded);
     }
     resetCutButton->setEnabled(loaded);
+}
+
+void InspectionPanel::updateDisplay() {
+    const auto display=state["display"].toObject();
+    const QSignalBlocker colorsBlocker(partColors),capsBlocker(capCuts),explosionBlocker(explosion);
+    partColors->setChecked(display["part_colors"].toBool()); capCuts->setChecked(display["cap_cuts"].toBool(true));
+    if(!pendingDisplay.contains("explosion") && !explosion->isSliderDown()) {
+        explosion->setValue(qRound(display["explosion"].toDouble()*100));
+        explosionValue->setText(QString::number(explosion->value())+"%");
+    }
+    partColors->setEnabled(loaded); capCuts->setEnabled(loaded);
+    explosion->setEnabled(loaded && state["capabilities"].toObject()["explosion"].toBool(true));
+    const auto sections=state["sections"].toObject();
+    sectionSummary->setText(sections["prepared"].toBool()?QString("%1 closed parts; %2 open or unsupported.")
+        .arg(sections["closed_parts"].toInt()).arg(sections["open_parts"].toInt()):"Closed parts receive solid-color cut faces.");
+    for(auto it=partItems.begin();it!=partItems.end();++it) {
+        QPixmap swatch(12,12); swatch.fill(QColor(parts.value(it.key())["display_color"].toString("#a6abb3")));
+        it.value()->setIcon(0,partColors->isChecked()?QIcon(swatch):QIcon());
+    }
+}
+void InspectionPanel::queueDisplay(const QString& key,QJsonValue value) {
+    if(!loaded) return;
+    pendingDisplay[key]=value;
+    if(!displayTimer->isActive()) displayTimer->start();
+}
+bool InspectionPanel::flushDisplay() {
+    if(pendingDisplay.isEmpty()) return true;
+    if(!loaded) { pendingDisplay={}; return false; }
+    const auto display=std::exchange(pendingDisplay,{});
+    const bool okay=request("inspect","display",{{"display",display}})["ok"].toBool();
+    if(!okay) updateDisplay();
+    return okay;
 }
 
 void InspectionPanel::queueCut(int index) {
